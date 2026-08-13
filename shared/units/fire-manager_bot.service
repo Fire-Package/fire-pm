@@ -1,0 +1,24 @@
+[Unit]
+Description=Fire Service: manager_bot
+After=network.target
+StartLimitBurst=15
+StartLimitIntervalSec=30m
+
+[Service]
+SyslogIdentifier=fire-manager_bot
+Type=simple
+User=root
+WorkingDirectory=/root/captcha
+Environment="PATH=/root/myenv/bin"
+ExecStart=/root/myenv/bin/python /root/captcha/manager_bot.py
+Restart=always
+RestartSec=3
+RestartMaxDelaySec=2m
+RestartSteps=5
+TimeoutStopSec=15
+KillSignal=SIGTERM
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,23 @@
+[Unit]
+Description=Fire Service: channel_user.py
+After=network.target
+StartLimitBurst=15
+StartLimitIntervalSec=30m
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/channel_user
+Environment="PATH=/root/myenv/bin:/usr/local/bin:/usr/bin:/bin"
+
+ExecStart=/root/myenv/bin/python /root/channel_user/channel_user.py
+Restart=always
+RestartSec=3
+RestartMaxDelaySec=2m
+RestartSteps=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fire-channel_userpy
+
+[Install]
+WantedBy=multi-user.target

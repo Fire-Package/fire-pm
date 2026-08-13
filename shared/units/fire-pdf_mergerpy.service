@@ -1,0 +1,23 @@
+[Unit]
+Description=Fire Service: pdf_merger.py
+After=network.target
+StartLimitBurst=15
+StartLimitIntervalSec=30m
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/pdf_merger
+Environment="PATH=/root/myenv/bin:/usr/local/bin:/usr/bin:/bin"
+
+ExecStart=/root/myenv/bin/python /root/pdf_merger/pdf_merger.py
+Restart=always
+RestartSec=3
+RestartMaxDelaySec=2m
+RestartSteps=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fire-pdf_mergerpy
+
+[Install]
+WantedBy=multi-user.target

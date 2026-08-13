@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+service="$1"
+
+if systemctl is-active --quiet "$service"; then
+    printf "\e[32m🟢 Running\e[0m"
+else
+    printf "\e[31m🔴 Stopped\e[0m"
+fi

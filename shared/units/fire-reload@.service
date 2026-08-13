@@ -1,0 +1,10 @@
+[Unit]
+Description=Fire Hot-Reloader for %i
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl restart %i
+
+[Install]
+WantedBy=multi-user.target

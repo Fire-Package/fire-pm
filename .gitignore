@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+
+# Next.js & Web builds
+web/.next/
+web/out/
+web/node_modules/
+
+# Config & Environment
+.env
+.env*.local
+config.json
+
+# Logs
+*.log
+/tmp/fire-tunnels/
+
+# OS
+.DS_Store

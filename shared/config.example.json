@@ -1,0 +1,17 @@
+{
+  "auth": {
+    "passwordHash": "",
+    "jwtSecret": "",
+    "apiTokens": []
+  },
+  "server": {
+    "port": 3000,
+    "host": "0.0.0.0",
+    "basePath": "/"
+  },
+  "fire": {
+    "cliBinary": "/usr/local/bin/fire",
+    "systemdDir": "/etc/systemd/system",
+    "servicePrefix": "fire"
+  }
+}

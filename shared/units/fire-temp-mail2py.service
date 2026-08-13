@@ -1,0 +1,23 @@
+[Unit]
+Description=Fire Service: temp-mail2.py
+After=network.target
+StartLimitBurst=15
+StartLimitIntervalSec=30m
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Temp-Mail
+Environment="PATH=/root/myenv/bin:/usr/local/bin:/usr/bin:/bin"
+
+ExecStart=/root/myenv/bin/python /root/Temp-Mail/temp-mail2.py
+Restart=always
+RestartSec=3
+RestartMaxDelaySec=2m
+RestartSteps=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fire-temp-mail2py
+
+[Install]
+WantedBy=multi-user.target

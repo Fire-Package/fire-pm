@@ -1,0 +1,2036 @@
+#!/bin/bash
+
+# ================== CONFIGURATION ==================
+VENV="${VENV:-/root/myenv}"
+RUN_USER="${RUN_USER:-root}"
+WORKDIR=$(pwd)
+SYSTEM_DIR="/etc/systemd/system"
+PREFIX="fire"
+TUNNEL_DIR="${TUNNEL_DIR:-/tmp/fire-tunnels}"
+TUNNEL_DOMAIN="${TUNNEL_DOMAIN:-tunnel.abhinav.eu.cc}"
+TUNNEL_BASE_DOMAIN="${TUNNEL_BASE_DOMAIN:-abhinav.eu.cc}"
+TUNNEL_HOST_SUFFIX="${TUNNEL_HOST_SUFFIX:--tunnel}"
+TUNNEL_NGINX_MAP="${TUNNEL_NGINX_MAP:-/etc/nginx/tunnels.map}"
+
+# ================== COLORS & STYLING ==================
+RED='\033[0;31m'
+L_RED='\033[1;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+ORANGE='\033[38;5;208m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+GREY='\033[0;90m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+# ================== UTILS ==================
+info() { echo -e "${BLUE}ℹ${NC} $1"; }
+success() { echo -e "${GREEN}✔${NC} $1"; }
+error() { echo -e "${RED}✖${NC} $1"; }
+warn() { echo -e "${YELLOW}⚠${NC} $1"; }
+
+type_text() {
+  local text="$1"
+  local delay="${2:-0.02}"
+  for (( i=0; i<${#text}; i++ )); do
+    if [[ "${INTRO_SKIP:-0}" -eq 1 ]]; then
+      echo -n "${text:$i}"
+      break
+    fi
+    echo -n "${text:$i:1}"
+    animation_pause "$delay" || true
+  done
+}
+
+action_doctor() {
+  if [[ $JSON_OPT -eq 1 ]]; then
+    local score=100
+    local checks=()
+    
+    if [[ -d "$VENV" ]]; then
+      checks+=("{\"name\":\"Environment\",\"passed\":true,\"message\":\"Python venv found at $VENV\"}")
+    else
+      checks+=("{\"name\":\"Environment\",\"passed\":false,\"message\":\"Python venv NOT found at $VENV\"}")
+      ((score -= 20))
+    fi
+
+    if id "$RUN_USER" &>/dev/null; then
+      checks+=("{\"name\":\"Run User\",\"passed\":true,\"message\":\"User '$RUN_USER' exists\"}")
+    else
+      checks+=("{\"name\":\"Run User\",\"passed\":false,\"message\":\"User '$RUN_USER' does not exist\"}")
+      ((score -= 20))
+    fi
+
+    local failed=$(systemctl list-units --all --plain --state=failed "${PREFIX}-*.service" 2>/dev/null | awk '{print $1}' | grep '\.service$' | wc -l)
+    if [[ $failed -eq 0 ]]; then
+      checks+=("{\"name\":\"Services\",\"passed\":true,\"message\":\"All fire services are healthy\"}")
+    else
+      checks+=("{\"name\":\"Services\",\"passed\":false,\"message\":\"$failed services have failed\"}")
+      ((score -= 20))
+    fi
+
+    local disk_usage=$(df -h / | tail -n 1 | awk '{print $5}' | sed 's/%//')
+    if (( disk_usage < 90 )); then
+      checks+=("{\"name\":\"Disk Space\",\"passed\":true,\"message\":\"$disk_usage% used (Healthy)\"}")
+    else
+      checks+=("{\"name\":\"Disk Space\",\"passed\":false,\"message\":\"$disk_usage% used (Warning: Critically Low)\"}")
+      ((score -= 20))
+    fi
+
+    local mem_free=$(free -m | grep Mem | awk '{print $4}')
+    if (( mem_free > 50 )); then
+      checks+=("{\"name\":\"Memory\",\"passed\":true,\"message\":\"${mem_free}MB free (Healthy)\"}")
+    else
+      checks+=("{\"name\":\"Memory\",\"passed\":false,\"message\":\"${mem_free}MB free (Warning: Very Low RAM)\"}")
+      ((score -= 20))
+    fi
+
+    [[ $score -lt 0 ]] && score=0
+    local old_ifs="$IFS"
+    IFS=","
+    local checks_json="${checks[*]}"
+    IFS="$old_ifs"
+
+    echo "{\"score\":$score,\"checks\":[$checks_json]}"
+    return
+  fi
+
+  clear
+  echo -e "${CYAN}${BOLD}Fire System Doctor${NC} — Diagnostic Tool"
+  echo -e "${GREY}--------------------------------------------------${NC}"
+  
+  local score=100
+  local total_checks=0
+  local passed=0
+  
+  check() {
+    ((total_checks++))
+    local label="$1"
+    local status="$2"
+    local msg="$3"
+    if [[ $status -eq 0 ]]; then
+      ((passed++))
+      echo -e "  [${GREEN}PASS${NC}] $label: $msg"
+    else
+      echo -e "  [${RED}FAIL${NC}] $label: ${RED}$msg${NC}"
+      ((score -= 20))
+    fi
+  }
+
+  # 1. Check VENV
+  if [[ -d "$VENV" ]]; then
+    check "Environment" 0 "Python venv found at $VENV"
+  else
+    check "Environment" 1 "Python venv NOT found at $VENV"
+  fi
+
+  # 2. Check User
+  if id "$RUN_USER" &>/dev/null; then
+    check "Run User" 0 "User '$RUN_USER' exists"
+  else
+    check "Run User" 1 "User '$RUN_USER' does not exist"
+  fi
+
+  # 3. Check Failed Services
+  local failed=$(systemctl list-units --all --plain --state=failed "${PREFIX}-*.service" | awk '{print $1}' | grep '\.service$' | wc -l)
+  if [[ $failed -eq 0 ]]; then
+    check "Services" 0 "All fire services are healthy"
+  else
+    check "Services" 1 "$failed services have failed"
+  fi
+
+  # 4. Check Disk Space
+  local disk_usage=$(df -h / | tail -n 1 | awk '{print $5}' | sed 's/%//')
+  if (( disk_usage < 90 )); then
+    check "Disk Space" 0 "$disk_usage% used (Healthy)"
+  else
+    check "Disk Space" 1 "$disk_usage% used (Warning: Critically Low)"
+  fi
+
+  # 5. Check Memory
+  local mem_free=$(free -m | grep Mem | awk '{print $4}')
+  if (( mem_free > 50 )); then
+    check "Memory" 0 "${mem_free}MB free (Healthy)"
+  else
+    check "Memory" 1 "${mem_free}MB free (Warning: Very Low RAM)"
+  fi
+
+  echo -e "${GREY}--------------------------------------------------${NC}"
+  local final_color=$GREEN
+  (( score < 70 )) && final_color=$YELLOW
+  (( score < 40 )) && final_color=$RED
+  [[ $score -lt 0 ]] && score=0
+  
+  echo -e "  ${BOLD}System Health Score:${NC} ${final_color}${score}%${NC} ($passed/$total_checks checks passed)"
+  echo ""
+}
+
+check_root() {
+  if [[ $EUID -ne 0 ]]; then
+     error "This script must be run as root (to manage systemd services)."
+     exit 1
+  fi
+}
+
+command_needs_root() {
+  case "$1" in
+    tunnel|help|--help|-h)
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+get_safe_name() {
+  # Convert to lowercase, remove non-alphanumeric chars
+  echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]//g'
+}
+
+resolve_service_name() {
+  local target="$1"
+  [[ -z "$target" ]] && echo "" && return
+
+  local safe_name=$(get_safe_name "$target")
+  local svc_file="${SYSTEM_DIR}/${PREFIX}-${safe_name}.service"
+
+  # 1. Exact safe name match
+  if [[ -f "$svc_file" ]]; then
+      basename "$svc_file"
+      return
+  fi
+
+  # 2. Try safe name of basename
+  local base=$(basename "$target")
+  local alt_safe=$(get_safe_name "$base")
+  svc_file="${SYSTEM_DIR}/${PREFIX}-${alt_safe}.service"
+  if [[ -f "$svc_file" ]]; then
+      basename "$svc_file"
+      return
+  fi
+
+  # 3. Try to find by Description (App Name)
+  local found=$(grep -l "Description=Fire Service: $target" "${SYSTEM_DIR}/${PREFIX}-"*.service 2>/dev/null | head -n 1)
+  if [[ -n "$found" ]]; then
+      basename "$found"
+      return
+  fi
+
+  # 4. Try fuzzy match by name
+  found=$(ls "${SYSTEM_DIR}/${PREFIX}-"*${safe_name}*.service 2>/dev/null | head -n 1)
+  if [[ -n "$found" ]]; then
+      basename "$found"
+      return
+  fi
+
+  # 5. Try to find by ExecStart containing the target
+  found=$(grep -l "ExecStart=.*$target" "${SYSTEM_DIR}/${PREFIX}-"*.service 2>/dev/null | head -n 1)
+  if [[ -n "$found" ]]; then
+      basename "$found"
+      return
+  fi
+
+  echo ""
+}
+
+format_uptime() {
+  local start_ts="$1"
+  [[ -z "$start_ts" ]] && echo "-" && return
+  
+  local start_sec=$(date -d "$start_ts" +%s 2>/dev/null)
+  [[ -z "$start_sec" ]] && echo "-" && return
+
+  local now_sec=$(date +%s)
+  local diff=$((now_sec - start_sec))
+
+  if (( diff < 60 )); then echo "${diff}s"
+  elif (( diff < 3600 )); then echo "$((diff/60))m"
+  else echo "$((diff/3600))h"
+  fi
+}
+
+format_elapsed() {
+  local total="$1"
+  [[ -z "$total" || "$total" -lt 0 ]] && echo "-" && return
+
+  if (( total < 60 )); then
+    echo "${total}s"
+  elif (( total < 3600 )); then
+    echo "$((total/60))m"
+  elif (( total < 86400 )); then
+    echo "$((total/3600))h"
+  else
+    echo "$((total/86400))d"
+  fi
+}
+
+format_mem_kb() {
+  local kb="${1:-0}"
+  [[ ! "$kb" =~ ^[0-9]+$ ]] && echo "0.0MB" && return
+  local tenths=$(( kb * 10 / 1024 ))
+  if (( tenths < 10 )); then
+    echo "0.${tenths}MB"
+  else
+    echo "${tenths:0:-1}.${tenths: -1}MB"
+  fi
+}
+
+ensure_tunnel_dir() {
+  mkdir -p "$TUNNEL_DIR"
+  chmod 700 "$TUNNEL_DIR" 2>/dev/null || true
+}
+
+is_pid_running() {
+  local pid="$1"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+validate_tunnel_port() {
+  local port="$1"
+  [[ "$port" =~ ^[0-9]+$ ]] || return 1
+  (( port > 0 && port < 65536 ))
+}
+
+local_port_is_reachable() {
+  local port="$1"
+  timeout 1 bash -c "exec 3<>/dev/tcp/127.0.0.1/$port" >/dev/null 2>&1
+}
+
+tunnel_state_file() {
+  echo "$TUNNEL_DIR/$1.env"
+}
+
+tunnel_log_file() {
+  echo "$TUNNEL_DIR/$1.log"
+}
+
+reset_tunnel_state() {
+  TUNNEL_STATE_PORT=""
+  TUNNEL_STATE_PID=""
+  TUNNEL_STATE_URL=""
+  TUNNEL_STATE_LOG_FILE=""
+  TUNNEL_STATE_START_TS=""
+}
+
+read_tunnel_state() {
+  local port="$1"
+  local state_file
+  local key
+  local value
+
+  state_file=$(tunnel_state_file "$port")
+  reset_tunnel_state
+  [[ -f "$state_file" ]] || return 1
+
+  while IFS='=' read -r key value; do
+    case "$key" in
+      PORT) TUNNEL_STATE_PORT="$value" ;;
+      PID) TUNNEL_STATE_PID="$value" ;;
+      URL) TUNNEL_STATE_URL="$value" ;;
+      LOG_FILE) TUNNEL_STATE_LOG_FILE="$value" ;;
+      START_TS) TUNNEL_STATE_START_TS="$value" ;;
+    esac
+  done < "$state_file"
+
+  [[ "$TUNNEL_STATE_PORT" == "$port" ]] || return 1
+}
+
+write_tunnel_state() {
+  local port="$1"
+  local pid="$2"
+  local url="$3"
+  local log_file="$4"
+  local start_ts="$5"
+  local state_file
+
+  ensure_tunnel_dir
+  state_file=$(tunnel_state_file "$port")
+
+  cat > "$state_file" <<EOF
+PORT=$port
+PID=$pid
+URL=$url
+LOG_FILE=$log_file
+START_TS=$start_ts
+EOF
+  chmod 600 "$state_file" 2>/dev/null || true
+}
+
+remove_tunnel_state() {
+  local port="$1"
+  local remove_log="${2:-0}"
+  local state_file
+  local known_log=""
+
+  state_file=$(tunnel_state_file "$port")
+  if read_tunnel_state "$port"; then
+    known_log="$TUNNEL_STATE_LOG_FILE"
+  fi
+
+  rm -f "$state_file"
+  if [[ "$remove_log" -eq 1 ]]; then
+    rm -f "$known_log" "$(tunnel_log_file "$port")"
+  fi
+  reset_tunnel_state
+}
+
+generate_tunnel_url() {
+  local hash="$1"
+  echo "https://${hash}${TUNNEL_HOST_SUFFIX}.${TUNNEL_BASE_DOMAIN}"
+}
+
+extract_tunnel_url() {
+  # Legacy: kept for backward compat with old state files; reads URL directly
+  local log_file="$1"
+  [[ -f "$log_file" ]] || return 1
+  cat "$log_file" 2>/dev/null | head -n 1
+}
+
+load_active_tunnel_state() {
+  local port="$1"
+  local hash=""
+  local host=""
+  local mapped_port=""
+
+  read_tunnel_state "$port" || return 1
+  # Nginx-based tunnels have no background PID; require our wildcard host and map entry.
+  host="${TUNNEL_STATE_URL#https://}"
+  if [[ "$host" =~ ^[a-f0-9]{8}${TUNNEL_HOST_SUFFIX}\.${TUNNEL_BASE_DOMAIN}$ ]]; then
+    hash="${host%%${TUNNEL_HOST_SUFFIX}.${TUNNEL_BASE_DOMAIN}}"
+    mapped_port=$(awk -v h="$host" '$1 == h { gsub(/;/, "", $2); print $2; exit }' "$TUNNEL_NGINX_MAP" 2>/dev/null)
+    [[ "$mapped_port" == "$port" ]] || {
+      remove_tunnel_state "$port" 1
+      return 1
+    }
+    return 0
+  fi
+
+  # Migrate old nested-subdomain state: https://<hash>.tunnel.domain
+  if [[ "$host" =~ ^[a-f0-9]{8}\.${TUNNEL_DOMAIN}$ ]]; then
+    hash="${host%%.*}"
+    mapped_port=$(awk -v h="$host" '$1 == h { gsub(/;/, "", $2); print $2; exit }' "$TUNNEL_NGINX_MAP" 2>/dev/null)
+    if [[ "$mapped_port" == "$port" ]]; then
+      nginx_map_remove "$host" >/dev/null 2>&1 || true
+      nginx_map_add "$(tunnel_map_key_for_hash "$hash")" "$port" >/dev/null 2>&1 || return 1
+      TUNNEL_STATE_URL=$(generate_tunnel_url "$hash")
+      write_tunnel_state "$port" "0" "$TUNNEL_STATE_URL" "" "$TUNNEL_STATE_START_TS"
+      return 0
+    fi
+  fi
+
+  # Migrate old path-style state: https://tunnel.domain/<hash>
+  if [[ "$TUNNEL_STATE_URL" =~ ^https://${TUNNEL_DOMAIN}/[a-f0-9]{8}$ ]]; then
+    hash="${TUNNEL_STATE_URL##*/}"
+    mapped_port=$(awk -v h="$hash" '$1 == h { gsub(/;/, "", $2); print $2; exit }' "$TUNNEL_NGINX_MAP" 2>/dev/null)
+    if [[ "$mapped_port" == "$port" ]]; then
+      nginx_map_remove "$hash" >/dev/null 2>&1 || true
+      nginx_map_add "$(tunnel_map_key_for_hash "$hash")" "$port" >/dev/null 2>&1 || return 1
+      TUNNEL_STATE_URL=$(generate_tunnel_url "$hash")
+      write_tunnel_state "$port" "0" "$TUNNEL_STATE_URL" "" "$TUNNEL_STATE_START_TS"
+      return 0
+    fi
+  fi
+
+  remove_tunnel_state "$port" 1
+  return 1
+}
+
+tunnel_map_key_for_hash() {
+  local hash="$1"
+  echo "${hash}${TUNNEL_HOST_SUFFIX}.${TUNNEL_BASE_DOMAIN}"
+}
+
+tunnel_hash_from_url() {
+  local url="$1"
+  local host="${url#https://}"
+
+  if [[ "$host" =~ ^[a-f0-9]{8}${TUNNEL_HOST_SUFFIX}\.${TUNNEL_BASE_DOMAIN}$ ]]; then
+    echo "${host%%${TUNNEL_HOST_SUFFIX}.${TUNNEL_BASE_DOMAIN}}"
+    return 0
+  fi
+
+  if [[ "$host" =~ ^[a-f0-9]{8}\.${TUNNEL_DOMAIN}$ ]]; then
+    echo "${host%%.*}"
+    return 0
+  fi
+
+  if [[ "$url" =~ ^https://${TUNNEL_DOMAIN}/[a-f0-9]{8}$ ]]; then
+    echo "${url##*/}"
+    return 0
+  fi
+
+  return 1
+}
+
+nginx_map_key_for_port() {
+  local port="$1"
+  awk -v p="$port" '{ gsub(/;/, "", $2); if ($2 == p) { print $1; exit } }' "$TUNNEL_NGINX_MAP" 2>/dev/null
+}
+
+nginx_map_get_hash_for_port() {
+  local port="$1"
+  local key=""
+
+  key=$(nginx_map_key_for_port "$port")
+  [[ -n "$key" ]] || return 1
+
+  if [[ "$key" =~ ^[a-f0-9]{8}${TUNNEL_HOST_SUFFIX}\.${TUNNEL_BASE_DOMAIN}$ ]]; then
+    echo "${key%%${TUNNEL_HOST_SUFFIX}.${TUNNEL_BASE_DOMAIN}}"
+  elif [[ "$key" =~ ^[a-f0-9]{8}\.${TUNNEL_DOMAIN}$ ]]; then
+    echo "${key%%.*}"
+  else
+    echo "$key"
+  fi
+}
+
+nginx_map_add() {
+  local key="$1"
+  local port="$2"
+
+  touch "$TUNNEL_NGINX_MAP" 2>/dev/null || {
+    error "Cannot write tunnel map: $TUNNEL_NGINX_MAP"
+    return 1
+  }
+
+  # Keep one live mapping per host/hash and per local port.
+  sed -i "/^${key//./\\.} /d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
+  sed -i "/^[a-f0-9]\{8\}${TUNNEL_HOST_SUFFIX//./\\.}\\.${TUNNEL_BASE_DOMAIN//./\\.} ${port};$/d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
+  sed -i "/^[a-f0-9]\{8\}\\.${TUNNEL_DOMAIN//./\\.} ${port};$/d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
+  sed -i "/^[a-f0-9]\{8\} ${port};$/d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
+  echo "${key} ${port};" >> "$TUNNEL_NGINX_MAP"
+  nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1
+}
+
+nginx_map_remove() {
+  local key="$1"
+  [[ -f "$TUNNEL_NGINX_MAP" ]] || return 0
+  sed -i "/^${key//./\\.} /d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
+  nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1
+}
+
+stop_background_process() {
+  local pid="$1"
+  local attempts=0
+
+  is_pid_running "$pid" || return 0
+  kill "$pid" 2>/dev/null || return 1
+
+  while (( attempts < 5 )); do
+    is_pid_running "$pid" || return 0
+    sleep 1
+    ((attempts++))
+  done
+
+  kill -9 "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  ! is_pid_running "$pid"
+}
+
+animation_pause() {
+  local delay="${1:-0.05}"
+
+  if [[ "${INTRO_SKIP:-0}" -eq 1 ]]; then
+    return 1
+  fi
+
+  if [[ ! -t 0 ]]; then
+    sleep "$delay"
+    return 0
+  fi
+
+  local key
+  if read -rsn1 -t "$delay" key 2>/dev/null; then
+    INTRO_SKIP=1
+    return 1
+  fi
+
+  return 0
+}
+
+get_fire_units() {
+  {
+    systemctl list-units --all --no-legend --plain "${PREFIX}-*.service" 2>/dev/null | awk '{print $1}' | grep '\.service$' | grep -v "${PREFIX}-reload@"
+    local legacy_list=$(grep -l "fire-managed Python Service" /etc/systemd/system/*.service 2>/dev/null)
+    [[ -n "$legacy_list" ]] && echo "$legacy_list" | xargs -n1 basename | grep -v "${PREFIX}-reload@"
+  } | sort -u
+}
+
+get_dashboard_snapshot() {
+  local total=0
+  local online=0
+  local failed=0
+  local total_mem_kb=0
+  local units=$(get_fire_units)
+
+  for svc in $units; do
+    [[ -z "$svc" ]] && continue
+    ((total++))
+
+    local props=$(systemctl show --property=ActiveState,MainPID -- "$svc" 2>/dev/null)
+    local state=$(echo "$props" | grep ActiveState | cut -d= -f2)
+    local pid_val=$(echo "$props" | grep MainPID | cut -d= -f2)
+
+    if [[ "$state" == "active" ]]; then
+      ((online++))
+      if [[ "$pid_val" =~ ^[0-9]+$ && "$pid_val" -gt 0 ]]; then
+        local rss=$(ps -p "$pid_val" -o rss= 2>/dev/null | awk '{print $1}')
+        [[ "$rss" =~ ^[0-9]+$ ]] && total_mem_kb=$((total_mem_kb + rss))
+      fi
+    elif [[ "$state" == "failed" ]]; then
+      ((failed++))
+    fi
+  done
+
+  local total_mem_mb=$(format_mem_kb "$total_mem_kb")
+  printf "%s|%s|%s|%s\n" "$total" "$online" "$failed" "$total_mem_mb"
+}
+
+print_dashboard_logo() {
+  local mode="${1:-hot}"
+
+  if [[ "$mode" == "dim" ]]; then
+    echo -e "    ${GREY}▄████████  ▄█  ███▄▄▄▄      ▄████████ ${NC}"
+    echo -e "   ${GREY}███    ███ ███  ███▀▀▀██▄   ███    ███ ${NC}"
+    echo -e "   ${GREY}███    █▀  ███▌ ███   ███   ███    █▀  ${NC}"
+    echo -e "  ${GREY}▄███▄▄▄     ███▌ ███   ███  ▄███▄▄▄     ${NC}"
+    echo -e " ${GREY}▀▀███▀▀▀     ███▌ ███   ███ ▀▀███▀▀▀     ${NC}"
+    echo -e "   ${GREY}███        ███  ███   ███   ███    █▄  ${NC}"
+    echo -e "   ${GREY}███        ███  ███   ███   ███    ███ ${NC}"
+    echo -e "   ${GREY}███        █▀    ▀█   █▀    ████████▀  ${NC}"
+    return
+  fi
+
+  echo -e "    ${L_RED}▄████████  ${RED}▄█  ${ORANGE}███▄▄▄▄      ${YELLOW}▄████████ ${NC}"
+  echo -e "   ${L_RED}███    ███ ${RED}███  ${ORANGE}███▀▀▀██▄   ${YELLOW}███    ███ ${NC}"
+  echo -e "   ${L_RED}███    █▀  ${RED}███▌ ${ORANGE}███   ███   ${YELLOW}███    █▀  ${NC}"
+  echo -e "  ${L_RED}▄███▄▄▄     ${RED}███▌ ${ORANGE}███   ███  ${YELLOW}▄███▄▄▄     ${NC}"
+  echo -e " ${L_RED}▀▀███▀▀▀     ${RED}███▌ ${ORANGE}███   ███ ${YELLOW}▀▀███▀▀▀     ${NC}"
+  echo -e "   ${L_RED}███        ${RED}███  ${ORANGE}███   ███   ${YELLOW}███    █▄  ${NC}"
+  echo -e "   ${L_RED}███        ${RED}███  ${ORANGE}███   ███   ${YELLOW}███    ███ ${NC}"
+  echo -e "   ${L_RED}███        ${RED}█▀    ${ORANGE}▀█   █▀    ${YELLOW}████████▀  ${NC}"
+}
+
+print_dashboard_banner() {
+  print_dashboard_logo "${1:-hot}"
+  echo -e "${NC}  ${CYAN}${BOLD}Fire Process Manager${NC} — Interactive Mode"
+}
+
+print_dashboard_snapshot_line() {
+  local snapshot
+  local total=0
+  local online=0
+  local failed=0
+  local memory="0.0MB"
+
+  snapshot=$(get_dashboard_snapshot)
+  IFS='|' read -r total online failed memory <<< "$snapshot"
+  echo -e "  ${ORANGE}${BOLD}${total}${NC} ${ORANGE}services${NC}  ${GREEN}${BOLD}${online}${NC} ${GREEN}online${NC}  ${RED}${BOLD}${failed}${NC} ${RED}failed${NC}  ${CYAN}${BOLD}${memory}${NC} ${CYAN}RAM${NC}"
+}
+
+print_dashboard_tunnel_line() {
+  local active=0
+  local pending=0
+  local active_ports=""
+  local pending_ports=""
+  local file=""
+
+  ensure_tunnel_dir
+  shopt -s nullglob
+  local state_files=("$TUNNEL_DIR"/*.env)
+  shopt -u nullglob
+
+  for file in "${state_files[@]}"; do
+    local port
+    port=$(basename "$file" .env)
+
+    load_active_tunnel_state "$port" || continue
+    if [[ -n "$TUNNEL_STATE_URL" ]]; then
+      ((active++))
+      active_ports+="${TUNNEL_STATE_PORT}, "
+    else
+      ((pending++))
+      pending_ports+="${TUNNEL_STATE_PORT}, "
+    fi
+  done
+
+  active_ports="${active_ports%, }"
+  pending_ports="${pending_ports%, }"
+
+  if (( active == 0 && pending == 0 )); then
+    echo -e "  ${YELLOW}${BOLD}Tunnels:${NC} ${GREY}none active${NC}"
+    return
+  fi
+
+  echo -ne "  ${YELLOW}${BOLD}Tunnels:${NC} ${GREEN}${BOLD}${active}${NC} ${GREEN}active${NC}  ${ORANGE}${BOLD}${pending}${NC} ${ORANGE}pending${NC}"
+  if [[ -n "$active_ports" ]]; then
+    echo -ne "  ${CYAN}${BOLD}Ports:${NC} ${CYAN}${active_ports}${NC}"
+  fi
+  if [[ -n "$pending_ports" ]]; then
+    echo -ne "  ${GREY}${BOLD}Starting:${NC} ${GREY}${pending_ports}${NC}"
+  fi
+  echo ""
+}
+
+animate_dashboard_intro() {
+  local flame
+  local flames=(
+    "${RED}▂▃▅▆${NC}"
+    "${RED}▂▃▅▆${ORANGE}▇█▇${NC}"
+    "${RED}▂▃▅▆${ORANGE}▇█▇${YELLOW}▆▅▄▃${NC}"
+    "${RED}▂▃▅▆${ORANGE}▇█▇${YELLOW}▆▅▄▃${ORANGE}▂${NC}"
+  )
+
+  INTRO_SKIP=0
+
+  for flame in "${flames[@]}"; do
+    printf "\033[2J\033[H"
+    print_dashboard_logo dim
+    echo ""
+    echo -e "  ${GREY}${BOLD}Fire Process Manager${NC} ${GREY}— Interactive Mode${NC}"
+    echo -e "  ${flame}"
+    echo -e "  ${GREY}Press any key to skip${NC}"
+    animation_pause 0.08 || break
+  done
+
+  printf "\033[2J\033[H"
+  print_dashboard_logo hot
+  echo ""
+  echo -ne "  ${CYAN}${BOLD}"
+  type_text "Fire" 0.01
+  echo -ne "${NC} ${CYAN}${BOLD}"
+  type_text "Process Manager" 0.006
+  echo -ne "${NC} — "
+  type_text "Interactive Mode" 0.004
+  echo -e "${NC}"
+  echo -e "  ${GREY}────────────────────────────────────────────────────${NC}"
+}
+
+# ================== COMMAND PARSING ==================
+CMD="$1"
+shift
+ARGS=()
+NAME_OPT=""
+INTERPRETER_OPT=""
+ENV_VARS=()
+PASSTHROUGH_ARGS=()
+JSON_OPT=0
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name)
+        NAME_OPT="$2"
+        shift 2
+        ;;
+      --interpreter)
+        INTERPRETER_OPT="$2"
+        shift 2
+        ;;
+      --env)
+        ENV_VARS+=("$2")
+        shift 2
+        ;;
+      --json)
+        JSON_OPT=1
+        shift
+        ;;
+      --)
+        shift
+        PASSTHROUGH_ARGS+=("$@")
+        break
+        ;;
+      *)
+        ARGS+=("$1")
+        shift
+        ;;
+    esac
+  done
+}
+
+# ================== ACTIONS ==================
+
+action_start() {
+  local file="${ARGS[0]}"
+  [[ -z "$file" ]] && error "No script specified." && exit 1
+  [[ ! -f "$file" ]] && error "File not found: $file" && exit 1
+
+  # Determine Name
+  local base_name=$(basename "$file")
+  local raw_name="${NAME_OPT:-$base_name}"
+  local safe_name=$(get_safe_name "$raw_name")
+  local service_name="${PREFIX}-${safe_name}.service"
+  local service_file="${SYSTEM_DIR}/${service_name}"
+
+  # Determine Interpreter / Executable
+  local exec_cmd=""
+  local ext="${file##*.}"
+
+  if [[ -n "$INTERPRETER_OPT" ]]; then
+    exec_cmd="$INTERPRETER_OPT"
+  elif [[ "$ext" == "py" ]]; then
+    if [[ -f "$VENV/bin/python" ]]; then
+      exec_cmd="$VENV/bin/python"
+    else
+      exec_cmd="python3"
+    fi
+  elif [[ "$ext" == "js" ]]; then
+    exec_cmd="node"
+  elif [[ "$ext" == "sh" ]]; then
+    exec_cmd="bash"
+  elif [[ -x "$file" ]]; then
+    exec_cmd=""
+  else
+    # Fallback to python if unsure? Or error? Let's default to python for legacy comp
+    exec_cmd="python3"
+  fi
+
+  # Construct Command
+  local full_exec=""
+  if [[ -n "$exec_cmd" ]]; then
+    full_exec="$exec_cmd $WORKDIR/$file"
+  else
+    full_exec="$WORKDIR/$file"
+  fi
+
+  # Append Passthrough Args
+  for a in "${PASSTHROUGH_ARGS[@]}"; do
+    full_exec+=" \"$a\""
+  done
+
+  # Build Environment Section
+  local env_section=""
+  for e in "${ENV_VARS[@]}"; do
+    env_section+="Environment=\"$e\""$'\n'
+  done
+  
+  # Inject Path for VENV if detected
+  if [[ "$full_exec" == *"$VENV"* ]]; then
+    env_section+="Environment=\"PATH=$VENV/bin:/usr/local/bin:/usr/bin:/bin\""$'\n'
+  fi
+
+  # Check update or create
+  if [[ -f "$service_file" ]]; then
+    warn "Updating existing service: $safe_name"
+    systemctl stop "$service_name"
+  fi
+
+  # Write Service File
+  cat <<EOF > "$service_file"
+[Unit]
+Description=Fire Service: $raw_name
+After=network.target
+StartLimitBurst=15
+StartLimitIntervalSec=30m
+
+[Service]
+Type=simple
+User=$RUN_USER
+WorkingDirectory=$WORKDIR
+$env_section
+ExecStart=$full_exec
+Restart=always
+RestartSec=3
+RestartMaxDelaySec=2m
+RestartSteps=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=${PREFIX}-${safe_name}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable "$service_name" >/dev/null
+  systemctl start "$service_name"
+  
+  success "Process started"
+  echo -e "   ${BOLD}Name:${NC} $safe_name"
+  echo -e "   ${BOLD}Cmd:${NC}  $full_exec"
+  echo -e "   ${BOLD}Mode:${NC} $RUN_USER"
+}
+
+# ================== TABLE DRAWING FUNCTIONS (Dynamically Defined) ==================
+# These functions will be generated inside action_list or action_monit to use dynamic widths
+
+action_list() {
+  local TERM_COLS=$(tput cols 2>/dev/null || echo 80)
+
+  declare -A PID_PORTS
+  if command -v ss &>/dev/null; then
+    local ss_state ss_recv ss_send ss_local ss_peer ss_proc ss_temp ss_pid
+    while read -r ss_state ss_recv ss_send ss_local ss_peer ss_proc; do
+      [[ "$ss_state" == "State" ]] && continue
+      local port_num="${ss_local##*:}"
+      ss_temp="$ss_proc"
+      while [[ "$ss_temp" =~ pid=([0-9]+) ]]; do
+        ss_pid="${BASH_REMATCH[1]}"
+        if [[ -n "${PID_PORTS[$ss_pid]}" ]]; then
+          if [[ ! ",${PID_PORTS[$ss_pid]}," == *",$port_num,"* ]]; then
+            PID_PORTS[$ss_pid]+=",$port_num"
+          fi
+        else
+          PID_PORTS[$ss_pid]="$port_num"
+        fi
+        ss_temp="${ss_temp#*pid=$ss_pid}"
+      done
+    done < <(ss -lntp 2>/dev/null)
+  fi
+
+  # Column settings (width + priority)
+  local ID_W=3
+  local STATUS_W=10
+  local UPTIME_W=9
+  local REST_W=6
+  local MEM_W=8
+  local CPU_W=7
+  local PID_W=7
+  
+  if [[ $MONIT_MODE -eq 1 ]]; then
+    MEM_W=16
+    CPU_W=15
+  fi
+
+  local APP_NAME_MIN=20
+  local APP_NAME_W=$APP_NAME_MIN
+
+  # Which columns to show (ID, NAME, STATUS are essential)
+  local show_uptime=1
+  local show_rest=1
+  local show_mem=1
+  local show_cpu=1
+  local show_pid=1
+
+  # Total width calculation helper
+  get_total_width() {
+    local w=$(( ID_W + APP_NAME_W + STATUS_W + 3*3 )) # Always ID, NAME, STATUS + 3 bars
+    [[ $show_uptime -eq 1 ]] && w=$(( w + UPTIME_W + 3 ))
+    [[ $show_rest -eq 1 ]]   && w=$(( w + REST_W + 3 ))
+    [[ $show_mem -eq 1 ]]    && w=$(( w + MEM_W + 3 ))
+    [[ $show_cpu -eq 1 ]]    && w=$(( w + CPU_W + 3 ))
+    [[ $show_pid -eq 1 ]]    && w=$(( w + PID_W + 3 ))
+    echo $w
+  }
+
+  # Progressive hiding based on width
+  [[ $(get_total_width) -gt $TERM_COLS ]] && show_pid=0
+  [[ $(get_total_width) -gt $TERM_COLS ]] && show_cpu=0
+  [[ $(get_total_width) -gt $TERM_COLS ]] && show_mem=0
+  [[ $(get_total_width) -gt $TERM_COLS ]] && show_rest=0
+  [[ $(get_total_width) -gt $TERM_COLS ]] && show_uptime=0
+
+  # Recalculate App Name Width (use remaining space)
+  local current_w=$(get_total_width)
+  local remaining=$(( TERM_COLS - current_w ))
+  [[ $remaining -gt 0 ]] && APP_NAME_W=$(( APP_NAME_MIN + remaining ))
+
+  # --- Dynamic Border Functions ---
+  draw_line_part() { local char="$1"; local w="$2"; printf "%s%*s" "$char" "$((w+2))" '' | tr ' ' '─'; }
+  draw_line() {
+    local line="${GREY}"
+    line+=$(draw_line_part "┌" $ID_W)
+    line+=$(draw_line_part "┬" $APP_NAME_W)
+    line+=$(draw_line_part "┬" $STATUS_W)
+    [[ $show_uptime -eq 1 ]] && line+=$(draw_line_part "┬" $UPTIME_W)
+    [[ $show_rest -eq 1 ]]   && line+=$(draw_line_part "┬" $REST_W)
+    [[ $show_mem -eq 1 ]]    && line+=$(draw_line_part "┬" $MEM_W)
+    [[ $show_cpu -eq 1 ]]    && line+=$(draw_line_part "┬" $CPU_W)
+    [[ $show_pid -eq 1 ]]    && line+=$(draw_line_part "┬" $PID_W)
+    echo -e "${line}┐${NC}"
+  }
+  draw_sep() {
+    local line="${GREY}"
+    line+=$(draw_line_part "├" $ID_W)
+    line+=$(draw_line_part "┼" $APP_NAME_W)
+    line+=$(draw_line_part "┼" $STATUS_W)
+    [[ $show_uptime -eq 1 ]] && line+=$(draw_line_part "┼" $UPTIME_W)
+    [[ $show_rest -eq 1 ]]   && line+=$(draw_line_part "┼" $REST_W)
+    [[ $show_mem -eq 1 ]]    && line+=$(draw_line_part "┼" $MEM_W)
+    [[ $show_cpu -eq 1 ]]    && line+=$(draw_line_part "┼" $CPU_W)
+    [[ $show_pid -eq 1 ]]    && line+=$(draw_line_part "┼" $PID_W)
+    echo -e "${line}┤${NC}"
+  }
+  draw_bottom() {
+    local line="${GREY}"
+    line+=$(draw_line_part "└" $ID_W)
+    line+=$(draw_line_part "┴" $APP_NAME_W)
+    line+=$(draw_line_part "┴" $STATUS_W)
+    [[ $show_uptime -eq 1 ]] && line+=$(draw_line_part "┴" $UPTIME_W)
+    [[ $show_rest -eq 1 ]]   && line+=$(draw_line_part "┴" $REST_W)
+    [[ $show_mem -eq 1 ]]    && line+=$(draw_line_part "┴" $MEM_W)
+    [[ $show_cpu -eq 1 ]]    && line+=$(draw_line_part "┴" $CPU_W)
+    [[ $show_pid -eq 1 ]]    && line+=$(draw_line_part "┴" $PID_W)
+    echo -e "${line}┘${NC}"
+  }
+
+  local units=$(get_fire_units)
+
+  if [[ -z "$units" ]]; then
+    if [[ $JSON_OPT -eq 1 ]]; then
+      echo '{"total_process":0,"active_process":0,"inactive_process":0}'
+      return
+    fi
+    echo -e "\n${YELLOW}No processes managed by fire.${NC}\n"
+    return
+  fi
+
+  # Collect path units that exist on disk for reload status
+  local path_units_str=""
+  declare -A SVC_PATH_STATE
+  for svc in $units; do
+    local path_unit="${svc%.service}.path"
+    if [[ -f "${SYSTEM_DIR}/${path_unit}" ]]; then
+      path_units_str+=" $path_unit"
+    fi
+  done
+
+  # Query systemctl in bulk (services + path units in one call)
+  declare -A SVC_STATE SVC_PID SVC_RESTARTS SVC_START_TS SVC_STOP_TS SVC_RESTART_POLICY SVC_MEMMAX SVC_CPUQUOTA
+  local show_line cur_svc active_state main_pid n_restarts active_enter inactive_enter restart_policy mem_max cpu_quota
+  while read -r show_line; do
+    if [[ -z "$show_line" ]]; then
+      if [[ -n "$cur_svc" ]]; then
+        if [[ "$cur_svc" == *.path ]]; then
+          SVC_PATH_STATE[$cur_svc]="$active_state"
+        else
+          SVC_STATE[$cur_svc]="$active_state"
+          SVC_PID[$cur_svc]="$main_pid"
+          SVC_RESTARTS[$cur_svc]="$n_restarts"
+          SVC_START_TS[$cur_svc]="$active_enter"
+          SVC_STOP_TS[$cur_svc]="$inactive_enter"
+          SVC_RESTART_POLICY[$cur_svc]="$restart_policy"
+          SVC_MEMMAX[$cur_svc]="$mem_max"
+          SVC_CPUQUOTA[$cur_svc]="$cpu_quota"
+        fi
+      fi
+      cur_svc="" active_state="" main_pid="" n_restarts="" active_enter="" inactive_enter="" restart_policy="" mem_max="" cpu_quota=""
+    elif [[ "$show_line" =~ ^Id=(.*)$ ]]; then
+      cur_svc="${BASH_REMATCH[1]}"
+    elif [[ "$show_line" =~ ^ActiveState=(.*)$ ]]; then
+      active_state="${BASH_REMATCH[1]}"
+    elif [[ "$show_line" =~ ^MainPID=(.*)$ ]]; then
+      main_pid="${BASH_REMATCH[1]}"
+    elif [[ "$show_line" =~ ^NRestarts=(.*)$ ]]; then
+      n_restarts="${BASH_REMATCH[1]}"
+    elif [[ "$show_line" =~ ^ActiveEnterTimestamp=(.*)$ ]]; then
+      active_enter="${BASH_REMATCH[1]}"
+    elif [[ "$show_line" =~ ^InactiveEnterTimestamp=(.*)$ ]]; then
+      inactive_enter="${BASH_REMATCH[1]}"
+    elif [[ "$show_line" =~ ^Restart=(.*)$ ]]; then
+      restart_policy="${BASH_REMATCH[1]}"
+    elif [[ "$show_line" =~ ^MemoryMax=(.*)$ ]]; then
+      mem_max="${BASH_REMATCH[1]}"
+    elif [[ "$show_line" =~ ^CPUQuotaPerSecUSec=(.*)$ ]]; then
+      cpu_quota="${BASH_REMATCH[1]}"
+    fi
+  done < <(systemctl show $units $path_units_str --property=Id,ActiveState,MainPID,NRestarts,ActiveEnterTimestamp,InactiveEnterTimestamp,Restart,MemoryMax,CPUQuotaPerSecUSec 2>/dev/null; echo "")
+
+  # Collect active PIDs and query ps in bulk
+  local active_pids=()
+  for svc in $units; do
+    local state="${SVC_STATE[$svc]}"
+    local pid_val="${SVC_PID[$svc]}"
+    if [[ "$state" == "active" && "$pid_val" -gt 0 && "$pid_val" != "0" ]]; then
+      active_pids+=("$pid_val")
+    fi
+  done
+
+  declare -A PID_CPU PID_MEM
+  if [[ ${#active_pids[@]} -gt 0 ]]; then
+    local ps_line ps_pid ps_cpu ps_rss
+    local pid_csv=$(IFS=,; echo "${active_pids[*]}")
+    while read -r ps_line; do
+      read -r ps_pid ps_cpu ps_rss <<< "$ps_line"
+      if [[ -n "$ps_pid" && "$ps_pid" =~ ^[0-9]+$ ]]; then
+        PID_CPU[$ps_pid]="$ps_cpu"
+        PID_MEM[$ps_pid]="$ps_rss"
+      fi
+    done < <(ps -p "$pid_csv" -o pid=,%cpu=,rss= 2>/dev/null)
+  fi
+
+  local row_data=()
+  local total_mem_kb=0
+  local online_count=0
+  local total_count=0
+
+  for svc in $units; do
+    [[ -z "$svc" ]] && continue
+    ((total_count++))
+    local name="$svc"
+    local is_legacy=0
+    if [[ "$svc" == "${PREFIX}-"* ]]; then
+      name=${name#"$PREFIX-"}
+      name=${name%.service}
+    else
+      name="${svc%.service}"
+      is_legacy=1
+    fi
+
+    local state="${SVC_STATE[$svc]}"
+    local pid_val="${SVC_PID[$svc]}"
+    local restarts="${SVC_RESTARTS[$svc]}"
+    local start_ts="${SVC_START_TS[$svc]}"
+    local stop_ts="${SVC_STOP_TS[$svc]}"
+    
+    local uptime="-"
+    local status_icon="○"
+    local status_text="stopped"
+    local status_color=$RED
+    local priority=3
+
+    if [[ "$state" == "active" ]]; then
+      uptime=$(format_uptime "$start_ts")
+      status_icon="●"
+      status_text="online"
+      status_color=$GREEN
+      priority=1
+      ((online_count++))
+    elif [[ "$state" == "failed" ]]; then
+      status_icon="✖"
+      status_text="errored"
+      status_color=$RED
+      priority=2
+    fi
+    
+    local mem="0.0MB"
+    local cpu="0.0%"
+    local cpu_num=0
+    local mem_num=0
+    local port="-"
+    if [[ "$state" == "active" && "$pid_val" -gt 0 && "$pid_val" != "0" ]]; then
+       local m="${PID_MEM[$pid_val]:-0}"
+       local c="${PID_CPU[$pid_val]:-0.0}"
+       total_mem_kb=$((total_mem_kb + m))
+       mem=$(format_mem_kb "$m")
+       cpu="${c}%"
+       cpu_num=$(printf "%.0f" "$c")
+       mem_num=$m
+       port="${PID_PORTS[$pid_val]:--}"
+    else
+       pid_val="-"
+    fi
+
+    local watch="${SVC_RESTART_POLICY[$svc]:-no}"
+
+    local reload_status="off"
+    local path_unit="${svc%.service}.path"
+    local path_state="${SVC_PATH_STATE[$path_unit]}"
+    if [[ -n "$path_state" ]]; then
+      [[ "$path_state" == "active" ]] && reload_status="active" || reload_status="ready"
+    elif [[ -f "${SYSTEM_DIR}/${path_unit}" ]]; then
+      reload_status="ready"
+    fi
+
+    local mem_max_raw="${SVC_MEMMAX[$svc]:-infinity}"
+    local mem_lim_val="-"
+    if [[ "$mem_max_raw" != "infinity" && "$mem_max_raw" != "[not set]" && "$mem_max_raw" =~ ^[0-9]+$ ]]; then
+      mem_lim_val="$((mem_max_raw / 1048576))M"
+    fi
+
+    local cpu_quota_raw="${SVC_CPUQUOTA[$svc]:-infinity}"
+    local cpu_lim_val="-"
+    if [[ "$cpu_quota_raw" != "infinity" && "$cpu_quota_raw" != "[not set]" ]]; then
+      if [[ "$cpu_quota_raw" =~ ^([0-9]+)us$ ]]; then
+        cpu_lim_val="$((${BASH_REMATCH[1]} / 10000))%"
+      elif [[ "$cpu_quota_raw" =~ ^([0-9]+)ms$ ]]; then
+        cpu_lim_val="$((${BASH_REMATCH[1]} / 10))%"
+      fi
+    fi
+
+    [[ $is_legacy -eq 1 ]] && name="L:$name"
+    row_data+=("$priority|$name|$status_icon|$status_text|$status_color|$uptime|$restarts|$mem|$cpu|$pid_val|$port|$watch|$reload_status|$mem_lim_val|$cpu_lim_val")
+  done
+
+  local sorted_rows=$(printf "%s\n" "${row_data[@]}" | sort -t'|' -k1,1n -k2,2)
+
+  if [[ $JSON_OPT -eq 1 ]]; then
+    local json_procs=()
+    local id=0
+    while IFS='|' read -r prio name icon st_text st_color upt rest m_val c_val p_val port_val watch_val reload_val mem_lim_val cpu_lim_val; do
+      local pid_num="null"
+      if [[ "$p_val" =~ ^[0-9]+$ ]]; then
+        pid_num="$p_val"
+      fi
+      local restarts_num="0"
+      if [[ "$rest" =~ ^[0-9]+$ ]]; then
+        restarts_num="$rest"
+      fi
+      json_procs+=("{\"id\":$id,\"name\":\"$name\",\"status\":\"$st_text\",\"uptime\":\"$upt\",\"restarts\":$restarts_num,\"mem\":\"$m_val\",\"cpu\":\"$c_val\",\"pid\":$pid_num,\"port\":\"$port_val\",\"watch\":\"$watch_val\",\"reload\":\"$reload_val\",\"mem_limit\":\"$mem_lim_val\",\"cpu_limit\":\"$cpu_lim_val\"}")
+      ((id++))
+    done <<< "$sorted_rows"
+
+    local old_ifs="$IFS"
+    IFS=","
+    local procs_json="${json_procs[*]}"
+    IFS="$old_ifs"
+
+    local inactive_count=$((total_count - online_count))
+    echo "{\"processes\":[$procs_json],\"total_process\":$total_count,\"active_process\":$online_count,\"inactive_process\":$inactive_count}"
+    return
+  fi
+
+  echo ""
+  draw_line
+  local h_fmt="${GREY}│${NC} ${BOLD}%-${ID_W}s${NC} ${GREY}│${NC} ${BOLD}%-${APP_NAME_W}s${NC} ${GREY}│${NC} ${BOLD}%-${STATUS_W}s${NC}"
+  local h_args=("ID" "App Name" "Status")
+  [[ $show_uptime -eq 1 ]] && h_fmt+=" ${GREY}│${NC} ${BOLD}%-${UPTIME_W}s${NC}" && h_args+=("Uptime")
+  [[ $show_rest -eq 1 ]]   && h_fmt+=" ${GREY}│${NC} ${BOLD}%-${REST_W}s${NC}"   && h_args+=("Rest")
+  [[ $show_mem -eq 1 ]]    && h_fmt+=" ${GREY}│${NC} ${BOLD}%-${MEM_W}s${NC}"    && h_args+=("Mem")
+  [[ $show_cpu -eq 1 ]]    && h_fmt+=" ${GREY}│${NC} ${BOLD}%-${CPU_W}s${NC}"    && h_args+=("CPU")
+  [[ $show_pid -eq 1 ]]    && h_fmt+=" ${GREY}│${NC} ${BOLD}%-${PID_W}s${NC}"    && h_args+=("PID")
+  h_fmt+=" ${GREY}│${NC}"
+  printf "$h_fmt\n" "${h_args[@]}"
+  draw_sep
+
+  local id=0
+  while IFS='|' read -r prio name icon st_text st_color upt rest m_val c_val p_val port_val watch_val reload_val mem_lim_val cpu_lim_val; do
+    local disp_name="$name"
+    [[ ${#disp_name} -gt $APP_NAME_W ]] && disp_name="${disp_name:0:$((APP_NAME_W-3))}..."
+
+    printf "${GREY}│${NC} %-${ID_W}d ${GREY}│${NC} %-${APP_NAME_W}s ${GREY}│${NC} ${st_color}%s %-$((STATUS_W-2))s${NC}" "$id" "$disp_name" "$icon" "$st_text"
+    [[ $show_uptime -eq 1 ]] && printf " ${GREY}│${NC} %-${UPTIME_W}s" "$upt"
+    [[ $show_rest -eq 1 ]]   && printf " ${GREY}│${NC} %-${REST_W}s" "$rest"
+    [[ $show_mem -eq 1 ]]    && printf " ${GREY}│${NC} %-${MEM_W}s" "$m_val"
+    [[ $show_cpu -eq 1 ]]    && printf " ${GREY}│${NC} %-${CPU_W}s" "$c_val"
+    [[ $show_pid -eq 1 ]]    && printf " ${GREY}│${NC} %-${PID_W}s" "$p_val"
+    printf " ${GREY}│${NC}\n"
+    ((id++))
+  done <<< "$sorted_rows"
+
+  draw_bottom
+  local total_mem_mb=$(format_mem_kb "$total_mem_kb")
+  echo -e " ${YELLOW}${BOLD}Total:${NC} ${YELLOW}${BOLD}$total_count${NC}  ${GREEN}${BOLD}Online:${NC} ${GREEN}${BOLD}$online_count${NC}  ${CYAN}${BOLD}Memory:${NC} ${CYAN}${BOLD}$total_mem_mb${NC}"
+  if [[ "${DASHBOARD_MODE:-0}" -ne 1 ]]; then
+    echo ""
+  fi
+}
+
+action_migrate() {
+  info "Scanning for legacy services..."
+  local legacy_files=$(grep -l "fire-managed Python Service" /etc/systemd/system/*.service 2>/dev/null)
+  
+  if [[ -z "$legacy_files" ]]; then
+    success "No legacy services found."
+    return
+  fi
+
+  for file in $legacy_files; do
+    local old_svc=$(basename "$file")
+    local old_name="${old_svc%.service}"
+    local new_name="${PREFIX}-${old_name}.service"
+    
+    warn "Migrating $old_name -> $new_name"
+    
+    # Extract WorkingDir and ExecStart
+    local wd=$(grep "WorkingDirectory=" "$file" | cut -d= -f2)
+    local exec=$(grep "ExecStart=" "$file" | cut -d= -f2)
+    
+    # Extract description name
+    local desc=$(grep "Description=" "$file" | sed 's/Description=fire-managed Python Service - //')
+
+    # Stop old using full path to bypass naming issues
+    systemctl stop "$file" 2>/dev/null
+    systemctl disable "$file" 2>/dev/null
+    
+    # Move to new name (we'll just rewrite it to ensure new format)
+    # new_name will be something like fire-@ccwalletrobot.service
+    # We should probably clean the name even more for the new version
+    local clean_new_name=$(get_safe_name "$old_name")
+    local final_svc_name="${PREFIX}-${clean_new_name}.service"
+
+    cp "$file" "$SYSTEM_DIR/$final_svc_name"
+    sed -i "s/Description=fire-managed Python Service - .*/Description=Fire Service: $desc/" "$SYSTEM_DIR/$final_svc_name"
+    sed -i "/\[Service\]/a SyslogIdentifier=${PREFIX}-${clean_new_name}" "$SYSTEM_DIR/$final_svc_name"
+    
+    rm "$file"
+    
+    systemctl daemon-reload
+    systemctl enable "$final_svc_name" >/dev/null
+    systemctl start "$final_svc_name"
+    success "Migrated $old_name -> $clean_new_name"
+  done
+}
+
+action_stop() {
+  local target="${ARGS[0]}"
+  [[ -z "$target" ]] && error "Usage: fire stop <name|all>" && exit 1
+
+  if [[ "$target" == "all" ]]; then
+    systemctl list-units --all --no-legend --plain "${PREFIX}-*.service" | awk '{print $1}' | while read svc; do
+      systemctl stop "$svc"
+      success "Stopped $svc"
+    done
+  else
+    local svc_name=$(resolve_service_name "$target")
+    if [[ -n "$svc_name" ]]; then
+        systemctl stop "$svc_name"
+        success "Stopped ${svc_name#$PREFIX-}"
+    else
+        error "Process not found: $target"
+    fi
+  fi
+}
+
+action_restart() {
+  local target="${ARGS[0]}"
+  [[ -z "$target" ]] && error "Usage: fire restart <name|all>" && exit 1
+
+  if [[ "$target" == "all" ]]; then
+    systemctl list-units --all --no-legend --plain "${PREFIX}-*.service" | awk '{print $1}' | while read svc; do
+      systemctl restart "$svc"
+      success "Restarted $svc"
+    done
+  else
+    local svc_name=$(resolve_service_name "$target")
+    if [[ -n "$svc_name" ]]; then
+        systemctl restart "$svc_name"
+        success "Restarted ${svc_name#$PREFIX-}"
+    else
+        error "Process not found: $target"
+    fi
+  fi
+}
+
+action_delete() {
+  local delete_stopped=0
+  local targets=()
+  local deleted_any=0
+
+  for arg in "${ARGS[@]}"; do
+    if [[ "$arg" == "--stopped" ]]; then
+      delete_stopped=1
+    else
+      targets+=("$arg")
+    fi
+  done
+
+  if [[ $delete_stopped -eq 1 ]]; then
+    local stopped_units=()
+    local units=$(systemctl list-units --all --no-legend --plain "${PREFIX}-*.service" | awk '{print $1}')
+    for svc in $units; do
+      local state=$(systemctl show --property=ActiveState -- "$svc" | cut -d= -f2)
+      if [[ "$state" != "active" ]]; then
+        stopped_units+=("$svc")
+      fi
+    done
+
+    if [[ ${#stopped_units[@]} -gt 0 ]]; then
+      echo -n -e "${YELLOW}⚠${NC} ${#stopped_units[@]} stopped processes found. Delete them? (y/n) "
+      read -r confirm
+      if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+        for svc in "${stopped_units[@]}"; do
+          local name=${svc#"$PREFIX-"}
+          name=${name%.service}
+          systemctl stop "$svc" 2>/dev/null
+          systemctl disable "$svc" 2>/dev/null
+          rm -f "$SYSTEM_DIR/$svc"
+          success "Deleted $name"
+          deleted_any=1
+        done
+      else
+        info "Aborted batch delete."
+      fi
+    else
+      info "No stopped processes found."
+    fi
+  fi
+
+  if [[ ${#targets[@]} -gt 0 ]]; then
+    for target in "${targets[@]}"; do
+      local svc_name=$(resolve_service_name "$target")
+      if [[ -n "$svc_name" ]]; then
+        local display_name="${svc_name#$PREFIX-}"
+        display_name="${display_name%.service}"
+        systemctl stop "$svc_name" 2>/dev/null
+        systemctl disable "$svc_name" 2>/dev/null
+        rm -f "$SYSTEM_DIR/$svc_name"
+        success "Deleted $display_name"
+        deleted_any=1
+      else
+        error "Process not found: $target"
+      fi
+    done
+  elif [[ $delete_stopped -eq 0 ]]; then
+    error "Usage: fire delete <name|--stopped> [names...]"
+    exit 1
+  fi
+
+  if [[ $deleted_any -eq 1 ]]; then
+    systemctl daemon-reload
+  fi
+}
+
+action_info() {
+  local target="${ARGS[0]}"
+  [[ -z "$target" ]] && error "Usage: fire info <name|file>" && exit 1
+
+  local svc_name=$(resolve_service_name "$target")
+  if [[ -z "$svc_name" ]]; then
+      error "Process not found: $target"
+      exit 1
+  fi
+
+  local svc_file="${SYSTEM_DIR}/${svc_name}"
+  local props=$(systemctl show --property=ActiveState,MainPID,NRestarts,ActiveEnterTimestamp,InactiveEnterTimestamp,ExecStart,WorkingDirectory,User,Description -- "$svc_name")
+  
+  local state=$(echo "$props" | grep ActiveState | cut -d= -f2)
+  local pid=$(echo "$props" | grep MainPID | cut -d= -f2)
+  local restarts=$(echo "$props" | grep NRestarts | cut -d= -f2)
+  local start_ts=$(echo "$props" | grep ActiveEnterTimestamp | cut -d= -f2)
+  local stop_ts=$(echo "$props" | grep InactiveEnterTimestamp | cut -d= -f2)
+  local exec_start=$(echo "$props" | grep ExecStart | cut -d= -f2-)
+  local work_dir=$(echo "$props" | grep WorkingDirectory | cut -d= -f2-)
+  local user=$(echo "$props" | grep User | cut -d= -f2-)
+  local raw_name=$(echo "$props" | grep Description | sed 's/Description=Fire Service: //')
+
+  # Parse ExecStart for Interpreter, Script, Args
+  # Format of systemctl ExecStart: { path=/... ; argv[]=/... ; ignore_errors=no ; ... }
+  # We extract the part inside argv[]
+  local argv_str=$(echo "$exec_start" | sed -n 's/.*argv\[\]=\([^;]*\).*/\1/p' | xargs)
+  local interpreter=$(echo "$argv_str" | cut -d' ' -f1)
+  local script_and_args=$(echo "$argv_str" | cut -d' ' -f2-)
+  
+  local script=""
+  local args=""
+  if [[ "$script_and_args" =~ ($work_dir/[^ ]+) ]]; then
+      script="${BASH_REMATCH[1]}"
+      args="${script_and_args#*"$script"}"
+      args="${args#" "}"
+  else
+      script=$(echo "$script_and_args" | cut -d' ' -f1)
+      args=$(echo "$script_and_args" | cut -d' ' -f2-)
+  fi
+
+  # Resource Usage
+  local mem="0.0MB"
+  local cpu="0.0%"
+  if [[ "$state" == "active" && "$pid" -gt 0 ]]; then
+      local stats=$(ps -p "$pid" -o %cpu=,rss= 2>/dev/null)
+      if [[ -n "$stats" ]]; then
+          read c m <<< "$stats"
+          mem=$(awk "BEGIN {printf \"%.1fMB\", $m/1024}")
+          cpu="${c}%"
+      fi
+  fi
+
+  # Status Styling
+  local status_color=$RED
+  [[ "$state" == "active" ]] && status_color=$GREEN
+
+  # Uptime / Stopped at
+  local time_info="-"
+  if [[ "$state" == "active" ]]; then
+      time_info=$(format_uptime "$start_ts")
+  elif [[ -n "$stop_ts" && "$stop_ts" != "n/a" ]]; then
+      time_info=$(TZ='Asia/Kolkata' date -d "$stop_ts" "+%b %d, %H:%M IST" 2>/dev/null)
+  fi
+
+  if [[ $JSON_OPT -eq 1 ]]; then
+    local pid_num="null"
+    [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 0 ]] && pid_num="$pid"
+    local restarts_num="0"
+    [[ "$restarts" =~ ^[0-9]+$ ]] && restarts_num="$restarts"
+
+    local safe_script=$(echo "$script" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    local safe_args=$(echo "${args:-}" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    local safe_work_dir=$(echo "$work_dir" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    local safe_raw_name=$(echo "$raw_name" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    local safe_interpreter=$(echo "$interpreter" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    local safe_time_info=$(echo "$time_info" | sed 's/\\/\\\\/g; s/"/\\"/g')
+
+    echo "{\"name\":\"$safe_raw_name\",\"service\":\"$svc_name\",\"status\":\"$state\",\"pid\":$pid_num,\"restarts\":$restarts_num,\"uptime\":\"$([[ "$state" == "active" ]] && echo "$safe_time_info" || echo "-")\",\"stopped_at\":\"$([[ "$state" != "active" ]] && echo "$safe_time_info" || echo "-")\",\"mem\":\"$mem\",\"cpu\":\"$cpu\",\"interpreter\":\"$safe_interpreter\",\"script\":\"$safe_script\",\"args\":\"$safe_args\",\"working_directory\":\"$safe_work_dir\",\"user\":\"$user\",\"log_path\":\"journalctl -u $svc_name -f\"}"
+    return
+  fi
+
+  echo -e "${BOLD}Describing process with name ${CYAN}$raw_name${NC}"
+  echo -e "${GREY}---------------------------------------------------------------------------${NC}"
+  printf "  %-17s : ${status_color}%s${NC}\n" "status" "$state"
+  printf "  %-17s : %s\n" "name" "$raw_name"
+  printf "  %-17s : %s\n" "interpreter" "$interpreter"
+  printf "  %-17s : %s\n" "script" "$script"
+  printf "  %-17s : %s\n" "args" "${args:-None}"
+  printf "  %-17s : %s\n" "working directory" "$work_dir"
+  printf "  %-17s : %s\n" "user" "$user"
+  printf "  %-17s : %s\n" "pid" "$([[ "$pid" == "0" ]] && echo "-" || echo "$pid")"
+  printf "  %-17s : %s\n" "restarts" "$restarts"
+  printf "  %-17s : %s\n" "uptime" "$([[ "$state" == "active" ]] && echo "$time_info" || echo "-")"
+  printf "  %-17s : %s\n" "stopped at" "$([[ "$state" != "active" ]] && echo "$time_info" || echo "-")"
+  printf "  %-17s : %s\n" "mem" "$mem"
+  printf "  %-17s : %s\n" "cpu" "$cpu"
+  printf "  %-17s : %s\n" "log path" "journalctl -u $svc_name -f"
+  echo -e "${GREY}---------------------------------------------------------------------------${NC}"
+}
+
+action_live() {
+  local target="${ARGS[0]}"
+  [[ -z "$target" ]] && error "Usage: fire live <name|file>" && exit 1
+
+  local svc_name=$(resolve_service_name "$target")
+  if [[ -z "$svc_name" ]]; then
+      error "Process not found: $target"
+      exit 1
+  fi
+
+  trap "printf '\033[?25h'; return" INT TERM
+  printf "\033[?25l" # Hide cursor
+
+  while true; do
+    clear
+    local props=$(systemctl show --property=ActiveState,MainPID,NRestarts,ActiveEnterTimestamp,Description -- "$svc_name" 2>/dev/null)
+    local state=$(echo "$props" | grep ActiveState | cut -d= -f2)
+    local pid=$(echo "$props" | grep MainPID | cut -d= -f2)
+    local restarts=$(echo "$props" | grep NRestarts | cut -d= -f2)
+    local start_ts=$(echo "$props" | grep ActiveEnterTimestamp | cut -d= -f2)
+    local raw_name=$(echo "$props" | grep Description | sed 's/Description=Fire Service: //')
+
+    local status_color=$RED
+    [[ "$state" == "active" ]] && status_color=$GREEN
+
+    echo -e "${BOLD}Cockpit:${NC} ${CYAN}$raw_name${NC} [${status_color}$state${NC}]"
+    echo -e "${GREY}PID: $pid | Uptime: $(format_uptime "$start_ts") | Restarts: $restarts${NC}"
+    echo ""
+
+    if [[ "$state" == "active" && "$pid" -gt 0 ]]; then
+      local stats=$(ps -p "$pid" -o %cpu=,rss= 2>/dev/null)
+      if [[ -n "$stats" ]]; then
+        read c m <<< "$stats"
+        local cpu_bar=$(printf "%.0f" "$c")
+        local mem_mb=$(awk "BEGIN {printf \"%.1fMB\", $m/1024}")
+        
+        # Draw CPU Bar
+        echo -n -e "  CPU: ${BOLD}${c}%${NC} ["
+        local filled=$((cpu_bar / 5))
+        [[ $filled -gt 20 ]] && filled=20
+        for ((i=0; i<filled; i++)); do echo -n "█"; done
+        for ((i=filled; i<20; i++)); do echo -n "░"; done
+        echo "]"
+        
+        # Mem info
+        echo -e "  MEM: ${BOLD}${mem_mb}${NC}"
+      fi
+    fi
+
+    echo -e "\n${BOLD}Live Logs:${NC} (last 15 lines)"
+    echo -e "${GREY}--------------------------------------------------${NC}"
+    journalctl -u "$svc_name" -n 15 --no-pager | sed 's/^.*: //' # Strip timestamp/hostname for cleaner view
+    echo -e "${GREY}--------------------------------------------------${NC}"
+    echo -e "${GREY}Press [r] Restart, [s] Stop/Start, [q] Quit${NC}"
+
+    read -t 1 -n 1 key
+    case "$key" in
+      r) systemctl restart "$svc_name"; echo -e "\n${YELLOW}Restarting...${NC}"; sleep 1 ;;
+      s) 
+        if [[ "$state" == "active" ]]; then
+          systemctl stop "$svc_name"
+          echo -e "\n${YELLOW}Stopping...${NC}"
+        else
+          systemctl start "$svc_name"
+          echo -e "\n${GREEN}Starting...${NC}"
+        fi
+        sleep 1 ;;
+      q) printf "\033[?25h"; return ;;
+    esac
+  done
+}
+
+action_logs() {
+  local target="${ARGS[0]}"
+  local subtarget="${ARGS[1]}"
+
+  if [[ "$target" == "clear" ]]; then
+    journalctl --rotate >/dev/null 2>&1
+    journalctl --vacuum-time=1s >/dev/null 2>&1
+    success "System journal logs purged."
+    return
+  fi
+
+  if [[ -z "$target" ]]; then
+    # Tail all fire logs
+    warn "Tailing logs for all fire services..."
+    journalctl -f | grep "${PREFIX}-"
+  else
+    local svc_name=$(resolve_service_name "$target")
+    if [[ -n "$svc_name" ]]; then
+        journalctl -u "$svc_name" -f -n 100
+    else
+        error "Process not found: $target"
+    fi
+  fi
+}
+
+action_limit() {
+  local target="${ARGS[0]}"
+  local mem="${ARGS[1]}"
+  local cpu="${ARGS[2]}"
+  
+  [[ -z "$target" ]] && error "Usage: fire limit <name> <mem> [cpu] (use 'none' to remove limits)" && exit 1
+  
+  local svc_name=$(resolve_service_name "$target")
+  if [[ -n "$svc_name" ]]; then
+      local args=("systemctl" "set-property" "$svc_name")
+      if [[ -n "$mem" && "$mem" != "none" ]]; then 
+          args+=("MemoryMax=$mem" "MemorySwapMax=infinity")
+      else 
+          args+=("MemoryMax=infinity" "MemorySwapMax=infinity")
+      fi
+      if [[ -n "$cpu" && "$cpu" != "none" ]]; then args+=("CPUQuota=$cpu"); else args+=("CPUQuota="); fi
+      "${args[@]}"
+      success "Updated limits for ${svc_name#$PREFIX-}: Mem=${mem:-none}, CPU=${cpu:-none}"
+  else
+      error "Process not found: $target"
+  fi
+}
+
+action_monit() {
+  trap "printf '\033[?25h'; clear; exit" INT TERM
+  printf "\033[?25l" # Hide cursor
+  export MONIT_MODE=1
+  while true; do
+    # Clear screen (portable)
+    printf "\033[2J\033[H"
+    echo -e "${BOLD}Fire Process Manager${NC} — $(date)"
+    action_list
+    echo -e "${GREY}Press Ctrl+C to exit${NC}"
+    sleep 1
+  done
+}
+
+action_tunnel_open() {
+  local port="${ARGS[0]}"
+  local hash=""
+  local map_key=""
+  local url=""
+  local start_ts=""
+
+  validate_tunnel_port "$port" || { error "Usage: fire tunnel open <port>"; exit 1; }
+  local_port_is_reachable "$port" || { error "Nothing is listening on localhost:$port"; exit 1; }
+
+  ensure_tunnel_dir
+
+  # Check if tunnel already active for this port
+  if load_active_tunnel_state "$port"; then
+    success "Tunnel already active on ${CYAN}localhost:$port${NC}"
+    echo -e "  ${ORANGE}🔗${NC} ${YELLOW}${BOLD}URL:${NC} ${CYAN}${BOLD}$TUNNEL_STATE_URL${NC}"
+    echo "$TUNNEL_STATE_URL"
+    return
+  fi
+
+  remove_tunnel_state "$port" 1
+
+  # Generate a random 8-char hex hash
+  hash=$(openssl rand -hex 4 2>/dev/null || cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 8)
+  map_key=$(tunnel_map_key_for_hash "$hash")
+  start_ts=$(date +%s)
+  url=$(generate_tunnel_url "$hash")
+
+  # Register in nginx map and reload.
+  if ! nginx_map_add "$map_key" "$port"; then
+    error "Could not update nginx tunnel map or reload nginx"
+    exit 1
+  fi
+
+  # Persist state (PID=0, no background process)
+  write_tunnel_state "$port" "0" "$url" "" "$start_ts"
+
+  success "Tunnel established for ${CYAN}localhost:$port${NC}"
+  echo -e "  ${ORANGE}🔗${NC} ${YELLOW}${BOLD}URL:${NC} ${CYAN}${BOLD}$url${NC}"
+  echo -e "  ${GREY}🔑${NC} ${GREY}${BOLD}Hash:${NC} ${GREY}$hash${NC}  ${GREY}🚫${NC} ${GREY}${BOLD}Close:${NC} ${GREY}fire tunnel close $port${NC}"
+  echo "$url"
+}
+
+action_tunnel_list() {
+  local any_active=0
+  local current_ts
+  local age="-"
+  local url=""
+  local file=""
+  local status_label=""
+  local status_color="$GREEN"
+  local total=0
+  local active_count=0
+  local pending_count=0
+  local json_mode=0
+  local json_tunnels=()
+
+  for arg in "${ARGS[@]}"; do
+    if [[ "$arg" == "--json" ]]; then
+      json_mode=1
+    fi
+  done
+
+  # Initialize process mapping for tunnels
+  declare -A PID_TO_NAME
+  declare -A PORT_TO_PID
+  if [[ $json_mode -eq 1 ]]; then
+    local units=$(get_fire_units)
+    if [[ -n "$units" ]]; then
+      local line pid id name
+      while read -r line; do
+        if [[ "$line" =~ ^MainPID=(.*)$ ]]; then
+          pid="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ ^Id=(.*)$ ]]; then
+          id="${BASH_REMATCH[1]}"
+          name="$id"
+          if [[ "$id" == "${PREFIX}-"* ]]; then
+            name=${name#"$PREFIX-"}
+            name=${name%.service}
+          else
+            name="${name%.service}"
+          fi
+          if [[ -n "$pid" && "$pid" -gt 0 ]]; then
+            PID_TO_NAME[$pid]="$name"
+          fi
+          pid=""
+        fi
+      done < <(systemctl show $units --property=Id,MainPID 2>/dev/null)
+    fi
+
+    if command -v ss &>/dev/null; then
+      local ss_state ss_recv ss_send ss_local ss_peer ss_proc ss_temp ss_pid
+      while read -r ss_state ss_recv ss_send ss_local ss_peer ss_proc; do
+        [[ "$ss_state" == "State" ]] && continue
+        local port_num="${ss_local##*:}"
+        ss_temp="$ss_proc"
+        while [[ "$ss_temp" =~ pid=([0-9]+) ]]; do
+          ss_pid="${BASH_REMATCH[1]}"
+          PORT_TO_PID[$port_num]="$ss_pid"
+          ss_temp="${ss_temp#*pid=$ss_pid}"
+        done
+      done < <(ss -lntp 2>/dev/null)
+    fi
+  fi
+
+  ensure_tunnel_dir
+  current_ts=$(date +%s)
+
+  shopt -s nullglob
+  local state_files=("$TUNNEL_DIR"/*.env)
+  shopt -u nullglob
+
+  if [[ ${#state_files[@]} -eq 0 ]]; then
+    if [[ $json_mode -eq 1 ]]; then
+      echo '{"tunnels":[],"total":0,"online":0,"pending":0}'
+      return
+    fi
+    echo -e "\n  ${ORANGE}🔗${NC} ${YELLOW}${BOLD}No active tunnels.${NC}\n"
+    return
+  fi
+
+  for file in "${state_files[@]}"; do
+    local port
+    port=$(basename "$file" .env)
+
+    load_active_tunnel_state "$port" || continue
+    any_active=1
+    ((total++))
+    age="-"
+    if [[ "$TUNNEL_STATE_START_TS" =~ ^[0-9]+$ ]]; then
+      age=$(format_elapsed "$((current_ts - TUNNEL_STATE_START_TS))")
+    fi
+    
+    local hash=""
+    hash=$(tunnel_hash_from_url "$TUNNEL_STATE_URL" 2>/dev/null || nginx_map_get_hash_for_port "$port" 2>/dev/null || echo "")
+
+    local raw_status="PENDING"
+    if [[ -n "$TUNNEL_STATE_URL" ]]; then
+      raw_status="ONLINE"
+      status_label="⚡ ONLINE"
+      status_color="$GREEN"
+      url="${CYAN}${TUNNEL_STATE_URL}${NC}"
+      ((active_count++))
+    else
+      status_label="⏳ PENDING"
+      status_color="$ORANGE"
+      url="${ORANGE}waiting for URL...${NC}"
+      ((pending_count++))
+    fi
+
+    local proc_name="-"
+    if [[ $json_mode -eq 1 ]]; then
+      local mapped_pid="${PORT_TO_PID[$port]}"
+      if [[ -n "$mapped_pid" ]]; then
+        if [[ -n "${PID_TO_NAME[$mapped_pid]}" ]]; then
+          proc_name="${PID_TO_NAME[$mapped_pid]}"
+        elif [[ -f "/proc/$mapped_pid/comm" ]]; then
+          proc_name=$(cat "/proc/$mapped_pid/comm" 2>/dev/null || echo "-")
+        fi
+      fi
+    fi
+
+    if [[ $json_mode -eq 1 ]]; then
+      json_tunnels+=("{\"port\":$port,\"pid\":${TUNNEL_STATE_PID:-0},\"age\":\"$age\",\"status\":\"$raw_status\",\"hash\":\"$hash\",\"url\":\"$TUNNEL_STATE_URL\",\"name\":\"$proc_name\"}")
+    else
+      if [[ $((total - 1)) -eq 0 ]]; then
+        echo -e "\n  ${ORANGE}${BOLD}🔗 Active Fire Tunnels${NC}"
+        echo -e "  ${GREY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        printf "  ${GREY}${BOLD}%-8s %-10s %-10s %s${NC}\n" "PORT" "AGE" "STATUS" "URL"
+      fi
+      printf "  ${YELLOW}%-8s${NC} ${ORANGE}%-10s${NC} ${status_color}%-10s${NC} %b\n" \
+        "$TUNNEL_STATE_PORT" "$age" "$status_label" "$url"
+    fi
+  done
+
+  if [[ $any_active -eq 0 ]]; then
+    if [[ $json_mode -eq 1 ]]; then
+      echo '{"tunnels":[],"total":0,"online":0,"pending":0}'
+      return
+    fi
+    echo -e "\n  ${ORANGE}🔗${NC} ${YELLOW}${BOLD}No active tunnels.${NC}\n"
+    return
+  fi
+
+  if [[ $json_mode -eq 1 ]]; then
+    local old_ifs="$IFS"
+    IFS=","
+    local tunnels_json="${json_tunnels[*]}"
+    IFS="$old_ifs"
+    echo "{\"tunnels\":[$tunnels_json],\"total\":$total,\"online\":$active_count,\"pending\":$pending_count}"
+  else
+    echo -e "  ${GREY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "  ${YELLOW}${BOLD}Total:${NC} ${YELLOW}${BOLD}$total${NC}   ${GREEN}${BOLD}Online:${NC} ${GREEN}${BOLD}$active_count${NC}   ${ORANGE}${BOLD}Pending:${NC} ${ORANGE}${BOLD}$pending_count${NC}"
+    echo ""
+  fi
+}
+
+action_tunnel_close() {
+  local port="${ARGS[0]}"
+  local hash=""
+  local map_key=""
+
+  validate_tunnel_port "$port" || { error "Usage: fire tunnel close <port>"; exit 1; }
+
+  if read_tunnel_state "$port"; then
+    hash=$(tunnel_hash_from_url "$TUNNEL_STATE_URL" || nginx_map_get_hash_for_port "$port")
+    map_key=$(nginx_map_key_for_port "$port")
+    [[ -z "$map_key" && -n "$hash" ]] && map_key=$(tunnel_map_key_for_hash "$hash")
+    if [[ -n "$map_key" ]] && ! nginx_map_remove "$map_key"; then
+      error "Could not update nginx tunnel map or reload nginx"
+      exit 1
+    fi
+    remove_tunnel_state "$port" 1
+    success "Tunnel on ${CYAN}localhost:$port${NC} has been ${RED}closed${NC}"
+    return
+  fi
+
+  # Fallback: try to find hash in nginx map directly
+  map_key=$(nginx_map_key_for_port "$port")
+  if [[ -n "$map_key" ]]; then
+    if ! nginx_map_remove "$map_key"; then
+      error "Could not update nginx tunnel map or reload nginx"
+      exit 1
+    fi
+    success "Tunnel on ${CYAN}localhost:$port${NC} has been ${RED}closed${NC}"
+    return
+  fi
+
+  warn "No active tunnel found on localhost:$port"
+}
+
+show_tunnel_help() {
+  echo -e "  ${ORANGE}${BOLD}🔗 Fire Tunnel Manager${NC}"
+  echo -e "  ${GREY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo -e "  ${CYAN}${BOLD}Usage:${NC} fire tunnel ${YELLOW}<command>${NC} [port]"
+  echo ""
+  echo -e "  ${YELLOW}${BOLD}Commands:${NC}"
+  echo -e "    ${GREEN}open${NC}  ${YELLOW}<port>${NC}   ⚡ Open a temporary tunnel for ${CYAN}localhost:<port>${NC}"
+  echo -e "    ${GREEN}list${NC} [--json]      📋 List all active fire tunnels in JSON format"
+  echo -e "    ${GREEN}close${NC} ${YELLOW}<port>${NC}   🚫 Close a running tunnel"
+  echo ""
+  echo -e "  ${YELLOW}${BOLD}Examples:${NC}"
+  echo -e "    ${GREY}fire tunnel open 3000${NC}"
+  echo -e "    ${GREY}fire tunnel list${NC}"
+  echo -e "    ${GREY}fire tunnel close 3000${NC}"
+  echo ""
+}
+
+action_tunnel() {
+  case "$TUNNEL_CMD" in
+    open)
+      action_tunnel_open
+      ;;
+    list|ls)
+      action_tunnel_list
+      ;;
+    close|stop)
+      action_tunnel_close
+      ;;
+    help|--help|-h|"")
+      show_tunnel_help
+      ;;
+    *)
+      error "Unknown tunnel command: $TUNNEL_CMD"
+      show_tunnel_help
+      exit 1
+      ;;
+  esac
+}
+
+action_dashboard() {
+  # If we have the python TUI and textual is installed, use it
+  if [[ -f "/usr/local/bin/fire_tui.py" && -x "$VENV/bin/python" ]]; then
+    # Loop to allow returning from live views or info screens
+    while true; do
+        rm -f /tmp/fire_tui_next_cmd
+        "$VENV/bin/python" /usr/local/bin/fire_tui.py
+        
+        if [[ -f /tmp/fire_tui_next_cmd ]]; then
+            local next_cmd=$(cat /tmp/fire_tui_next_cmd)
+            rm -f /tmp/fire_tui_next_cmd
+            
+            # Execute the command
+            if [[ "$next_cmd" == "fire "* ]]; then
+                local subcmd=$(echo "$next_cmd" | cut -d' ' -f2)
+                local target=$(echo "$next_cmd" | cut -d' ' -f3)
+                
+                case "$subcmd" in
+                    live) ARGS=("$target"); action_live ;;
+                    info|show) ARGS=("$target"); action_info; echo -e "\nPress Enter to return..."; read ;;
+                    *) eval "$next_cmd" ;;
+                esac
+            else
+                eval "$next_cmd"
+            fi
+        else
+            # User quit the TUI normally
+            clear
+            exit 0
+        fi
+    done
+  fi
+
+  # Fallback Dashboard (Old Version)
+  local first_run=1
+  while true; do
+    clear
+    if [[ $first_run -eq 1 ]]; then
+      animate_dashboard_intro
+      first_run=0
+    else
+      print_dashboard_banner hot
+    fi
+    
+    DASHBOARD_MODE=1 action_list
+    print_dashboard_snapshot_line
+    print_dashboard_tunnel_line
+    echo ""
+    
+    echo -e "${BOLD}Actions:${NC}"
+    echo -e "  [${GREEN}m${NC}] monit   [${GREEN}l${NC}] list    [${GREEN}s${NC}] stop    [${GREEN}r${NC}] restart"
+    echo -e "  [${GREEN}i${NC}] info    [${GREEN}d${NC}] delete  [${GREEN}v${NC}] live    [${GREEN}x${NC}] doctor"
+    echo -e "  [${GREEN}h${NC}] help    [${GREEN}q${NC}] quit"
+    echo ""
+    read -p ">> " choice
+    
+    case "$choice" in
+      m|monit) action_monit ;;
+      l|list) 
+        echo -n -e "${GREY}Refreshing... ${NC}"
+        sleep 0.2
+        ;;
+      s|stop) 
+        read -p "Name to stop: " target
+        [[ -n "$target" ]] && ARGS=("$target") && action_stop && sleep 1 
+        ;;
+      r|restart) 
+        read -p "Name to restart: " target
+        [[ -n "$target" ]] && ARGS=("$target") && action_restart && sleep 1 
+        ;;
+      i|info|show) 
+        read -p "Name for info: " target
+        [[ -n "$target" ]] && ARGS=("$target") && action_info && read -p "Press Enter to continue..." 
+        ;;
+      v|live) 
+        read -p "Name for live cockpit: " target
+        [[ -n "$target" ]] && ARGS=("$target") && action_live
+        ;;
+      x|doctor) action_doctor; read -p "Press Enter to continue..." ;;
+      d|delete|del|rm) 
+        read -p "Name to delete: " target
+        [[ -n "$target" ]] && ARGS=("$target") && action_delete && sleep 1 
+        ;;
+      h|help) show_help; read -p "Press Enter to continue..." ;;
+      q|quit|exit) clear; exit 0 ;;
+      *) warn "Invalid choice: $choice"; sleep 1 ;;
+    esac
+  done
+}
+
+show_help() {
+  echo "Usage: fire <command> [options]"
+  echo ""
+  echo "Commands:"
+  echo "  start <script>   Start a script (py, js, sh) as a service"
+  echo "    --name <name>    Set a custom name"
+  echo "    --env KEY=VAL    Set environment variable (repeatable)"
+  echo "    -- <args>        Pass arguments to the script"
+  echo "  list             List all managed processes
+  status [--json]  Show status summary in JSON format"
+  echo "  stop <name|all>  Stop a process"
+  echo "  restart <name>   Restart a process"
+  echo "  delete <name|--stopped> Delete a process or all stopped processes"
+  echo "  info <name|file> Show detailed information about a process"
+  echo "  show <name|file> Alias for info"
+  echo "  live <name>      Open live cockpit for a process"
+  echo "  doctor           Run system health diagnostics"
+  echo "  logs [name]      Stream logs"
+  echo "  monit            Real-time monitoring dashboard"
+  echo "  migrate          Migrate legacy fire services to new format"
+  echo "  tunnel open <port>  Open a tunnel at https://<hash>${TUNNEL_HOST_SUFFIX}.${TUNNEL_BASE_DOMAIN}"
+  echo "  tunnel list         List active temporary tunnels"
+  echo "  tunnel close <port> Close a temporary tunnel"
+  echo ""
+  echo "Examples:"
+  echo "  fire start server.py --name api --port 8080"
+  echo "  fire start app.js --env NODE_ENV=production"
+  echo "  fire tunnel open 3000"
+}
+
+# ================== ROUTING ==================
+if command_needs_root "$CMD"; then
+  check_root
+fi
+
+TUNNEL_CMD=""
+if [[ "$CMD" == "tunnel" ]]; then
+  if [[ $# -gt 0 ]]; then
+    TUNNEL_CMD="$1"
+    shift
+  fi
+  ARGS=("$@")
+else
+  # Handle implied start if first arg is a file
+  if [[ -f "$CMD" ]]; then
+     ARGS+=("$CMD")
+     CMD="start"
+  fi
+
+  parse_args "$@"
+fi
+
+case "$CMD" in
+  start|create)  action_start ;;
+  list|ls|status) action_list ;;
+  stop)          action_stop ;;
+  restart)       action_restart ;;
+  delete|del|rm) action_delete ;;
+  info|show)     action_info ;;
+  live)          action_live ;;
+  doctor)        action_doctor ;;
+  logs|log)      action_logs ;;
+  limit)         action_limit ;;
+  monit)         action_monit ;;
+  migrate)       action_migrate ;;
+  tunnel)        action_tunnel ;;
+  help|--help|-h) show_help ;;
+  *)
+    if [[ -z "$CMD" ]]; then
+      action_dashboard
+    else
+      error "Unknown command: $CMD"
+      show_help
+    fi
+    ;;
+esac

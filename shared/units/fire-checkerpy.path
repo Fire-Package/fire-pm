@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch /root/checker/checker.py for checker.py
+
+[Path]
+PathModified=/root/checker/checker.py
+Unit=fire-reload@fire-checkerpy.service.service
+
+[Install]
+WantedBy=multi-user.target
