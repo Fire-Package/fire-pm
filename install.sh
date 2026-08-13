@@ -28,7 +28,7 @@ echo ""
 
 # 1. Root Check
 if [[ $EUID -ne 0 ]]; then
-   echo -e "${RED}✖ This installer must be run as root.${NC}"
+   echo -e "${RED}✖ This installer must be run as root (use: sudo ./install.sh)${NC}"
    exit 1
 fi
 
@@ -52,6 +52,8 @@ chmod +x /usr/local/bin/fire_tui.py
 # Check Python environment for textual
 if command -v pip3 &>/dev/null; then
   pip3 install textual &>/dev/null || true
+elif command -v pip &>/dev/null; then
+  pip install textual &>/dev/null || true
 elif [[ -x "/root/myenv/bin/pip" ]]; then
   /root/myenv/bin/pip install textual &>/dev/null || true
 fi
@@ -70,12 +72,15 @@ echo -e "    ${GREEN}✔${NC} Systemd unit templates registered"
 echo -e "${CYAN}4/4 Building Web UI Dashboard & API...${NC}"
 if [[ -d "${SCRIPT_DIR}/web" ]]; then
   cd "${SCRIPT_DIR}/web"
+  
   if command -v pnpm &>/dev/null; then
-    pnpm install
+    pnpm install --prod=false
     pnpm build
   elif command -v npm &>/dev/null; then
     npm install
     npm run build
+  else
+    echo -e "    ${YELLOW}⚠ Node.js/pnpm not found. Please install Node.js (v18+) to use the Web UI.${NC}"
   fi
   chmod +x "${SCRIPT_DIR}/web/start.sh"
   echo -e "    ${GREEN}✔${NC} Web UI built successfully"
