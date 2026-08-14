@@ -553,6 +553,7 @@ animation_pause() {
 get_fire_units() {
   {
     systemctl list-units --all --no-legend --plain "${PREFIX}-*.service" 2>/dev/null | awk '{print $1}' | grep '\.service$' | grep -v "${PREFIX}-reload@"
+    ls -1 ${SYSTEM_DIR}/${PREFIX}-*.service 2>/dev/null | xargs -n1 basename 2>/dev/null | grep -v "${PREFIX}-reload@"
     local legacy_list=$(grep -l "fire-managed Python Service" /etc/systemd/system/*.service 2>/dev/null)
     [[ -n "$legacy_list" ]] && echo "$legacy_list" | xargs -n1 basename | grep -v "${PREFIX}-reload@"
   } | sort -u
@@ -788,11 +789,18 @@ action_start() {
   fi
 
   # Construct Command
+  local resolved_file=""
+  if [[ "$file" == /* ]]; then
+    resolved_file="$file"
+  else
+    resolved_file="$WORKDIR/$file"
+  fi
+
   local full_exec=""
   if [[ -n "$exec_cmd" ]]; then
-    full_exec="$exec_cmd $WORKDIR/$file"
+    full_exec="$exec_cmd $resolved_file"
   else
-    full_exec="$WORKDIR/$file"
+    full_exec="$resolved_file"
   fi
 
   # Append Passthrough Args
