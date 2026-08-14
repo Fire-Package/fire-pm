@@ -5,21 +5,27 @@
 
 ---
 
-## ⚡ Quick Start (1-Command Install)
+## ⚡ 1-Liner Quick Install
 
-Clone the repository and run the automated installer:
+Run the one-liner command in your Linux terminal to install and set up Fire PM:
 
+```bash
+curl -fsSL https://raw.githubusercontent.com/Fire-Package/fire-pm/main/install.sh | sudo bash
+```
+
+*Or via Git Clone:*
 ```bash
 git clone https://github.com/Fire-Package/fire-pm.git
 cd fire-pm
 sudo ./install.sh
 ```
 
-This installs:
-* `fire` CLI binary to `/usr/local/bin/fire`
-* Interactive Python TUI dashboard to `/usr/local/bin/fire_tui.py`
-* Systemd auto-reload units
-* Pre-built developer Web UI
+This single command:
+1. Verifies/installs system prerequisites (`systemd`, `procps`, `iproute2`, `python3`, `nodejs`, `pnpm`).
+2. Installs the `fire` CLI binary to `/usr/local/bin/fire`.
+3. Sets up the interactive Python Terminal UI (`fire_tui.py`) and dependencies.
+4. Registers systemd auto-reload template units.
+5. Builds and configures the production Web UI dashboard.
 
 ---
 
@@ -69,9 +75,9 @@ fire tunnel close 3000
 ```
 
 ### 4. Developer Web Dashboard & API
-Start the Web UI as a managed service:
+Start the Web UI as a managed background service:
 ```bash
-fire start $(pwd)/web/start.sh --name fire-web --env PORT=3000
+fire start /opt/fire-pm/web/start.sh --name fire-web --env PORT=3000
 ```
 Open `http://localhost:3000` in your browser. On your first visit, set your master password to access:
 * Real-time process metrics table with 3-second live updates
@@ -90,7 +96,7 @@ fire-pm/
 ├── web/                  # Full-stack Next.js Web UI & REST/SSE API
 ├── tui/                  # Python Textual interactive terminal dashboard
 ├── shared/               # Shared systemd templates, Nginx configs, examples
-├── install.sh            # Automated Linux installer
+├── install.sh            # 1-liner automated Linux installer
 ├── AGENT.md              # Architecture reference for AI coding agents
 └── README.md             # Documentation & guide
 ```

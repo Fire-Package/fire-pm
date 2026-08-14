@@ -3,6 +3,9 @@ set -e
 
 # ==============================================================================
 # Fire PM — Automated Installer & System Prerequisite Checker
+# Supports both:
+#   1) Standalone execution: sudo ./install.sh
+#   2) One-liner curl pipe:  curl -fsSL <url> | sudo bash
 # ==============================================================================
 
 GREEN='\033[0;32m'
@@ -28,11 +31,14 @@ echo ""
 
 # 1. Root Check
 if [[ $EUID -ne 0 ]]; then
-   echo -e "${RED}✖ This installer must be run as root (use: sudo ./install.sh)${NC}"
+   echo -e "${RED}✖ This installer must be run as root (use: sudo ./install.sh or curl ... | sudo bash)${NC}"
    exit 1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR=""
+if [[ -n "${BASH_SOURCE[0]}" && -f "${BASH_SOURCE[0]}" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 
 # Package manager helper
 install_package() {
@@ -69,7 +75,7 @@ if ! command -v systemctl &>/dev/null; then
 fi
 echo -e "  ${GREEN}✔${NC} systemd / systemctl is active"
 
-# 3. Check core CLI utilities (procps for ps, iproute2 for ss)
+# 3. Check core CLI utilities (procps for ps, iproute2 for ss, git, curl)
 if ! command -v ps &>/dev/null; then
   echo -e "  ${YELLOW}Installing procps (ps)...${NC}"
   install_package "procps"
@@ -78,6 +84,14 @@ fi
 if ! command -v ss &>/dev/null; then
   echo -e "  ${YELLOW}Installing iproute2 (ss)...${NC}"
   install_package "iproute2"
+fi
+
+if ! command -v curl &>/dev/null; then
+  install_package "curl"
+fi
+
+if ! command -v git &>/dev/null; then
+  install_package "git"
 fi
 
 # 4. Check Python 3 and pip
@@ -110,19 +124,35 @@ fi
 echo -e "  ${GREEN}✔${NC} System dependencies verified"
 echo ""
 
+# Determine source directory (local clone or pull into /opt/fire-pm)
+INSTALL_SOURCE_DIR=""
+if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/app/fire" ]]; then
+  INSTALL_SOURCE_DIR="${SCRIPT_DIR}"
+else
+  TARGET_OPT_DIR="/opt/fire-pm"
+  echo -e "${CYAN}Setting up Fire PM repository in ${TARGET_OPT_DIR}...${NC}"
+  mkdir -p /opt
+  if [[ -d "${TARGET_OPT_DIR}/.git" ]]; then
+    git -C "${TARGET_OPT_DIR}" pull --rebase || true
+  else
+    git clone https://github.com/Fire-Package/fire-pm.git "${TARGET_OPT_DIR}"
+  fi
+  INSTALL_SOURCE_DIR="${TARGET_OPT_DIR}"
+fi
+
 # 7. Install CLI binary
 echo -e "${CYAN}1/4 Installing Fire CLI engine...${NC}"
-cp "${SCRIPT_DIR}/app/fire" /usr/local/bin/fire
+cp "${INSTALL_SOURCE_DIR}/app/fire" /usr/local/bin/fire
 chmod +x /usr/local/bin/fire
-if [[ -f "${SCRIPT_DIR}/app/ff-service" ]]; then
-  cp "${SCRIPT_DIR}/app/ff-service" /usr/local/bin/ff-service
+if [[ -f "${INSTALL_SOURCE_DIR}/app/ff-service" ]]; then
+  cp "${INSTALL_SOURCE_DIR}/app/ff-service" /usr/local/bin/ff-service
   chmod +x /usr/local/bin/ff-service
 fi
 echo -e "    ${GREEN}✔${NC} Fire CLI installed to /usr/local/bin/fire"
 
 # 8. Install TUI
 echo -e "${CYAN}2/4 Installing Terminal UI (TUI)...${NC}"
-cp "${SCRIPT_DIR}/tui/fire_tui.py" /usr/local/bin/fire_tui.py
+cp "${INSTALL_SOURCE_DIR}/tui/fire_tui.py" /usr/local/bin/fire_tui.py
 chmod +x /usr/local/bin/fire_tui.py
 
 # Install python textual library
@@ -138,16 +168,16 @@ echo -e "    ${GREEN}✔${NC} Fire TUI installed to /usr/local/bin/fire_tui.py"
 # 9. Install Systemd templates
 echo -e "${CYAN}3/4 Registering Systemd templates...${NC}"
 mkdir -p /etc/systemd/system /etc/fire-pm
-if [[ -f "${SCRIPT_DIR}/shared/units/fire-reload@.service" ]]; then
-  cp "${SCRIPT_DIR}/shared/units/fire-reload@.service" /etc/systemd/system/
+if [[ -f "${INSTALL_SOURCE_DIR}/shared/units/fire-reload@.service" ]]; then
+  cp "${INSTALL_SOURCE_DIR}/shared/units/fire-reload@.service" /etc/systemd/system/
 fi
 systemctl daemon-reload
 echo -e "    ${GREEN}✔${NC} Systemd unit templates registered"
 
 # 10. Build Web UI
 echo -e "${CYAN}4/4 Building Web UI Dashboard & API...${NC}"
-if [[ -d "${SCRIPT_DIR}/web" ]]; then
-  cd "${SCRIPT_DIR}/web"
+if [[ -d "${INSTALL_SOURCE_DIR}/web" ]]; then
+  cd "${INSTALL_SOURCE_DIR}/web"
   
   if command -v pnpm &>/dev/null; then
     pnpm install --prod=false
@@ -158,7 +188,7 @@ if [[ -d "${SCRIPT_DIR}/web" ]]; then
   else
     echo -e "    ${YELLOW}⚠ Node.js not found. Install Node.js (v18+) to run the Web UI.${NC}"
   fi
-  chmod +x "${SCRIPT_DIR}/web/start.sh"
+  chmod +x "${INSTALL_SOURCE_DIR}/web/start.sh"
   echo -e "    ${GREEN}✔${NC} Web UI built successfully"
 fi
 
@@ -173,5 +203,5 @@ echo -e "    ${YELLOW}fire tunnel open <p>${NC} — Expose local port via revers
 echo -e "    ${YELLOW}fire doctor${NC}         — Run system diagnostics"
 echo ""
 echo -e "  ${BOLD}Start Web UI Dashboard:${NC}"
-echo -e "    ${CYAN}fire start ${SCRIPT_DIR}/web/start.sh --name fire-web --env PORT=3000${NC}"
+echo -e "    ${CYAN}fire start ${INSTALL_SOURCE_DIR}/web/start.sh --name fire-web --env PORT=3000${NC}"
 echo ""
