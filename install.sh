@@ -15,6 +15,8 @@ RED='\033[0;31m'
 BOLD='\033[1m'
 NC='\033[0m'
 
+NODE_VERSION="22.16.0"
+
 echo -e "${CYAN}${BOLD}"
 echo "    ▄████████  ▄█  ███▄▄▄▄      ▄████████ "
 echo "   ███    ███ ███  ███▀▀▀██▄   ███    ███ "
@@ -75,7 +77,7 @@ if ! command -v systemctl &>/dev/null; then
 fi
 echo -e "  ${GREEN}✔${NC} systemd / systemctl is active"
 
-# 3. Check core CLI utilities (procps for ps, iproute2 for ss, git, curl)
+# 3. Check core CLI utilities
 if ! command -v ps &>/dev/null; then
   echo -e "  ${YELLOW}Installing procps (ps)...${NC}"
   install_package "procps"
@@ -94,6 +96,10 @@ if ! command -v git &>/dev/null; then
   install_package "git"
 fi
 
+if ! command -v tar &>/dev/null; then
+  install_package "tar"
+fi
+
 # 4. Check Python 3 and pip
 if ! command -v python3 &>/dev/null; then
   echo -e "  ${YELLOW}Installing python3...${NC}"
@@ -106,46 +112,51 @@ if ! command -v pip3 &>/dev/null && ! command -v pip &>/dev/null; then
 fi
 
 # 5. Check Node.js >= 22 (required by pnpm and Next.js)
+#    Uses official Node.js binary tarball — works on any Linux, no repo setup needed.
 NEED_NODE=false
 if ! command -v node &>/dev/null; then
   NEED_NODE=true
 else
   NODE_MAJOR=$(node -v 2>/dev/null | sed 's/^v//' | cut -d. -f1)
   if [[ -z "$NODE_MAJOR" || "$NODE_MAJOR" -lt 22 ]]; then
-    echo -e "  ${YELLOW}⚠ Node.js v${NODE_MAJOR:-unknown} detected, but v22+ is required.${NC}"
+    echo -e "  ${YELLOW}⚠ Node.js v${NODE_MAJOR:-unknown} detected, but v22+ is required. Upgrading...${NC}"
     NEED_NODE=true
   fi
 fi
 
 if [[ "$NEED_NODE" == "true" ]]; then
-  echo -e "  ${CYAN}Installing Node.js v22 LTS...${NC}"
-  if command -v apt-get &>/dev/null; then
-    # NodeSource setup for Debian/Ubuntu
-    if ! command -v curl &>/dev/null; then install_package "curl"; fi
-    install_package "ca-certificates"
-    install_package "gnupg"
-    mkdir -p /etc/apt/keyrings
-    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg 2>/dev/null || true
-    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
-    apt-get update &>/dev/null
-    DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs &>/dev/null
-  elif command -v dnf &>/dev/null; then
-    dnf module enable -y nodejs:22 &>/dev/null || true
-    dnf install -y nodejs &>/dev/null || true
-  elif command -v yum &>/dev/null; then
-    curl -fsSL https://rpm.nodesource.com/setup_22.x | bash - &>/dev/null
-    yum install -y nodejs &>/dev/null || true
-  elif command -v pacman &>/dev/null; then
-    pacman -Sy --noconfirm nodejs npm &>/dev/null || true
-  elif command -v apk &>/dev/null; then
-    apk add nodejs npm &>/dev/null || true
-  fi
+  echo -e "  ${CYAN}Installing Node.js v${NODE_VERSION} (official binary)...${NC}"
 
-  if command -v node &>/dev/null; then
-    echo -e "  ${GREEN}✔${NC} Node.js $(node -v) installed"
-  else
-    echo -e "  ${RED}✖ Failed to install Node.js v22. Please install it manually:${NC}"
-    echo -e "    https://nodejs.org/en/download"
+  ARCH=$(uname -m)
+  case "$ARCH" in
+    x86_64)  NODE_ARCH="x64" ;;
+    aarch64) NODE_ARCH="arm64" ;;
+    armv7l)  NODE_ARCH="armv7l" ;;
+    *)
+      echo -e "  ${RED}✖ Unsupported architecture: ${ARCH}${NC}"
+      echo -e "    Please install Node.js v22+ manually: https://nodejs.org/en/download"
+      ;;
+  esac
+
+  if [[ -n "$NODE_ARCH" ]]; then
+    NODE_TARBALL="node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz"
+    NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/${NODE_TARBALL}"
+
+    TMP_DIR=$(mktemp -d)
+    if curl -fsSL "$NODE_URL" -o "${TMP_DIR}/${NODE_TARBALL}"; then
+      tar -xJf "${TMP_DIR}/${NODE_TARBALL}" -C "${TMP_DIR}"
+      cp -rf "${TMP_DIR}/node-v${NODE_VERSION}-linux-${NODE_ARCH}"/bin/* /usr/local/bin/
+      cp -rf "${TMP_DIR}/node-v${NODE_VERSION}-linux-${NODE_ARCH}"/lib/* /usr/local/lib/ 2>/dev/null || true
+      cp -rf "${TMP_DIR}/node-v${NODE_VERSION}-linux-${NODE_ARCH}"/include/* /usr/local/include/ 2>/dev/null || true
+      cp -rf "${TMP_DIR}/node-v${NODE_VERSION}-linux-${NODE_ARCH}"/share/* /usr/local/share/ 2>/dev/null || true
+      rm -rf "${TMP_DIR}"
+      hash -r
+      echo -e "  ${GREEN}✔${NC} Node.js $(node -v) installed to /usr/local/bin/node"
+    else
+      rm -rf "${TMP_DIR}"
+      echo -e "  ${RED}✖ Failed to download Node.js v${NODE_VERSION}.${NC}"
+      echo -e "    Please install manually: https://nodejs.org/en/download"
+    fi
   fi
 fi
 
@@ -199,8 +210,6 @@ if command -v pip3 &>/dev/null; then
   pip3 install textual &>/dev/null || pip3 install --break-system-packages textual &>/dev/null || true
 elif command -v pip &>/dev/null; then
   pip install textual &>/dev/null || true
-elif [[ -x "/root/myenv/bin/pip" ]]; then
-  /root/myenv/bin/pip install textual &>/dev/null || true
 fi
 echo -e "    ${GREEN}✔${NC} Fire TUI installed to /usr/local/bin/fire_tui.py"
 
@@ -225,7 +234,7 @@ if [[ -d "${INSTALL_SOURCE_DIR}/web" ]]; then
     npm install
     npm run build
   else
-    echo -e "    ${YELLOW}⚠ Node.js not found. Install Node.js (v18+) to run the Web UI.${NC}"
+    echo -e "    ${YELLOW}⚠ Node.js not found. Install Node.js (v22+) to run the Web UI.${NC}"
   fi
   chmod +x "${INSTALL_SOURCE_DIR}/web/start.sh"
   echo -e "    ${GREEN}✔${NC} Web UI built successfully"
