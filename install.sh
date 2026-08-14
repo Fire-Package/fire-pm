@@ -105,20 +105,59 @@ if ! command -v pip3 &>/dev/null && ! command -v pip &>/dev/null; then
   install_package "python3-pip"
 fi
 
-# 5. Check Node.js (for Web UI)
+# 5. Check Node.js >= 22 (required by pnpm and Next.js)
+NEED_NODE=false
 if ! command -v node &>/dev/null; then
-  echo -e "  ${YELLOW}Node.js not detected.${NC}"
+  NEED_NODE=true
+else
+  NODE_MAJOR=$(node -v 2>/dev/null | sed 's/^v//' | cut -d. -f1)
+  if [[ -z "$NODE_MAJOR" || "$NODE_MAJOR" -lt 22 ]]; then
+    echo -e "  ${YELLOW}⚠ Node.js v${NODE_MAJOR:-unknown} detected, but v22+ is required.${NC}"
+    NEED_NODE=true
+  fi
+fi
+
+if [[ "$NEED_NODE" == "true" ]]; then
+  echo -e "  ${CYAN}Installing Node.js v22 LTS...${NC}"
   if command -v apt-get &>/dev/null; then
-    echo -e "  ${CYAN}Attempting to install Node.js via apt...${NC}"
-    install_package "nodejs"
-    install_package "npm"
+    # NodeSource setup for Debian/Ubuntu
+    if ! command -v curl &>/dev/null; then install_package "curl"; fi
+    install_package "ca-certificates"
+    install_package "gnupg"
+    mkdir -p /etc/apt/keyrings
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg 2>/dev/null || true
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
+    apt-get update &>/dev/null
+    DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs &>/dev/null
+  elif command -v dnf &>/dev/null; then
+    dnf module enable -y nodejs:22 &>/dev/null || true
+    dnf install -y nodejs &>/dev/null || true
+  elif command -v yum &>/dev/null; then
+    curl -fsSL https://rpm.nodesource.com/setup_22.x | bash - &>/dev/null
+    yum install -y nodejs &>/dev/null || true
+  elif command -v pacman &>/dev/null; then
+    pacman -Sy --noconfirm nodejs npm &>/dev/null || true
+  elif command -v apk &>/dev/null; then
+    apk add nodejs npm &>/dev/null || true
+  fi
+
+  if command -v node &>/dev/null; then
+    echo -e "  ${GREEN}✔${NC} Node.js $(node -v) installed"
+  else
+    echo -e "  ${RED}✖ Failed to install Node.js v22. Please install it manually:${NC}"
+    echo -e "    https://nodejs.org/en/download"
   fi
 fi
 
 # 6. Check pnpm
-if command -v npm &>/dev/null && ! command -v pnpm &>/dev/null; then
+if command -v node &>/dev/null && ! command -v pnpm &>/dev/null; then
   echo -e "  ${CYAN}Installing pnpm package manager...${NC}"
-  npm install -g pnpm &>/dev/null || true
+  if command -v corepack &>/dev/null; then
+    corepack enable &>/dev/null || true
+    corepack prepare pnpm@latest --activate &>/dev/null || npm install -g pnpm &>/dev/null || true
+  else
+    npm install -g pnpm &>/dev/null || true
+  fi
 fi
 
 echo -e "  ${GREEN}✔${NC} System dependencies verified"
