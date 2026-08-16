@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AuthService } from "@/lib/services/auth.service";
-import { AUTH_COOKIE_NAME, CSRF_COOKIE_NAME } from "@/lib/auth";
+import { AUTH_COOKIE_NAME, CSRF_COOKIE_NAME, checkRateLimit } from "@/lib/auth";
 import { errorResponse } from "@/lib/api-helper";
 
 export async function POST(req: NextRequest) {
   try {
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "127.0.0.1";
+    const allowed = checkRateLimit(`login:${ip}`, 5, 60000);
+    if (!allowed) {
+      return errorResponse("Too many login attempts. Please wait 1 minute before trying again.", 429, "RATE_LIMITED");
+    }
+
     const body = await req.json();
     const { password } = body;
 
