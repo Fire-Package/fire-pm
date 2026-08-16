@@ -5,22 +5,21 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
-  RotateCw,
-  Square,
+  ArrowsClockwise,
+  Stop,
   Play,
-  Sliders,
-  Trash2,
-  Terminal,
+  SlidersHorizontal,
+  Trash,
+  TerminalWindow,
   FileCode,
   Check,
-  AlertCircle,
   Clock,
-  HardDrive,
-  Cpu,
   User,
   Folder,
   Command,
-} from "lucide-react";
+  Pulse,
+  Eye
+} from "@phosphor-icons/react";
 import { Header } from "@/components/Header";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -140,20 +139,20 @@ export default function ProcessDetailPage(props: { params: Promise<{ name: strin
   return (
     <div className="flex-1 flex flex-col min-w-0">
       <Header
-        title={`Process: ${detail?.name || params.name}`}
+        title={`Daemon: ${detail?.name || params.name}`}
         subtitle={detail?.service}
         onRefresh={loadData}
         isRefreshing={isLoading}
       />
 
-      <main className="p-6 md:p-8 space-y-6 max-w-7xl w-full mx-auto">
+      <main className="p-5 sm:p-6 md:p-8 space-y-6 max-w-7xl w-full mx-auto">
         {/* Navigation & Action Bar */}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <Link
             href="/processes"
-            className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors"
+            className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors haptic-btn font-mono"
           >
-            <ArrowLeft className="w-4 h-4" /> Back to Process List
+            <ArrowLeft weight="bold" className="w-3.5 h-3.5" /> Back to daemons
           </Link>
 
           {/* Quick Actions */}
@@ -164,7 +163,7 @@ export default function ProcessDetailPage(props: { params: Promise<{ name: strin
               onClick={() => setConfirmAction("restart")}
               disabled={isActing}
             >
-              <RotateCw className="w-3.5 h-3.5" /> Restart
+              <ArrowsClockwise weight="bold" className={`w-3.5 h-3.5 ${isActing ? "animate-spin" : ""}`} /> Restart
             </Button>
 
             {isOnline ? (
@@ -174,7 +173,7 @@ export default function ProcessDetailPage(props: { params: Promise<{ name: strin
                 onClick={() => setConfirmAction("stop")}
                 disabled={isActing}
               >
-                <Square className="w-3.5 h-3.5 text-rose-400" /> Stop
+                <Stop weight="fill" className="w-3.5 h-3.5 text-rose-400" /> Stop
               </Button>
             ) : (
               <Button
@@ -183,7 +182,7 @@ export default function ProcessDetailPage(props: { params: Promise<{ name: strin
                 onClick={() => setConfirmAction("start")}
                 disabled={isActing}
               >
-                <Play className="w-3.5 h-3.5" /> Start
+                <Play weight="fill" className="w-3.5 h-3.5" /> Start
               </Button>
             )}
 
@@ -192,7 +191,7 @@ export default function ProcessDetailPage(props: { params: Promise<{ name: strin
               variant="secondary"
               onClick={() => setIsLimitsOpen(true)}
             >
-              <Sliders className="w-3.5 h-3.5 text-amber-400" /> Limits
+              <SlidersHorizontal weight="bold" className="w-3.5 h-3.5 text-amber-400" /> Limits
             </Button>
 
             <Button
@@ -201,45 +200,45 @@ export default function ProcessDetailPage(props: { params: Promise<{ name: strin
               onClick={() => setConfirmAction("delete")}
               disabled={isActing}
             >
-              <Trash2 className="w-3.5 h-3.5" /> Delete
+              <Trash weight="bold" className="w-3.5 h-3.5" /> Delete
             </Button>
           </div>
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex items-center gap-2 border-b border-[#1c2230] pb-2">
+        <div className="flex items-center gap-2 border-b border-white/[0.05] pb-2">
           <button
             onClick={() => setActiveTab("overview")}
-            className={`px-4 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer haptic-btn ${
               activeTab === "overview"
-                ? "bg-[#ff5500]/15 text-[#ff5500] border border-[#ff5500]/30"
+                ? "bg-[#ff5500]/15 text-[#ff5500] border border-[#ff5500]/30 font-bold"
                 : "text-slate-400 hover:text-slate-200"
             }`}
           >
-            Overview & Metrics
+            Overview & Telemetry
           </button>
 
           <button
             onClick={() => setActiveTab("logs")}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer haptic-btn ${
               activeTab === "logs"
-                ? "bg-[#ff5500]/15 text-[#ff5500] border border-[#ff5500]/30"
+                ? "bg-[#ff5500]/15 text-[#ff5500] border border-[#ff5500]/30 font-bold"
                 : "text-slate-400 hover:text-slate-200"
             }`}
           >
-            <Terminal className="w-3.5 h-3.5" />
+            <TerminalWindow weight="bold" className="w-3.5 h-3.5" />
             Live Logs
           </button>
 
           <button
             onClick={() => setActiveTab("unit")}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer haptic-btn ${
               activeTab === "unit"
-                ? "bg-[#ff5500]/15 text-[#ff5500] border border-[#ff5500]/30"
+                ? "bg-[#ff5500]/15 text-[#ff5500] border border-[#ff5500]/30 font-bold"
                 : "text-slate-400 hover:text-slate-200"
             }`}
           >
-            <FileCode className="w-3.5 h-3.5" />
+            <FileCode weight="bold" className="w-3.5 h-3.5" />
             Systemd Unit File
           </button>
         </div>
@@ -248,106 +247,121 @@ export default function ProcessDetailPage(props: { params: Promise<{ name: strin
         {activeTab === "overview" && detail && (
           <div className="space-y-6">
             {/* Top Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div className="bg-[#12151e] border border-[#202634] rounded-lg p-4">
-                <div className="text-xs text-slate-400 font-semibold uppercase">Status</div>
-                <div className="mt-1.5">
-                  <StatusBadge status={detail.status} />
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 sm:gap-4">
+              <div className="double-bezel">
+                <div className="double-bezel-inner p-4">
+                  <div className="text-[10px] font-mono text-slate-400 font-bold uppercase tracking-wider">Status</div>
+                  <div className="mt-2">
+                    <StatusBadge status={detail.status} size="sm" />
+                  </div>
                 </div>
               </div>
 
-              <div className="bg-[#12151e] border border-[#202634] rounded-lg p-4">
-                <div className="text-xs text-slate-400 font-semibold uppercase">RAM Usage</div>
-                <div className="text-xl font-bold font-mono text-slate-100 mt-1">
-                  {detail.mem}
+              <div className="double-bezel">
+                <div className="double-bezel-inner p-4">
+                  <div className="text-[10px] font-mono text-slate-400 font-bold uppercase tracking-wider">RAM Usage</div>
+                  <div className="text-xl font-bold font-mono text-slate-100 mt-1">
+                    {detail.mem}
+                  </div>
                 </div>
               </div>
 
-              <div className="bg-[#12151e] border border-[#202634] rounded-lg p-4">
-                <div className="text-xs text-slate-400 font-semibold uppercase">CPU Usage</div>
-                <div className="text-xl font-bold font-mono text-slate-100 mt-1">
-                  {detail.cpu}
+              <div className="double-bezel">
+                <div className="double-bezel-inner p-4">
+                  <div className="text-[10px] font-mono text-slate-400 font-bold uppercase tracking-wider">CPU Usage</div>
+                  <div className="text-xl font-bold font-mono text-slate-100 mt-1">
+                    {detail.cpu}
+                  </div>
                 </div>
               </div>
 
-              <div className="bg-[#12151e] border border-[#202634] rounded-lg p-4">
-                <div className="text-xs text-slate-400 font-semibold uppercase">Uptime</div>
-                <div className="text-xl font-bold font-mono text-emerald-400 mt-1">
-                  {detail.uptime}
+              <div className="double-bezel">
+                <div className="double-bezel-inner p-4">
+                  <div className="text-[10px] font-mono text-slate-400 font-bold uppercase tracking-wider">Uptime</div>
+                  <div className="text-xl font-bold font-mono text-emerald-400 mt-1">
+                    {detail.uptime}
+                  </div>
                 </div>
               </div>
             </div>
 
             {/* Detailed Properties Grid */}
-            <Card title="Process Configuration & Properties">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-8 text-xs font-mono">
-                <div className="flex items-start gap-3">
-                  <Command className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <span className="text-slate-400 block text-[11px] uppercase tracking-wider">Interpreter</span>
-                    <span className="text-slate-200 break-all">{detail.interpreter}</span>
+            <div className="double-bezel">
+              <div className="double-bezel-inner p-5">
+                <div className="pb-4 mb-4 border-b border-white/[0.05]">
+                  <h3 className="text-sm font-bold text-slate-100 font-sans tracking-tight">Process Properties & Runtime Directives</h3>
+                  <p className="text-[11px] text-slate-400 font-mono">Kernel cgroup and process parameters</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-y-3 gap-x-6 text-xs font-mono">
+                  <div className="flex items-start gap-3 p-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+                    <Command weight="bold" className="w-4 h-4 text-[#ff5500] shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-slate-400 block text-[9px] uppercase tracking-wider font-bold">Interpreter</span>
+                      <span className="text-slate-200 break-all">{detail.interpreter}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3 p-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+                    <FileCode weight="bold" className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-slate-400 block text-[9px] uppercase tracking-wider font-bold">Script File</span>
+                      <span className="text-slate-200 break-all">{detail.script}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3 p-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+                    <Folder weight="bold" className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-slate-400 block text-[9px] uppercase tracking-wider font-bold">Working Directory</span>
+                      <span className="text-slate-200 break-all">{detail.workingDirectory}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3 p-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+                    <User weight="bold" className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-slate-400 block text-[9px] uppercase tracking-wider font-bold">Run User</span>
+                      <span className="text-slate-200">{detail.user}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3 p-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+                    <Clock weight="bold" className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-slate-400 block text-[9px] uppercase tracking-wider font-bold">Restarts Count</span>
+                      <span className="text-slate-200">{detail.restarts} times</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3 p-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+                    <TerminalWindow weight="bold" className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-slate-400 block text-[9px] uppercase tracking-wider font-bold">Log Source</span>
+                      <span className="text-slate-200">{detail.logPath}</span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex items-start gap-3">
-                  <FileCode className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <span className="text-slate-400 block text-[11px] uppercase tracking-wider">Script File</span>
-                    <span className="text-slate-200 break-all">{detail.script}</span>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <Folder className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <span className="text-slate-400 block text-[11px] uppercase tracking-wider">Working Directory</span>
-                    <span className="text-slate-200 break-all">{detail.workingDirectory}</span>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <User className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <span className="text-slate-400 block text-[11px] uppercase tracking-wider">Run User</span>
-                    <span className="text-slate-200">{detail.user}</span>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <Clock className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <span className="text-slate-400 block text-[11px] uppercase tracking-wider">Restarts Count</span>
-                    <span className="text-slate-200">{detail.restarts} times</span>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <Terminal className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <span className="text-slate-400 block text-[11px] uppercase tracking-wider">Log Source</span>
-                    <span className="text-slate-200">{detail.logPath}</span>
-                  </div>
+                {/* Toggles (Watchdog & Reload) */}
+                <div className="mt-6 pt-5 border-t border-white/[0.05] flex flex-wrap items-center gap-3">
+                  <Button size="sm" variant="secondary" onClick={handleToggleWatch}>
+                    Toggle Watchdog (Restart=always)
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={handleToggleReload}>
+                    Toggle Hot-Reload (.path unit)
+                  </Button>
                 </div>
               </div>
-
-              {/* Toggles (Watchdog & Reload) */}
-              <div className="mt-6 pt-5 border-t border-[#1c2230] flex flex-wrap items-center gap-4">
-                <Button size="sm" variant="secondary" onClick={handleToggleWatch}>
-                  Toggle Watchdog (Restart=always)
-                </Button>
-                <Button size="sm" variant="secondary" onClick={handleToggleReload}>
-                  Toggle Hot-Reload (.path unit)
-                </Button>
-              </div>
-            </Card>
+            </div>
 
             {/* Inline live log snippet */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-200">Recent Output Logs</h3>
+                <h3 className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-300">Live Output Stream</h3>
                 <button
                   onClick={() => setActiveTab("logs")}
-                  className="text-xs text-[#ff5500] hover:underline"
+                  className="text-xs text-[#ff5500] hover:underline font-semibold font-mono"
                 >
                   View Full Terminal &rarr;
                 </button>
@@ -371,7 +385,7 @@ export default function ProcessDetailPage(props: { params: Promise<{ name: strin
               </h3>
               <Link
                 href={`/processes/${encodeURIComponent(params.name)}/logs`}
-                className="text-xs text-sky-400 hover:underline"
+                className="text-xs text-sky-400 hover:underline font-semibold font-mono"
               >
                 Open Fullscreen View &rarr;
               </Link>
@@ -387,33 +401,34 @@ export default function ProcessDetailPage(props: { params: Promise<{ name: strin
 
         {/* Tab 3: Systemd Unit Editor */}
         {activeTab === "unit" && (
-          <Card
-            title={`Systemd Unit Configuration (${detail?.service})`}
-            subtitle="Directly edit the service unit file and reload the systemd daemon."
-            action={
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={handleSaveUnit}
-                isLoading={isSavingUnit}
-              >
-                <Check className="w-4 h-4" /> Save & Reload Daemon
-              </Button>
-            }
-          >
-            <div className="space-y-4">
+          <div className="double-bezel">
+            <div className="double-bezel-inner p-5 space-y-4">
+              <div className="flex items-center justify-between pb-4 border-b border-white/[0.05]">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-100 font-sans tracking-tight">Systemd Unit Configuration ({detail?.service})</h3>
+                  <p className="text-[11px] text-slate-400 font-mono">Direct daemon configuration file</p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={handleSaveUnit}
+                  isLoading={isSavingUnit}
+                >
+                  <Check weight="bold" className="w-3.5 h-3.5" /> Save & Reload Daemon
+                </Button>
+              </div>
               <textarea
                 value={unitContent}
                 onChange={(e) => setUnitContent(e.target.value)}
                 rows={16}
-                className="w-full bg-[#0b0d13] border border-[#232a3b] rounded-lg p-4 font-mono text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-[#ff5500] leading-relaxed"
+                className="w-full bg-[#06070b] border border-white/[0.06] rounded-xl p-4 font-mono text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-[#ff5500]/70 leading-relaxed"
                 spellCheck={false}
               />
-              <p className="text-xs text-slate-500">
-                Tip: Saving this unit file executes <code className="text-slate-400 font-mono">systemctl daemon-reload</code> automatically.
+              <p className="text-xs text-slate-500 font-mono">
+                Tip: Saving this unit file executes <code className="text-slate-300 font-mono">systemctl daemon-reload</code> automatically.
               </p>
             </div>
-          </Card>
+          </div>
         )}
       </main>
 
