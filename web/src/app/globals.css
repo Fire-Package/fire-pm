@@ -2,73 +2,105 @@
 
 @layer base {
   :root {
-    --bg-substrate: #040507;
-    --bg-bezel-outer: rgba(255, 255, 255, 0.035);
-    --bg-bezel-inner: #090b10;
-    --bg-surface-elevated: #0f121a;
-    --border-hairline: rgba(255, 255, 255, 0.06);
-    --border-highlight: rgba(255, 85, 0, 0.4);
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --text-tertiary: #64748b;
-    --accent-fire: #ff5500;
-    --accent-fire-glow: rgba(255, 85, 0, 0.25);
+    --bg-base: #06080d;
+    --bg-surface: #0a0d14;
+    --bg-surface-elevated: #101522;
+    --bg-card: #0d111a;
+    --bg-card-hover: #131826;
+    --border-subtle: rgba(255, 255, 255, 0.06);
+    --border-muted: rgba(255, 255, 255, 0.1);
+    --border-focus: rgba(255, 85, 0, 0.5);
+    --accent-orange: #ff5500;
+    --accent-orange-glow: rgba(255, 85, 0, 0.3);
+    --text-main: #f1f5f9;
+    --text-muted: #8b9bb4;
+    --text-dim: #54647e;
   }
 
   body {
-    background-color: var(--bg-substrate);
-    color: var(--text-primary);
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    background-color: var(--bg-base);
+    color: var(--text-main);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "tnum";
     min-height: 100dvh;
     overflow-x: hidden;
     background-image: 
-      radial-gradient(ellipse 60% 40% at 50% -10%, rgba(255, 85, 0, 0.07), transparent 70%),
-      radial-gradient(ellipse 40% 30% at 90% 90%, rgba(14, 165, 233, 0.03), transparent 60%);
+      radial-gradient(ellipse 70% 40% at 50% -10%, rgba(255, 85, 0, 0.08), transparent 75%),
+      radial-gradient(ellipse 40% 30% at 100% 100%, rgba(14, 165, 233, 0.03), transparent 70%),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+      linear-gradient(to right, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px;
     background-attachment: fixed;
   }
 }
 
-/* Double-Bezel (Doppelrand) Hardware Architecture */
-.double-bezel {
-  background: var(--bg-bezel-outer);
-  border: 1px solid var(--border-hairline);
-  padding: 0.375rem;
-  border-radius: 1.25rem;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4);
+/* Glassmorphism & High-Tech Panel Containers */
+.telemetry-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.875rem;
+  box-shadow: 0 4px 20px -4px rgba(0, 0, 0, 0.5);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.double-bezel-inner {
-  background: var(--bg-bezel-inner);
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  border-radius: calc(1.25rem - 0.375rem);
-  box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.06);
+.telemetry-panel:hover {
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
-/* Tactile haptic micro-feedback */
-.haptic-btn {
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+.telemetry-card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0) 100%), var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.75rem;
+  box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.35);
+  transition: all 0.2s ease;
 }
-.haptic-btn:active {
+
+.telemetry-card:hover {
+  border-color: rgba(255, 85, 0, 0.25);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px -2px rgba(255, 85, 0, 0.1);
+}
+
+/* Tactile Micro-Interactions */
+.tactile-btn {
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tactile-btn:hover {
+  filter: brightness(1.08);
+}
+
+.tactile-btn:active {
   transform: scale(0.97);
 }
 
-/* Glowing telemetry indicator */
-.telemetry-pulse {
-  box-shadow: 0 0 12px var(--accent-fire-glow);
+/* Glowing Telemetry Indicators */
+.pulse-glow-orange {
+  box-shadow: 0 0 10px var(--accent-orange-glow);
 }
 
-/* Precision technical scrollbar */
+.pulse-glow-emerald {
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.35);
+}
+
+.pulse-glow-rose {
+  box-shadow: 0 0 10px rgba(244, 63, 94, 0.35);
+}
+
+/* Precision Technical Scrollbars */
 ::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
 }
+
 ::-webkit-scrollbar-track {
-  background: #040507;
+  background: var(--bg-base);
 }
+
 ::-webkit-scrollbar-thumb {
-  background: #1c2333;
+  background: #192030;
   border-radius: 9999px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
-  background: #333f5c;
+  background: #2b3650;
 }

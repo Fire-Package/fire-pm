@@ -16,7 +16,7 @@ export const Button: React.FC<ButtonProps> = ({
   ...props
 }) => {
   const baseStyles =
-    "inline-flex items-center justify-center font-semibold rounded-lg transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[#090a0f] disabled:opacity-50 disabled:cursor-not-allowed select-none cursor-pointer btn-tactile";
+    "inline-flex items-center justify-center font-semibold rounded-lg transition-all duration-150 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed select-none cursor-pointer tactile-btn";
 
   const sizeStyles = {
     sm: "px-2.5 py-1 text-xs gap-1.5",
@@ -26,15 +26,15 @@ export const Button: React.FC<ButtonProps> = ({
 
   const variantStyles = {
     primary:
-      "bg-[#ff5500] hover:bg-[#ff6e26] text-white shadow-sm shadow-[#ff5500]/25 focus:ring-[#ff5500] border border-transparent",
+      "bg-[#ff5500] hover:bg-[#ff681a] text-white shadow-sm shadow-[#ff5500]/25 focus:ring-1 focus:ring-[#ff5500] border border-transparent",
     secondary:
-      "bg-[#141926] hover:bg-[#1f2638] text-slate-200 border border-[#20283c] focus:ring-slate-400 shadow-sm",
+      "bg-[#0a0d14] hover:bg-[#121622] text-slate-200 border border-white/[0.08] hover:border-white/[0.15] shadow-sm",
     danger:
-      "bg-rose-600/90 hover:bg-rose-600 text-white shadow-sm shadow-rose-600/25 focus:ring-rose-500 border border-transparent",
+      "bg-rose-600/90 hover:bg-rose-600 text-white shadow-sm shadow-rose-600/25 border border-transparent",
     ghost:
-      "bg-transparent hover:bg-[#141824] text-slate-300 hover:text-white focus:ring-slate-500",
+      "bg-transparent hover:bg-white/[0.04] text-slate-400 hover:text-white",
     outline:
-      "bg-transparent hover:bg-[#141926] text-slate-300 border border-[#20283c] hover:border-slate-500 focus:ring-[#ff5500]",
+      "bg-transparent hover:bg-white/[0.04] text-slate-300 border border-white/[0.08] hover:border-white/[0.15]",
   };
 
   return (

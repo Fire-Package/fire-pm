@@ -3,8 +3,8 @@ import "./globals.css";
 import { ToastProvider } from "@/components/ui/Toast";
 
 export const metadata: Metadata = {
-  title: "Fire PM — Process Manager",
-  description: "Linux process and application management dashboard",
+  title: "Fire PM — Linux Process Supervisor",
+  description: "Real-time Linux daemon orchestration, cgroup telemetry & reverse-proxy tunnels",
 };
 
 export default function RootLayout({
@@ -14,7 +14,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className="antialiased bg-[#0a0c10] text-[#f0f3f8] min-h-screen">
+      <body className="antialiased bg-[#06080d] text-[#f1f5f9] min-h-screen">
         <ToastProvider>{children}</ToastProvider>
       </body>
     </html>

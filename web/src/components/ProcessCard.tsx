@@ -10,7 +10,10 @@ import {
   Trash, 
   TerminalWindow, 
   Eye,
-  Link as LinkIcon
+  Cpu,
+  HardDrives,
+  Clock,
+  ArrowCounterClockwise
 } from "@phosphor-icons/react";
 import { ProcessItem } from "@/lib/types";
 import { StatusBadge } from "./StatusBadge";
@@ -19,12 +22,12 @@ import { ResourceLimitsModal } from "./ResourceLimitsModal";
 import { useToast } from "./ui/Toast";
 import { ProcessApi } from "@/lib/api/processes";
 
-export interface ProcessRowProps {
+export interface ProcessCardProps {
   process: ProcessItem;
   onRefresh: () => void;
 }
 
-export const ProcessRow: React.FC<ProcessRowProps> = ({ process, onRefresh }) => {
+export const ProcessCard: React.FC<ProcessCardProps> = ({ process, onRefresh }) => {
   const { showToast } = useToast();
   const [isActing, setIsActing] = useState(false);
   const [confirmAction, setConfirmAction] = useState<"restart" | "stop" | "start" | "delete" | null>(null);
@@ -68,95 +71,93 @@ export const ProcessRow: React.FC<ProcessRowProps> = ({ process, onRefresh }) =>
 
   return (
     <>
-      <tr className="border-b border-white/[0.04] hover:bg-white/[0.025] transition-colors text-xs font-normal group">
-        {/* Name & PID */}
-        <td className="py-2.5 px-3.5">
-          <div className="flex items-center gap-2">
-            <Link
-              href={`/processes/${encodeURIComponent(process.name)}`}
-              className="font-bold text-slate-100 hover:text-[#ff5500] transition-colors font-sans tracking-tight truncate max-w-[160px] sm:max-w-[200px]"
-            >
-              {process.name}
-            </Link>
-            {process.pid && (
-              <span className="text-[9px] font-mono text-slate-400 bg-white/[0.03] px-1.5 py-0.5 rounded border border-white/[0.05]">
-                {process.pid}
-              </span>
-            )}
+      <div className="telemetry-card p-4 flex flex-col justify-between select-none">
+        <div>
+          {/* Header row with name and status */}
+          <div className="flex items-start justify-between gap-2 mb-3">
+            <div className="min-w-0 flex-1">
+              <Link
+                href={`/processes/${encodeURIComponent(process.name)}`}
+                className="font-bold text-sm text-slate-100 hover:text-[#ff5500] transition-colors font-sans tracking-tight truncate block"
+              >
+                {process.name}
+              </Link>
+              <div className="flex items-center gap-2 mt-1 text-[10px] font-mono text-slate-400">
+                {process.pid && (
+                  <span className="bg-white/[0.03] px-1.5 py-0.5 rounded border border-white/[0.05]">
+                    PID {process.pid}
+                  </span>
+                )}
+                {process.port !== "-" && (
+                  <span className="text-amber-400 font-semibold bg-amber-950/30 border border-amber-500/25 px-1.5 py-0.5 rounded">
+                    :{process.port}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <StatusBadge status={process.status} size="sm" />
           </div>
-        </td>
 
-        {/* Status */}
-        <td className="py-2.5 px-3.5">
-          <StatusBadge status={process.status} size="sm" />
-        </td>
+          {/* Metrics Bars */}
+          <div className="space-y-2.5 my-3 p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.04]">
+            {/* Memory */}
+            <div>
+              <div className="flex justify-between text-[11px] font-mono text-slate-300 mb-1">
+                <span className="flex items-center gap-1 text-slate-400">
+                  <HardDrives weight="regular" className="w-3 h-3 text-sky-400" /> RAM
+                </span>
+                <span className="font-bold text-slate-200">{process.mem}</span>
+              </div>
+              <div className="w-full bg-white/[0.04] rounded-full h-1.5 overflow-hidden border border-white/[0.03]">
+                <div
+                  className="h-full bg-sky-500 rounded-full transition-all"
+                  style={{ width: `${Math.min((memNum / 1024) * 100, 100)}%` }}
+                />
+              </div>
+            </div>
 
-        {/* Port */}
-        <td className="py-2.5 px-3.5 font-mono text-xs text-slate-300">
-          {process.port !== "-" ? (
-            <span className="text-amber-400 font-semibold bg-amber-950/30 border border-amber-500/25 px-1.5 py-0.5 rounded text-[11px]">
-              :{process.port}
-            </span>
-          ) : (
-            <span className="text-slate-600 text-xs">-</span>
-          )}
-        </td>
-
-        {/* Memory */}
-        <td className="py-2.5 px-3.5 font-mono text-xs">
-          <div className="flex items-center gap-2">
-            <span className="text-slate-200 font-medium min-w-[50px]">{process.mem}</span>
-            <div className="w-14 h-1.5 bg-white/[0.05] rounded-full overflow-hidden hidden sm:block border border-white/[0.03]">
-              <div
-                className="h-full bg-sky-500 rounded-full transition-all"
-                style={{ width: `${Math.min((memNum / 1024) * 100, 100)}%` }}
-              />
+            {/* CPU */}
+            <div>
+              <div className="flex justify-between text-[11px] font-mono text-slate-300 mb-1">
+                <span className="flex items-center gap-1 text-slate-400">
+                  <Cpu weight="regular" className="w-3 h-3 text-amber-400" /> CPU
+                </span>
+                <span className="font-bold text-slate-200">{process.cpu}</span>
+              </div>
+              <div className="w-full bg-white/[0.04] rounded-full h-1.5 overflow-hidden border border-white/[0.03]">
+                <div
+                  className={`h-full rounded-full transition-all ${cpuNum > 75 ? "bg-rose-500" : "bg-[#ff5500]"}`}
+                  style={{ width: `${Math.min(cpuNum, 100)}%` }}
+                />
+              </div>
             </div>
           </div>
-          {process.memLimit !== "-" && (
-            <div className="text-[9px] text-slate-500 font-mono">cap {process.memLimit}</div>
-          )}
-        </td>
 
-        {/* CPU */}
-        <td className="py-2.5 px-3.5 font-mono text-xs">
-          <div className="flex items-center gap-2">
-            <span className="text-slate-200 font-medium min-w-[42px]">{process.cpu}</span>
-            <div className="w-14 h-1.5 bg-white/[0.05] rounded-full overflow-hidden hidden sm:block border border-white/[0.03]">
-              <div
-                className={`h-full rounded-full transition-all ${cpuNum > 75 ? "bg-rose-500" : "bg-[#ff5500]"}`}
-                style={{ width: `${Math.min(cpuNum, 100)}%` }}
-              />
+          {/* Sub-info: Uptime & Restarts */}
+          <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 pt-1">
+            <div className="flex items-center gap-1">
+              <Clock weight="regular" className="w-3 h-3 text-emerald-400" />
+              <span>{process.uptime}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <ArrowCounterClockwise weight="regular" className="w-3 h-3 text-purple-400" />
+              <span>{process.restarts} restarts</span>
             </div>
           </div>
-          {process.cpuLimit !== "-" && (
-            <div className="text-[9px] text-slate-500 font-mono">cap {process.cpuLimit}</div>
-          )}
-        </td>
+        </div>
 
-        {/* Uptime */}
-        <td className="py-2.5 px-3.5 font-mono text-xs text-slate-400">
-          {process.uptime}
-        </td>
-
-        {/* Restarts */}
-        <td className="py-2.5 px-3.5 font-mono text-xs text-slate-400">
-          {process.restarts}
-        </td>
-
-        {/* Action Controls */}
-        <td className="py-2.5 px-3.5 text-right">
-          <div className="flex items-center justify-end gap-1">
-            {/* Live details button */}
+        {/* Footer actions */}
+        <div className="flex items-center justify-between gap-1 pt-3 mt-3 border-t border-white/[0.05]">
+          <div className="flex items-center gap-1">
             <Link
               href={`/processes/${encodeURIComponent(process.name)}`}
               className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-white/[0.05] rounded-lg transition-colors tactile-btn"
-              title="Process Details"
+              title="Details"
             >
               <Eye weight="bold" className="w-3.5 h-3.5" />
             </Link>
 
-            {/* Logs button */}
             <Link
               href={`/processes/${encodeURIComponent(process.name)}/logs`}
               className="p-1.5 text-slate-400 hover:text-sky-400 hover:bg-white/[0.05] rounded-lg transition-colors tactile-btn"
@@ -165,23 +166,31 @@ export const ProcessRow: React.FC<ProcessRowProps> = ({ process, onRefresh }) =>
               <TerminalWindow weight="bold" className="w-3.5 h-3.5" />
             </Link>
 
-            {/* Restart button */}
+            <button
+              onClick={() => setIsLimitsOpen(true)}
+              className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-white/[0.05] rounded-lg transition-colors cursor-pointer tactile-btn"
+              title="Limits"
+            >
+              <SlidersHorizontal weight="bold" className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1">
             <button
               onClick={() => setConfirmAction("restart")}
               disabled={isActing}
               className="p-1.5 text-slate-400 hover:text-[#ff5500] hover:bg-white/[0.05] rounded-lg transition-colors cursor-pointer tactile-btn"
-              title="Restart Daemon"
+              title="Restart"
             >
               <ArrowsClockwise weight="bold" className={`w-3.5 h-3.5 ${isActing ? "animate-spin" : ""}`} />
             </button>
 
-            {/* Stop/Start toggle */}
             {isOnline ? (
               <button
                 onClick={() => setConfirmAction("stop")}
                 disabled={isActing}
                 className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-white/[0.05] rounded-lg transition-colors cursor-pointer tactile-btn"
-                title="Stop Daemon"
+                title="Stop"
               >
                 <Stop weight="fill" className="w-3.5 h-3.5" />
               </button>
@@ -190,33 +199,23 @@ export const ProcessRow: React.FC<ProcessRowProps> = ({ process, onRefresh }) =>
                 onClick={() => setConfirmAction("start")}
                 disabled={isActing}
                 className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-white/[0.05] rounded-lg transition-colors cursor-pointer tactile-btn"
-                title="Start Daemon"
+                title="Start"
               >
                 <Play weight="fill" className="w-3.5 h-3.5" />
               </button>
             )}
 
-            {/* Resource limits */}
-            <button
-              onClick={() => setIsLimitsOpen(true)}
-              className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-white/[0.05] rounded-lg transition-colors cursor-pointer tactile-btn"
-              title="Configure Limits"
-            >
-              <SlidersHorizontal weight="bold" className="w-3.5 h-3.5" />
-            </button>
-
-            {/* Delete button */}
             <button
               onClick={() => setConfirmAction("delete")}
               disabled={isActing}
               className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-950/30 rounded-lg transition-colors cursor-pointer tactile-btn"
-              title="Delete Service"
+              title="Delete"
             >
               <Trash weight="bold" className="w-3.5 h-3.5" />
             </button>
           </div>
-        </td>
-      </tr>
+        </div>
+      </div>
 
       {/* Confirmation Dialog */}
       <ConfirmDialog
@@ -230,7 +229,7 @@ export const ProcessRow: React.FC<ProcessRowProps> = ({ process, onRefresh }) =>
         onCancel={() => setConfirmAction(null)}
       />
 
-      {/* Resource Limits Modal */}
+      {/* Limits Modal */}
       <ResourceLimitsModal
         isOpen={isLimitsOpen}
         serviceName={process.name}

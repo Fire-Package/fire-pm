@@ -5,6 +5,21 @@ export const ProcessApi = {
   list: () => apiFetch<ProcessListResponse>("/api/processes"),
   
   getDetail: (name: string) => apiFetch<ProcessDetail>(`/api/processes/${encodeURIComponent(name)}`),
+
+  create: (data: {
+    script: string;
+    name?: string;
+    interpreter?: string;
+    env?: string[];
+    watch?: boolean;
+    reload?: boolean;
+    mem?: string;
+    cpu?: string;
+  }) =>
+    apiFetch<{ success: boolean; message: string }>("/api/processes", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
   
   start: (name: string) =>
     apiFetch<{ success: boolean; message: string }>(`/api/processes/${encodeURIComponent(name)}/start`, {

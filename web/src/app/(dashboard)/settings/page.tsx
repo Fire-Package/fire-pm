@@ -2,14 +2,13 @@
 
 import React, { useState } from "react";
 import { Header } from "@/components/Header";
-import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { SystemHealth } from "@/components/SystemHealth";
 import { useToast } from "@/components/ui/Toast";
 import { useSystemInfo } from "@/hooks/useSystemInfo";
 import { AuthApi } from "@/lib/api/auth";
-import { KeyRound, Shield, Server, FileText } from "lucide-react";
+import { Key, ShieldCheck, HardDrives, TerminalWindow } from "@phosphor-icons/react";
 
 export default function SettingsPage() {
   const { info, health, isLoading } = useSystemInfo();
@@ -53,16 +52,23 @@ export default function SettingsPage() {
     <div className="flex-1 flex flex-col min-w-0">
       <Header
         title="Settings & System Diagnostics"
-        subtitle="Manage authentication security and view system configuration"
+        subtitle="Manage master authentication security and inspect runtime environment"
       />
 
-      <main className="p-6 md:p-8 space-y-6 max-w-5xl w-full mx-auto">
+      <main className="p-4 sm:p-6 md:p-8 space-y-5 max-w-5xl w-full mx-auto">
         {/* Security / Password Card */}
-        <Card
-          title="Security & Password"
-          subtitle="Update the master dashboard authentication password."
-        >
-          <form onSubmit={handleChangePassword} className="space-y-4 max-w-lg">
+        <div className="telemetry-panel p-5 space-y-4">
+          <div className="flex items-center gap-2.5 pb-3.5 border-b border-white/[0.05]">
+            <div className="p-2 rounded-lg bg-[#ff5500]/10 border border-[#ff5500]/25 text-[#ff5500]">
+              <Key weight="bold" className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-100 font-sans tracking-tight">Security & Master Password</h3>
+              <p className="text-[10px] text-slate-400 font-mono">Update the root authentication credentials for web console access</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleChangePassword} className="space-y-3.5 max-w-lg">
             <Input
               label="Current Password"
               type="password"
@@ -89,40 +95,50 @@ export default function SettingsPage() {
 
             <div className="pt-2">
               <Button type="submit" variant="primary" isLoading={isChangingPass}>
-                <KeyRound className="w-4 h-4" /> Update Password
+                <Key weight="bold" className="w-3.5 h-3.5" /> Update Password
               </Button>
             </div>
           </form>
-        </Card>
+        </div>
 
         {/* System Diagnostics */}
         <SystemHealth health={health} isLoading={isLoading} />
 
         {/* Server & Environment Paths */}
         {info && (
-          <Card title="System Environment">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
-              <div className="p-3 bg-[#0d0f16] border border-[#1e2330] rounded-lg">
-                <span className="text-slate-400 block text-[11px] uppercase tracking-wider mb-1">Hostname</span>
+          <div className="telemetry-panel p-5">
+            <div className="flex items-center gap-2.5 pb-3.5 mb-3.5 border-b border-white/[0.05]">
+              <div className="p-2 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400">
+                <TerminalWindow weight="bold" className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-100 font-sans tracking-tight">System Environment Paths</h3>
+                <p className="text-[10px] text-slate-400 font-mono">Kernel host parameters & systemd directory bindings</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono">
+              <div className="p-3 bg-[#06080d] border border-white/[0.05] rounded-lg">
+                <span className="text-slate-400 block text-[9px] uppercase tracking-wider mb-1 font-bold">Hostname</span>
                 <span className="text-slate-200 font-semibold">{info.hostname}</span>
               </div>
 
-              <div className="p-3 bg-[#0d0f16] border border-[#1e2330] rounded-lg">
-                <span className="text-slate-400 block text-[11px] uppercase tracking-wider mb-1">Platform</span>
+              <div className="p-3 bg-[#06080d] border border-white/[0.05] rounded-lg">
+                <span className="text-slate-400 block text-[9px] uppercase tracking-wider mb-1 font-bold">Platform / Architecture</span>
                 <span className="text-slate-200 font-semibold">{info.platform}</span>
               </div>
 
-              <div className="p-3 bg-[#0d0f16] border border-[#1e2330] rounded-lg">
-                <span className="text-slate-400 block text-[11px] uppercase tracking-wider mb-1">CLI Path</span>
+              <div className="p-3 bg-[#06080d] border border-white/[0.05] rounded-lg">
+                <span className="text-slate-400 block text-[9px] uppercase tracking-wider mb-1 font-bold">CLI Binary Path</span>
                 <span className="text-slate-200 font-semibold">/usr/local/bin/fire</span>
               </div>
 
-              <div className="p-3 bg-[#0d0f16] border border-[#1e2330] rounded-lg">
-                <span className="text-slate-400 block text-[11px] uppercase tracking-wider mb-1">Systemd Directory</span>
+              <div className="p-3 bg-[#06080d] border border-white/[0.05] rounded-lg">
+                <span className="text-slate-400 block text-[9px] uppercase tracking-wider mb-1 font-bold">Systemd Unit Directory</span>
                 <span className="text-slate-200 font-semibold">/etc/systemd/system</span>
               </div>
             </div>
-          </Card>
+          </div>
         )}
       </main>
     </div>

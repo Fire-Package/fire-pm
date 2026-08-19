@@ -8,12 +8,12 @@ export const Card: React.FC<{
   action?: React.ReactNode;
 }> = ({ children, className = "", title, subtitle, action }) => {
   return (
-    <div className={`bg-[#0e111a] border border-[#1b2233] rounded-xl p-5 shadow-sm ${className}`}>
+    <div className={`telemetry-panel p-5 ${className}`}>
       {(title || action) && (
-        <div className="flex items-center justify-between pb-3.5 mb-4 border-b border-[#181f2e]">
+        <div className="flex items-center justify-between pb-3.5 mb-4 border-b border-white/[0.05]">
           <div>
-            {title && <h3 className="text-sm font-bold text-slate-100 tracking-tight">{title}</h3>}
-            {subtitle && <p className="text-[11px] text-slate-400 mt-0.5">{subtitle}</p>}
+            {title && <h3 className="text-sm font-bold text-slate-100 tracking-tight font-sans">{title}</h3>}
+            {subtitle && <p className="text-[10px] text-slate-400 font-mono mt-0.5">{subtitle}</p>}
           </div>
           {action && <div>{action}</div>}
         </div>

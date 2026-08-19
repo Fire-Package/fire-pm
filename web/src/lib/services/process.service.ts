@@ -267,4 +267,54 @@ export class ProcessService {
 
     return { success: true, reload: "active" };
   }
+
+  static async create(params: {
+    script: string;
+    name?: string;
+    interpreter?: string;
+    env?: string[];
+    watch?: boolean;
+    reload?: boolean;
+    mem?: string;
+    cpu?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    const config = loadConfig();
+    const args = ["start", params.script];
+
+    if (params.name) {
+      if (!validateServiceName(params.name)) throw new Error("Invalid service name");
+      args.push("--name", params.name);
+    }
+    if (params.interpreter) {
+      args.push("--interpreter", params.interpreter);
+    }
+    if (params.watch) {
+      args.push("--watch");
+    }
+    if (params.reload) {
+      args.push("--reload");
+    }
+    if (params.mem) {
+      if (!validateMemoryLimit(params.mem)) throw new Error("Invalid memory limit format");
+      args.push("--memory", params.mem);
+    }
+    if (params.cpu) {
+      if (!validateCpuLimit(params.cpu)) throw new Error("Invalid CPU quota format");
+      args.push("--cpu", params.cpu);
+    }
+    if (params.env && Array.isArray(params.env)) {
+      for (const e of params.env) {
+        if (typeof e === "string" && e.includes("=")) {
+          args.push("--env", e);
+        }
+      }
+    }
+
+    const result = await safeExec(config.fire.cliBinary, args);
+    if (result.code !== 0) {
+      throw new Error(result.stderr || "Failed to start new process");
+    }
+
+    return { success: true, message: result.stdout || "Process started successfully" };
+  }
 }
