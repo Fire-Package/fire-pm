@@ -12,7 +12,7 @@ import {
   SignOut, 
   TerminalWindow, 
   Cpu,
-  Activity,
+  Pulse,
   HardDrives
 } from "@phosphor-icons/react";
 import { AuthApi } from "@/lib/api/auth";
@@ -55,7 +55,7 @@ export const Sidebar: React.FC = () => {
       <nav className="flex-1 px-2.5 py-4 space-y-1 overflow-y-auto">
         <div className="px-2.5 pb-2 text-[9px] font-mono font-bold uppercase tracking-[0.18em] text-slate-500 flex items-center justify-between">
           <span>Orchestration</span>
-          <Activity weight="bold" className="w-3 h-3 text-slate-600" />
+          <Pulse weight="bold" className="w-3 h-3 text-slate-600" />
         </div>
 
         {navItems.map((item) => {

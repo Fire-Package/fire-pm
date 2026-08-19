@@ -14,9 +14,7 @@ import {
   Warning, 
   HardDrives, 
   Plugs, 
-  Cpu,
-  Activity,
-  Plus
+  Cpu
 } from "@phosphor-icons/react";
 
 export default function DashboardPage() {

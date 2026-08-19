@@ -18,8 +18,7 @@ import {
   Folder,
   Command,
   Pulse,
-  Eye,
-  Activity
+  Eye
 } from "@phosphor-icons/react";
 import { Header } from "@/components/Header";
 import { Button } from "@/components/ui/Button";

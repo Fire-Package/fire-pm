@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getAuthSession, errorResponse, successResponse, validateCsrf } from "@/lib/api-helper";
+import { getAuthSession, errorResponse, successResponse, verifyCsrf } from "@/lib/api-helper";
 import { ProcessService } from "@/lib/services/process.service";
 
 export async function GET(req: NextRequest) {
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const session = getAuthSession(req);
   if (!session) return errorResponse("Unauthorized", 401, "UNAUTHORIZED");
-  if (!validateCsrf(req)) return errorResponse("Invalid CSRF token", 403, "CSRF_ERROR");
+  if (!verifyCsrf(req)) return errorResponse("Invalid CSRF token", 403, "CSRF_ERROR");
 
   try {
     const body = await req.json();
