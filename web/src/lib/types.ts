@@ -54,6 +54,7 @@ export interface TunnelItem {
   hash: string;
   url: string;
   name: string;
+  provider?: string;
 }
 
 export interface TunnelListResponse {

@@ -4,10 +4,10 @@ import { TunnelListResponse } from "../types";
 export const TunnelApi = {
   list: () => apiFetch<TunnelListResponse>("/api/tunnels"),
   
-  open: (port: number) =>
-    apiFetch<{ port: number; url: string; hash?: string }>("/api/tunnels", {
+  open: (port: number, provider?: string) =>
+    apiFetch<{ port: number; url: string; hash?: string; provider?: string }>("/api/tunnels", {
       method: "POST",
-      body: JSON.stringify({ port }),
+      body: JSON.stringify({ port, provider }),
     }),
     
   close: (port: number) =>

@@ -18,6 +18,13 @@ export interface FireConfig {
     systemdDir: string;
     servicePrefix: string;
   };
+  tunnel?: {
+    provider?: "quick" | "custom" | string;
+    domain?: string;
+    hostSuffix?: string;
+    sslCert?: string;
+    sslKey?: string;
+  };
 }
 
 const PRIMARY_CONFIG_PATH = "/etc/fire-pm/config.json";
@@ -57,6 +64,13 @@ const DEFAULT_CONFIG: FireConfig = {
     systemdDir: "/etc/systemd/system",
     servicePrefix: "fire",
   },
+  tunnel: {
+    provider: "quick",
+    domain: "",
+    hostSuffix: "-tunnel",
+    sslCert: "",
+    sslKey: "",
+  },
 };
 
 let cachedConfig: FireConfig | null = null;
@@ -77,6 +91,7 @@ export function loadConfig(): FireConfig {
         auth: { ...DEFAULT_CONFIG.auth, ...(parsed.auth || {}) },
         server: { ...DEFAULT_CONFIG.server, ...(parsed.server || {}) },
         fire: { ...DEFAULT_CONFIG.fire, ...(parsed.fire || {}) },
+        tunnel: { ...DEFAULT_CONFIG.tunnel, ...(parsed.tunnel || {}) },
       };
       return cachedConfig!;
     } catch (e) {

@@ -13,5 +13,12 @@
     "cliBinary": "/usr/local/bin/fire",
     "systemdDir": "/etc/systemd/system",
     "servicePrefix": "fire"
+  },
+  "tunnel": {
+    "provider": "quick",
+    "domain": "",
+    "hostSuffix": "-tunnel",
+    "sslCert": "",
+    "sslKey": ""
   }
 }

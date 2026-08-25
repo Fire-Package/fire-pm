@@ -28,6 +28,7 @@ export class TunnelService {
         hash: t.hash ?? "",
         url: t.url ?? "",
         name: t.name ?? "-",
+        provider: t.provider ?? "quick",
       }));
 
       return {
@@ -47,13 +48,17 @@ export class TunnelService {
     }
   }
 
-  static async open(port: number): Promise<{ port: number; url: string; hash?: string }> {
+  static async open(port: number, provider?: string): Promise<{ port: number; url: string; hash?: string; provider?: string }> {
     if (!validatePort(port)) {
       throw new Error(`Invalid port number: ${port}`);
     }
 
     const config = loadConfig();
-    const result = await safeExec(config.fire.cliBinary, ["tunnel", "open", port.toString()]);
+    const args = ["tunnel", "open", port.toString()];
+    if (provider) {
+      args.push("--provider", provider);
+    }
+    const result = await safeExec(config.fire.cliBinary, args);
 
     if (result.code !== 0) {
       throw new Error(result.stderr || result.stdout || `Failed to open tunnel on port ${port}`);
@@ -66,6 +71,7 @@ export class TunnelService {
     return {
       port,
       url: urlLine,
+      provider: provider || config.tunnel?.provider || "quick",
     };
   }
 
