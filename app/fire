@@ -422,7 +422,7 @@ format_mem_kb() {
 
 ensure_tunnel_dir() {
   mkdir -p "$TUNNEL_DIR"
-  chmod 700 "$TUNNEL_DIR" 2>/dev/null || true
+  chmod 777 "$TUNNEL_DIR" 2>/dev/null || chmod 755 "$TUNNEL_DIR" 2>/dev/null || true
 }
 
 is_pid_running() {
@@ -503,7 +503,10 @@ LOG_FILE=$log_file
 START_TS=$start_ts
 PROVIDER=$provider
 EOF
-  chmod 600 "$state_file" 2>/dev/null || true
+  chmod 666 "$state_file" 2>/dev/null || chmod 644 "$state_file" 2>/dev/null || true
+  if [[ -n "$log_file" && -f "$log_file" ]]; then
+    chmod 666 "$log_file" 2>/dev/null || chmod 644 "$log_file" 2>/dev/null || true
+  fi
 }
 
 remove_tunnel_state() {
