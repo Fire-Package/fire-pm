@@ -69,16 +69,25 @@ fire doctor --json
 ### Reverse-Proxy Tunnels
 
 ```bash
-# Expose a local port through a public HTTPS subdomain via Nginx
+# Open a zero-config Quick Tunnel (default, no domain/DNS/SSL needed)
 fire tunnel open <port>
+# Output: https://random-words.trycloudflare.com
 
-# List all active tunnels
+# Open a tunnel using your custom Nginx domain (requires prior setup)
+fire tunnel open <port> --provider custom
+
+# Interactive wizard to configure custom domain, SSL certs, and Nginx
+fire tunnel setup
+
+# List all active tunnels (shows provider, URL, uptime)
 fire tunnel list
 fire tunnel list --json
 
 # Close a tunnel
 fire tunnel close <port>
 ```
+
+**Provider priority:** CLI `--provider` flag > `tunnel.provider` in `/etc/fire-pm/config.json` > fallback to `quick`.
 
 ---
 

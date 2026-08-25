@@ -1,7 +1,7 @@
 # 🔥 Fire PM
 
 > **The lightweight, Linux-native process & application management platform.**  
-> Fast CLI &bull; Rich Terminal UI (TUI) &bull; Developer Web Dashboard &bull; Wildcard Reverse-Proxy Tunnels
+> Fast CLI &bull; Rich Terminal UI (TUI) &bull; Developer Web Dashboard &bull; Zero-Config Public HTTPS Tunnels
 
 ---
 
@@ -60,18 +60,37 @@ fire delete my-api
 fire limit my-api 500M 50%
 ```
 
-### 3. Public HTTPS Tunnels (Reverse Proxy)
-Expose any local port over a secure HTTPS subdomain mapped via Nginx:
+### 3. Public HTTPS Tunnels
+
+Fire PM supports two tunnel providers. The default requires **zero configuration**.
+
+#### Quick Tunnels (Default — No Setup Required)
+Instantly expose any local port over a public HTTPS URL powered by Cloudflare:
 ```bash
 # Open a tunnel for port 3000
 fire tunnel open 3000
-# Output: https://a1b2c3d4-tunnel.yourdomain.com
+# Output: https://random-words.trycloudflare.com
 
 # List active tunnels
 fire tunnel list
 
 # Close a tunnel
 fire tunnel close 3000
+```
+No domain, DNS, SSL, or account needed — works on any machine, home network, or Codespace.
+
+#### Custom Domain Tunnels (Self-Hosted Nginx)
+If you have your own server with a wildcard domain and SSL certificates, set up persistent custom-domain tunnels:
+```bash
+# Interactive setup wizard (configures domain, SSL, and Nginx)
+fire tunnel setup
+
+# Open a tunnel using your custom domain
+fire tunnel open 3000 --provider custom
+# Output: https://a1b2c3d4-tunnel.yourdomain.com
+
+# You can always override with --provider quick to use a Quick Tunnel instead
+fire tunnel open 3000 --provider quick
 ```
 
 ### 4. Developer Web Dashboard & API
