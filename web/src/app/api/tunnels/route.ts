@@ -21,8 +21,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { port } = body;
-    const res = await TunnelService.open(Number(port));
+    const { port, provider } = body;
+    const res = await TunnelService.open(Number(port), provider);
     return successResponse(res, 201);
   } catch (error: any) {
     return errorResponse(error.message || "Failed to open tunnel", 400);

@@ -232,7 +232,7 @@ class TunnelModal(ModalScreen):
 
     def on_mount(self) -> None:
         table = self.query_one("#tunnel_table", DataTable)
-        table.add_columns("Port", "Age", "Status", "URL")
+        table.add_columns("Port", "Provider", "Age", "Status", "URL")
         table.cursor_type = "row"
         self.update_tunnels()
         self.set_interval(3.0, self.update_tunnels)
@@ -250,17 +250,19 @@ class TunnelModal(ModalScreen):
                     port = re.search(r"PORT=(\d+)", content)
                     url = re.search(r"URL=(https://[^\s]+)", content)
                     start_ts = re.search(r"START_TS=(\d+)", content)
+                    provider = re.search(r"PROVIDER=([^\s]+)", content)
                     if port:
                         p_val = port.group(1)
                         url_val = f"[cyan]{url.group(1)}[/]" if url else "[dim]pending...[/]"
+                        prov_val = f"[white]{provider.group(1)}[/]" if provider else "[white]quick[/]"
                         age = "-"
                         if start_ts:
                             diff = int(now - int(start_ts.group(1)))
                             if diff < 60: age = f"{diff}s"
                             elif diff < 3600: age = f"{diff//60}m"
                             else: age = f"{diff//3600}h"
-                        status = "[bold green]ACTIVE[/]" if url else "[bold yellow]PENDING[/]"
-                        table.add_row(f"[bold yellow]{p_val}[/]", age, status, url_val)
+                        status = "[bold green]ONLINE[/]" if url else "[bold yellow]PENDING[/]"
+                        table.add_row(f"[bold yellow]{p_val}[/]", prov_val, age, status, url_val)
             except Exception as e: _log.debug("Error reading tunnel file %s: %s", f, e)
 
 class FireTUI(App):

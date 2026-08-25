@@ -28,6 +28,8 @@ export default function TunnelsPage() {
   const [closingPort, setClosingPort] = useState<number | null>(null);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
 
+  const [providerInput, setProviderInput] = useState<"quick" | "custom">("quick");
+
   const handleOpenTunnel = async (e: React.FormEvent) => {
     e.preventDefault();
     const portNum = parseInt(portInput, 10);
@@ -38,7 +40,7 @@ export default function TunnelsPage() {
 
     setIsOpening(true);
     try {
-      const res = await TunnelApi.open(portNum);
+      const res = await TunnelApi.open(portNum, providerInput);
       showToast(`Tunnel opened for localhost:${res.port}`, "success");
       setPortInput("");
       setIsOpenModal(false);
@@ -73,8 +75,8 @@ export default function TunnelsPage() {
   return (
     <div className="flex-1 flex flex-col min-w-0">
       <Header
-        title="Public Reverse-Proxy Tunnels"
-        subtitle="Expose local listening ports securely via Nginx wildcard routing"
+        title="Public HTTPS Tunnels"
+        subtitle="Expose local listening ports instantly via Cloudflare Quick Tunnels or custom Nginx routing"
         onRefresh={refresh}
         isRefreshing={isLoading}
       />
@@ -88,7 +90,7 @@ export default function TunnelsPage() {
             </div>
             <div>
               <div className="text-sm font-bold text-slate-100 font-sans">
-                {total} Active {total === 1 ? "Reverse-Proxy Tunnel" : "Reverse-Proxy Tunnels"}
+                {total} Active {total === 1 ? "Tunnel" : "Tunnels"}
               </div>
               <div className="text-xs text-slate-400 font-mono">
                 {online} Online &bull; {pending} Pending Configuration
@@ -109,6 +111,7 @@ export default function TunnelsPage() {
                 <tr className="border-b border-white/[0.04] bg-white/[0.01] text-[10px] font-mono font-bold uppercase tracking-[0.15em] text-slate-400 select-none">
                   <th className="py-2.5 px-3.5">Local Port</th>
                   <th className="py-2.5 px-3.5">Service</th>
+                  <th className="py-2.5 px-3.5">Provider</th>
                   <th className="py-2.5 px-3.5">Status</th>
                   <th className="py-2.5 px-3.5">Age</th>
                   <th className="py-2.5 px-3.5">Public HTTPS Endpoint</th>
@@ -118,13 +121,13 @@ export default function TunnelsPage() {
               <tbody className="text-xs">
                 {isLoading && tunnels.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-12 text-center text-slate-500 font-mono text-xs">
-                      Inspecting dynamic Nginx tunnel sockets...
+                    <td colSpan={7} className="py-12 text-center text-slate-500 font-mono text-xs">
+                      Inspecting active tunnel sockets...
                     </td>
                   </tr>
                 ) : tunnels.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-12 text-center text-slate-500 font-mono text-xs">
+                    <td colSpan={7} className="py-12 text-center text-slate-500 font-mono text-xs">
                       No active tunnels. Click "Open New Tunnel" to expose any local listening port.
                     </td>
                   </tr>
@@ -136,6 +139,11 @@ export default function TunnelsPage() {
                       </td>
                       <td className="py-2.5 px-3.5 font-sans font-medium text-slate-200">
                         {t.name}
+                      </td>
+                      <td className="py-2.5 px-3.5 font-mono text-[11px] text-slate-300">
+                        <span className="px-2 py-0.5 rounded bg-white/[0.05] border border-white/[0.08]">
+                          {t.provider === "custom" ? "Custom Nginx" : "Cloudflare Quick"}
+                        </span>
                       </td>
                       <td className="py-2.5 px-3.5">
                         <span
@@ -200,13 +208,13 @@ export default function TunnelsPage() {
           </div>
         </div>
 
-        {/* Nginx Info Banner */}
+        {/* Info Banner */}
         <div className="telemetry-panel p-4 text-xs text-slate-400 flex items-start gap-3">
           <ShieldCheck weight="fill" className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
           <div>
-            <div className="font-semibold text-slate-200 font-sans">Dynamic Nginx Reverse-Proxy Architecture</div>
+            <div className="font-semibold text-slate-200 font-sans">Multi-Provider Tunnel Architecture</div>
             <p className="mt-0.5 text-slate-400 leading-relaxed font-mono text-[11px]">
-              Tunnels map random hex subdomains to local service ports via dynamic Nginx map configuration (<code>/etc/nginx/tunnels.map</code>) and automated zero-downtime daemon reloading.
+              Fire PM supports zero-config Cloudflare Quick Tunnels (instant public HTTPS without domain/DNS setup) and custom self-hosted Nginx wildcard subdomains (<code>fire tunnel setup</code>).
             </p>
           </div>
         </div>
@@ -216,9 +224,9 @@ export default function TunnelsPage() {
       {isOpenModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in select-none">
           <div className="telemetry-panel max-w-md w-full p-6 shadow-2xl animate-in zoom-in-95 border-white/[0.1]">
-            <h3 className="text-sm font-bold text-slate-100 mb-1 font-sans">Open Reverse-Proxy Tunnel</h3>
+            <h3 className="text-sm font-bold text-slate-100 mb-1 font-sans">Open HTTPS Tunnel</h3>
             <p className="text-[11px] text-slate-400 mb-4 font-mono">
-              Enter the local port you want to expose through a secure public HTTPS subdomain.
+              Expose a local listening port through an instant secure public HTTPS endpoint.
             </p>
 
             <form onSubmit={handleOpenTunnel} className="space-y-4">
@@ -230,6 +238,39 @@ export default function TunnelsPage() {
                 onChange={(e) => setPortInput(e.target.value)}
                 autoFocus
               />
+
+              <div>
+                <label className="block text-[11px] font-mono font-medium text-slate-300 mb-1.5">
+                  Tunnel Provider
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setProviderInput("quick")}
+                    className={`p-2.5 text-left rounded border transition-colors cursor-pointer ${
+                      providerInput === "quick"
+                        ? "bg-amber-950/40 border-amber-500/40 text-amber-300"
+                        : "bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    <div className="text-xs font-bold font-sans">Quick Tunnel</div>
+                    <div className="text-[10px] font-mono text-slate-400 mt-0.5">Zero config (Cloudflare)</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setProviderInput("custom")}
+                    className={`p-2.5 text-left rounded border transition-colors cursor-pointer ${
+                      providerInput === "custom"
+                        ? "bg-amber-950/40 border-amber-500/40 text-amber-300"
+                        : "bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    <div className="text-xs font-bold font-sans">Custom Nginx</div>
+                    <div className="text-[10px] font-mono text-slate-400 mt-0.5">Self-hosted domain</div>
+                  </button>
+                </div>
+              </div>
 
               <div className="flex items-center justify-end gap-2.5 pt-2">
                 <Button

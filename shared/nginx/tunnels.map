@@ -1,2 +1,2 @@
 # Live Fire tunnel mappings.
-# Format: <8-char-hex-hash>-tunnel.abhinav.eu.cc <local-port>;
+# Format: <hash>-tunnel.<domain> <local-port>;
