@@ -254,6 +254,25 @@ if [[ -f "${INSTALL_SOURCE_DIR}/app/ff-service" ]]; then
   cp "${INSTALL_SOURCE_DIR}/app/ff-service" /usr/local/bin/ff-service
   chmod +x /usr/local/bin/ff-service
 fi
+
+# Configure sudoers rule so fire can manage systemd without password prompts
+if [[ -d "/etc/sudoers.d" ]]; then
+  SUDOERS_FILE="/etc/sudoers.d/fire-pm"
+  {
+    echo "# Fire PM — Allow administrative users to manage fire services without password prompt"
+    echo "%sudo ALL=(ALL) NOPASSWD: /usr/local/bin/fire"
+    echo "%wheel ALL=(ALL) NOPASSWD: /usr/local/bin/fire"
+    if [[ -n "$SUDO_USER" && "$SUDO_USER" != "root" ]]; then
+      echo "$SUDO_USER ALL=(ALL) NOPASSWD: /usr/local/bin/fire"
+    fi
+  } > "$SUDOERS_FILE"
+  chmod 0440 "$SUDOERS_FILE"
+  if command -v visudo &>/dev/null; then
+    if ! visudo -c -f "$SUDOERS_FILE" &>/dev/null; then
+      rm -f "$SUDOERS_FILE"
+    fi
+  fi
+fi
 echo -e "    ${GREEN}✔${NC} Fire CLI installed to /usr/local/bin/fire"
 
 # 8. Install TUI

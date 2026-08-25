@@ -2,7 +2,7 @@
 
 # ================== CONFIGURATION ==================
 VENV="${VENV:-${VIRTUAL_ENV:-}}"
-RUN_USER="${RUN_USER:-root}"
+RUN_USER="${RUN_USER:-${SUDO_USER:-root}}"
 WORKDIR=$(pwd)
 SYSTEM_DIR="/etc/systemd/system"
 PREFIX="fire"
@@ -270,18 +270,41 @@ action_doctor() {
 
 check_root() {
   if [[ $EUID -ne 0 ]]; then
-     error "This script must be run as root (to manage systemd services)."
+     error "This action requires root privileges (to manage systemd services)."
      exit 1
   fi
 }
 
+ensure_root() {
+  if [[ $EUID -ne 0 ]]; then
+    if command -v sudo &>/dev/null; then
+      exec sudo -E "$0" "$@"
+    else
+      error "This action requires root privileges. Please install sudo or run as root."
+      exit 1
+    fi
+  fi
+}
+
 command_needs_root() {
-  case "$1" in
-    tunnel|help|--help|-h)
-      return 1
+  local cmd="$1"
+  local subcmd="$2"
+  case "$cmd" in
+    start|create|stop|restart|delete|del|rm|limit|migrate)
+      return 0
+      ;;
+    tunnel)
+      case "$subcmd" in
+        open|close|stop)
+          return 0
+          ;;
+        *)
+          return 1
+          ;;
+      esac
       ;;
     *)
-      return 0
+      return 1
       ;;
   esac
 }
@@ -834,6 +857,10 @@ parse_args() {
         ;;
       --env)
         ENV_VARS+=("$2")
+        shift 2
+        ;;
+      --user)
+        RUN_USER="$2"
         shift 2
         ;;
       --json)
@@ -2116,10 +2143,7 @@ show_help() {
 }
 
 # ================== ROUTING ==================
-if command_needs_root "$CMD"; then
-  check_root
-fi
-
+ORIG_CLI_ARGS=("$CMD" "$@")
 TUNNEL_CMD=""
 if [[ "$CMD" == "tunnel" ]]; then
   if [[ $# -gt 0 ]]; then
@@ -2135,6 +2159,10 @@ else
   fi
 
   parse_args "$@"
+fi
+
+if command_needs_root "$CMD" "$TUNNEL_CMD"; then
+  ensure_root "${ORIG_CLI_ARGS[@]}"
 fi
 
 case "$CMD" in
