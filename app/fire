@@ -1799,13 +1799,20 @@ open_quick_tunnel() {
   ensure_tunnel_dir
   > "$log_file"
 
+  # Kill any previous background process on this port
+  if read_tunnel_state "$port"; then
+    if [[ "$TUNNEL_STATE_PID" =~ ^[0-9]+$ && "$TUNNEL_STATE_PID" -gt 0 ]]; then
+      kill "$TUNNEL_STATE_PID" 2>/dev/null || true
+    fi
+  fi
+
   # Run cloudflared in background
-  nohup cloudflared tunnel --url "http://127.0.0.1:$port" > "$log_file" 2>&1 &
+  nohup cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$port" > "$log_file" 2>&1 &
   local tunnel_pid=$!
 
-  # Wait for public URL to appear in log
+  # Wait for public URL to appear in log (up to 20 seconds)
   local url=""
-  for ((i=0; i<30; i++)); do
+  for ((i=0; i<40; i++)); do
     if [[ -f "$log_file" ]]; then
       url=$(grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' "$log_file" | head -n 1)
       if [[ -n "$url" ]]; then
@@ -1815,7 +1822,7 @@ open_quick_tunnel() {
     if ! kill -0 "$tunnel_pid" 2>/dev/null; then
       break
     fi
-    sleep 0.3
+    sleep 0.5
   done
 
   if [[ -z "$url" ]]; then
