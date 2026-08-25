@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ================== CONFIGURATION ==================
-VENV="${VENV:-/root/myenv}"
+VENV="${VENV:-${VIRTUAL_ENV:-}}"
 RUN_USER="${RUN_USER:-root}"
 WORKDIR=$(pwd)
 SYSTEM_DIR="/etc/systemd/system"
@@ -43,16 +43,99 @@ type_text() {
   done
 }
 
+# Finds the best available Python interpreter with fallback priority:
+# 1. Active virtualenv ($VIRTUAL_ENV/bin/python or explicit $VENV/bin/python)
+# 2. Local directory venvs (.venv/bin/python, venv/bin/python, env/bin/python, /opt/fire-pm/venv)
+# 3. System python3 / python
+find_python() {
+  local prefer_textual="${1:-0}"
+
+  _test_py() {
+    local py="$1"
+    if [[ -n "$py" && -x "$py" ]]; then
+      if [[ "$prefer_textual" -eq 1 ]]; then
+        if "$py" -c "import textual" &>/dev/null; then
+          echo "$py"
+          return 0
+        fi
+      else
+        echo "$py"
+        return 0
+      fi
+    fi
+    return 1
+  }
+
+  # 1. Active virtual environment
+  if [[ -n "$VIRTUAL_ENV" ]] && _test_py "$VIRTUAL_ENV/bin/python"; then
+    return 0
+  fi
+  if [[ -n "$VENV" ]] && _test_py "$VENV/bin/python"; then
+    return 0
+  fi
+
+  # 2. Local directory venvs
+  local candidate_venvs=("$WORKDIR/.venv" "$WORKDIR/venv" "$WORKDIR/env" "/opt/fire-pm/venv")
+  for cv in "${candidate_venvs[@]}"; do
+    if _test_py "$cv/bin/python"; then
+      return 0
+    fi
+  done
+
+  # 3. System python3 / python
+  if command -v python3 &>/dev/null; then
+    local sys_py3
+    sys_py3=$(command -v python3)
+    if _test_py "$sys_py3"; then
+      return 0
+    fi
+  fi
+  if command -v python &>/dev/null; then
+    local sys_py
+    sys_py=$(command -v python)
+    if _test_py "$sys_py"; then
+      return 0
+    fi
+  fi
+
+  # Fallback if prefer_textual was 1 and none had textual
+  if [[ "$prefer_textual" -eq 1 ]]; then
+    find_python 0
+    return $?
+  fi
+
+  return 1
+}
+
 action_doctor() {
   if [[ $JSON_OPT -eq 1 ]]; then
     local score=100
     local checks=()
     
-    if [[ -d "$VENV" ]]; then
-      checks+=("{\"name\":\"Environment\",\"passed\":true,\"message\":\"Python venv found at $VENV\"}")
+    local py_bin
+    py_bin=$(find_python 0)
+    if [[ -n "$py_bin" ]]; then
+      local py_ver
+      py_ver=$("$py_bin" -c "import sys; print('.'.join(map(str, sys.version_info[:3])))" 2>/dev/null || echo "detected")
+      if [[ "$py_bin" == *"/bin/python" && "$py_bin" != "/usr/bin/python"* && "$py_bin" != "/usr/local/bin/python"* ]]; then
+        local venv_dir
+        venv_dir=$(dirname "$(dirname "$py_bin")")
+        checks+=("{\"name\":\"Environment\",\"passed\":true,\"message\":\"Python venv found at $venv_dir (Python $py_ver)\"}")
+      else
+        checks+=("{\"name\":\"Environment\",\"passed\":true,\"message\":\"Python found at $py_bin (Python $py_ver)\"}")
+      fi
     else
-      checks+=("{\"name\":\"Environment\",\"passed\":false,\"message\":\"Python venv NOT found at $VENV\"}")
+      checks+=("{\"name\":\"Environment\",\"passed\":false,\"message\":\"Python 3 runtime not found\"}")
       ((score -= 20))
+    fi
+
+    local tui_py
+    tui_py=$(find_python 1)
+    if [[ -n "$tui_py" ]] && "$tui_py" -c "import textual" &>/dev/null; then
+      checks+=("{\"name\":\"TUI Dependencies\",\"passed\":true,\"message\":\"Textual library available\"}")
+    else
+      checks+=("{\"name\":\"TUI Dependencies\",\"passed\":false,\"message\":\"Textual library not installed (run: pip3 install textual)\"}")
+      ((score -= 10))
     fi
 
     if id "$RUN_USER" &>/dev/null; then
@@ -118,29 +201,48 @@ action_doctor() {
     fi
   }
 
-  # 1. Check VENV
-  if [[ -d "$VENV" ]]; then
-    check "Environment" 0 "Python venv found at $VENV"
+  # 1. Check Python Environment
+  local py_bin
+  py_bin=$(find_python 0)
+  if [[ -n "$py_bin" ]]; then
+    local py_ver
+    py_ver=$("$py_bin" -c "import sys; print('.'.join(map(str, sys.version_info[:3])))" 2>/dev/null || echo "detected")
+    if [[ "$py_bin" == *"/bin/python" && "$py_bin" != "/usr/bin/python"* && "$py_bin" != "/usr/local/bin/python"* ]]; then
+      local venv_dir
+      venv_dir=$(dirname "$(dirname "$py_bin")")
+      check "Environment" 0 "Python venv found at $venv_dir (Python $py_ver)"
+    else
+      check "Environment" 0 "Python found at $py_bin (Python $py_ver)"
+    fi
   else
-    check "Environment" 1 "Python venv NOT found at $VENV"
+    check "Environment" 1 "Python 3 runtime not found"
   fi
 
-  # 2. Check User
+  # 2. Check TUI Dependencies
+  local tui_py
+  tui_py=$(find_python 1)
+  if [[ -n "$tui_py" ]] && "$tui_py" -c "import textual" &>/dev/null; then
+    check "TUI Dependencies" 0 "Textual library available"
+  else
+    check "TUI Dependencies" 1 "Textual library not found (run: pip3 install textual)"
+  fi
+
+  # 3. Check User
   if id "$RUN_USER" &>/dev/null; then
     check "Run User" 0 "User '$RUN_USER' exists"
   else
     check "Run User" 1 "User '$RUN_USER' does not exist"
   fi
 
-  # 3. Check Failed Services
-  local failed=$(systemctl list-units --all --plain --state=failed "${PREFIX}-*.service" | awk '{print $1}' | grep '\.service$' | wc -l)
+  # 4. Check Failed Services
+  local failed=$(systemctl list-units --all --plain --state=failed "${PREFIX}-*.service" 2>/dev/null | awk '{print $1}' | grep '\.service$' | wc -l)
   if [[ $failed -eq 0 ]]; then
     check "Services" 0 "All fire services are healthy"
   else
     check "Services" 1 "$failed services have failed"
   fi
 
-  # 4. Check Disk Space
+  # 5. Check Disk Space
   local disk_usage=$(df -h / | tail -n 1 | awk '{print $5}' | sed 's/%//')
   if (( disk_usage < 90 )); then
     check "Disk Space" 0 "$disk_usage% used (Healthy)"
@@ -148,7 +250,7 @@ action_doctor() {
     check "Disk Space" 1 "$disk_usage% used (Warning: Critically Low)"
   fi
 
-  # 5. Check Memory
+  # 6. Check Memory
   local mem_free=$(free -m | grep Mem | awk '{print $4}')
   if (( mem_free > 50 )); then
     check "Memory" 0 "${mem_free}MB free (Healthy)"
@@ -772,11 +874,9 @@ action_start() {
   if [[ -n "$INTERPRETER_OPT" ]]; then
     exec_cmd="$INTERPRETER_OPT"
   elif [[ "$ext" == "py" ]]; then
-    if [[ -f "$VENV/bin/python" ]]; then
-      exec_cmd="$VENV/bin/python"
-    else
-      exec_cmd="python3"
-    fi
+    local py_bin
+    py_bin=$(find_python 0)
+    exec_cmd="${py_bin:-python3}"
   elif [[ "$ext" == "js" ]]; then
     exec_cmd="node"
   elif [[ "$ext" == "sh" ]]; then
@@ -785,7 +885,9 @@ action_start() {
     exec_cmd=""
   else
     # Fallback to python if unsure? Or error? Let's default to python for legacy comp
-    exec_cmd="python3"
+    local py_bin
+    py_bin=$(find_python 0)
+    exec_cmd="${py_bin:-python3}"
   fi
 
   # Construct Command
@@ -815,7 +917,11 @@ action_start() {
   done
   
   # Inject Path for VENV if detected
-  if [[ "$full_exec" == *"$VENV"* ]]; then
+  if [[ "$exec_cmd" == *"/bin/python"* && "$exec_cmd" != "/usr/bin/python"* && "$exec_cmd" != "/usr/local/bin/python"* ]]; then
+    local venv_bin
+    venv_bin=$(dirname "$exec_cmd")
+    env_section+="Environment=\"PATH=$venv_bin:/usr/local/bin:/usr/bin:/bin\""$'\n'
+  elif [[ -n "$VENV" && -d "$VENV" ]]; then
     env_section+="Environment=\"PATH=$VENV/bin:/usr/local/bin:/usr/bin:/bin\""$'\n'
   fi
 
@@ -1877,12 +1983,25 @@ action_tunnel() {
 }
 
 action_dashboard() {
+  # Locate TUI script
+  local tui_script=""
+  if [[ -f "/usr/local/bin/fire_tui.py" ]]; then
+    tui_script="/usr/local/bin/fire_tui.py"
+  elif [[ -f "${WORKDIR}/tui/fire_tui.py" ]]; then
+    tui_script="${WORKDIR}/tui/fire_tui.py"
+  elif [[ -f "/opt/fire-pm/tui/fire_tui.py" ]]; then
+    tui_script="/opt/fire-pm/tui/fire_tui.py"
+  fi
+
+  local py_bin
+  py_bin=$(find_python 1)
+
   # If we have the python TUI and textual is installed, use it
-  if [[ -f "/usr/local/bin/fire_tui.py" && -x "$VENV/bin/python" ]]; then
+  if [[ -n "$tui_script" && -n "$py_bin" ]] && "$py_bin" -c "import textual" &>/dev/null; then
     # Loop to allow returning from live views or info screens
     while true; do
         rm -f /tmp/fire_tui_next_cmd
-        "$VENV/bin/python" /usr/local/bin/fire_tui.py
+        "$py_bin" "$tui_script"
         
         if [[ -f /tmp/fire_tui_next_cmd ]]; then
             local next_cmd=$(cat /tmp/fire_tui_next_cmd)
