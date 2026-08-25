@@ -260,10 +260,10 @@ if [[ -d "/etc/sudoers.d" ]]; then
   SUDOERS_FILE="/etc/sudoers.d/fire-pm"
   {
     echo "# Fire PM — Allow administrative users to manage fire services without password prompt"
-    echo "%sudo ALL=(ALL) NOPASSWD: /usr/local/bin/fire"
-    echo "%wheel ALL=(ALL) NOPASSWD: /usr/local/bin/fire"
+    echo "%sudo ALL=(ALL) NOPASSWD: SETENV: /usr/local/bin/fire"
+    echo "%wheel ALL=(ALL) NOPASSWD: SETENV: /usr/local/bin/fire"
     if [[ -n "$SUDO_USER" && "$SUDO_USER" != "root" ]]; then
-      echo "$SUDO_USER ALL=(ALL) NOPASSWD: /usr/local/bin/fire"
+      echo "$SUDO_USER ALL=(ALL) NOPASSWD: SETENV: /usr/local/bin/fire"
     fi
   } > "$SUDOERS_FILE"
   chmod 0440 "$SUDOERS_FILE"
