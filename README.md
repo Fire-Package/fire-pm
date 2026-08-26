@@ -93,6 +93,21 @@ fire tunnel open 3000 --provider custom
 fire tunnel open 3000 --provider quick
 ```
 
+#### How Does Fire PM Compare?
+
+| Feature | Fire PM (Quick) | Fire PM (Custom) | ngrok (Free) | localtunnel | Tailscale Funnel |
+|---|---|---|---|---|---|
+| **Setup** | None | `fire tunnel setup` | Account signup | `npm install` | Tailscale login |
+| **Account Required** | ❌ No | ❌ No | ✅ Yes | ❌ No | ✅ Yes |
+| **Custom Domain** | ❌ | ✅ Your domain | Paid plan only | ❌ | ❌ |
+| **Persistent URL** | ❌ Random | ✅ Stable | Paid plan only | ❌ Random | ✅ Stable |
+| **HTTPS** | ✅ Automatic | ✅ Your certs | ✅ Automatic | ✅ Automatic | ✅ Automatic |
+| **Rate Limits** | Cloudflare fair-use | None (your server) | 40 req/min | Unreliable | Tailscale limits |
+| **Self-Hosted** | ❌ | ✅ Full control | ❌ | ❌ | ❌ |
+| **Concurrent Tunnels** | Unlimited | Unlimited | 1 (free) | 1 | Limited |
+| **Time Limit** | Until you close it | Until you close it | 2 hours (free) | Unreliable | No limit |
+| **Built Into PM** | ✅ | ✅ | ❌ Separate tool | ❌ Separate tool | ❌ Separate tool |
+
 ### 4. Developer Web Dashboard & API
 Start the Web UI as a managed background service:
 ```bash
