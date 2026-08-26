@@ -321,6 +321,10 @@ command_needs_root() {
           ;;
       esac
       ;;
+    completion)
+      [[ "$subcmd" == "install" || "$subcmd" == "--install" ]] && return 0
+      return 1
+      ;;
     *)
       return 1
       ;;
@@ -3112,16 +3116,23 @@ action_completion() {
       generate_fish_completion
       ;;
     install|--install)
+      local tmp_comp
+      tmp_comp=$(mktemp)
+      generate_bash_completion > "$tmp_comp"
       if [[ -d "/etc/bash_completion.d" ]]; then
-        generate_bash_completion > /etc/bash_completion.d/fire 2>/dev/null || sudo bash -c "fire completion bash > /etc/bash_completion.d/fire"
-        chmod 644 /etc/bash_completion.d/fire 2>/dev/null || true
+        cp "$tmp_comp" /etc/bash_completion.d/fire 2>/dev/null || sudo cp "$tmp_comp" /etc/bash_completion.d/fire
+        chmod 644 /etc/bash_completion.d/fire 2>/dev/null || sudo chmod 644 /etc/bash_completion.d/fire 2>/dev/null || true
+        rm -f "$tmp_comp"
         success "Bash completion installed to /etc/bash_completion.d/fire"
       elif [[ -d "/usr/share/bash-completion/completions" ]]; then
-        generate_bash_completion > /usr/share/bash-completion/completions/fire 2>/dev/null || sudo bash -c "fire completion bash > /usr/share/bash-completion/completions/fire"
+        cp "$tmp_comp" /usr/share/bash-completion/completions/fire 2>/dev/null || sudo cp "$tmp_comp" /usr/share/bash-completion/completions/fire
+        chmod 644 /usr/share/bash-completion/completions/fire 2>/dev/null || sudo chmod 644 /usr/share/bash-completion/completions/fire 2>/dev/null || true
+        rm -f "$tmp_comp"
         success "Bash completion installed to /usr/share/bash-completion/completions/fire"
       else
         mkdir -p "$HOME/.bash_completion.d"
-        generate_bash_completion > "$HOME/.bash_completion.d/fire"
+        cp "$tmp_comp" "$HOME/.bash_completion.d/fire"
+        rm -f "$tmp_comp"
         grep -q "source.*\.bash_completion\.d/fire" "$HOME/.bashrc" 2>/dev/null || echo "[[ -f ~/.bash_completion.d/fire ]] && source ~/.bash_completion.d/fire" >> "$HOME/.bashrc"
         success "Bash completion installed to ~/.bash_completion.d/fire and added to ~/.bashrc"
       fi
