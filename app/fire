@@ -2900,8 +2900,9 @@ generate_bash_completion() {
   cat << 'EOF'
 # Fire PM Bash Completion
 _fire_completions() {
-  local cur prev words cword
-  _init_completion || return
+  local cur="${COMP_WORDS[COMP_CWORD]}"
+  local prev="${COMP_WORDS[COMP_CWORD-1]}"
+  local cword=$COMP_CWORD
 
   local commands="start create list ls status stop restart delete del rm info show live doctor logs log flush clean-logs limit monit migrate update upgrade startup enable-boot unstartup disable-boot save dump restore resurrect tunnel completion help"
   local tunnel_subcmds="open start close stop list setup config"
@@ -2926,11 +2927,11 @@ _fire_completions() {
       return 0
       ;;
     2)
-      case "${words[1]}" in
+      case "${COMP_WORDS[1]}" in
         stop|restart|delete|del|rm|info|show|live|logs|log|flush|clean-logs|startup|enable-boot|unstartup|disable-boot|limit)
           local svcs
           svcs=$(_fire_services)
-          if [[ "${words[1]}" =~ ^(stop|restart|logs|log|flush|clean-logs|startup|enable-boot|unstartup|disable-boot)$ ]]; then
+          if [[ "${COMP_WORDS[1]}" =~ ^(stop|restart|logs|log|flush|clean-logs|startup|enable-boot|unstartup|disable-boot)$ ]]; then
             svcs="$svcs all"
           fi
           COMPREPLY=( $(compgen -W "$svcs" -- "$cur") )
@@ -2948,22 +2949,22 @@ _fire_completions() {
           if [[ "$cur" == -* ]]; then
             COMPREPLY=( $(compgen -W "$start_flags" -- "$cur") )
           else
-            _filedir
+            COMPREPLY=( $(compgen -f -- "$cur") )
           fi
           return 0
           ;;
         save|dump|restore|resurrect)
-          _filedir
+          COMPREPLY=( $(compgen -f -- "$cur") )
           return 0
           ;;
       esac
       ;;
     *)
-      case "${words[1]}" in
+      case "${COMP_WORDS[1]}" in
         start|create)
           case "$prev" in
             --env-file)
-              _filedir
+              COMPREPLY=( $(compgen -f -- "$cur") )
               return 0
               ;;
             --interpreter)
@@ -2979,7 +2980,7 @@ _fire_completions() {
           esac
           ;;
         tunnel)
-          if [[ "${words[2]}" == "open" && "$cur" == -* ]]; then
+          if [[ "${COMP_WORDS[2]}" == "open" && "$cur" == -* ]]; then
             COMPREPLY=( $(compgen -W "--provider --quick --custom" -- "$cur") )
             return 0
           fi
