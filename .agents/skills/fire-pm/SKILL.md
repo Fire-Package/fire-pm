@@ -52,6 +52,10 @@ fire info <service_name>
 fire logs <service_name>
 fire live <service_name>
 
+# Flush / clean accumulated service logs
+fire flush <service_name|all>
+fire logs clear <service_name|all>
+
 # Stop, restart, or delete a service
 fire stop <service_name>
 fire restart <service_name>

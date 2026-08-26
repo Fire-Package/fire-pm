@@ -308,7 +308,7 @@ command_needs_root() {
   local cmd="$1"
   local subcmd="$2"
   case "$cmd" in
-    start|create|stop|restart|delete|del|rm|limit|migrate|update|save|dump|restore|resurrect|startup|unstartup)
+    start|create|stop|restart|delete|del|rm|limit|migrate|update|save|dump|restore|resurrect|startup|unstartup|flush)
       return 0
       ;;
     tunnel)
@@ -1799,14 +1799,38 @@ action_live() {
   done
 }
 
+action_flush() {
+  local target="${ARGS[0]}"
+
+  if [[ -z "$target" || "$target" == "all" ]]; then
+    journalctl --rotate >/dev/null 2>&1 || true
+    journalctl --vacuum-time=1s >/dev/null 2>&1 || true
+    if [[ -d "$TUNNEL_DIR" ]]; then
+      rm -f "$TUNNEL_DIR"/*.log 2>/dev/null || true
+    fi
+    success "Flushed logs for all Fire PM services and tunnels."
+  else
+    local svc_name=$(resolve_service_name "$target")
+    if [[ -n "$svc_name" ]]; then
+      local display_name="${svc_name#$PREFIX-}"
+      display_name="${display_name%.service}"
+      journalctl --rotate >/dev/null 2>&1 || true
+      journalctl --vacuum-time=1s >/dev/null 2>&1 || true
+      success "Flushed logs for process: $display_name"
+    else
+      error "Process not found: $target"
+      exit 1
+    fi
+  fi
+}
+
 action_logs() {
   local target="${ARGS[0]}"
   local subtarget="${ARGS[1]}"
 
-  if [[ "$target" == "clear" ]]; then
-    journalctl --rotate >/dev/null 2>&1
-    journalctl --vacuum-time=1s >/dev/null 2>&1
-    success "System journal logs purged."
+  if [[ "$target" == "clear" || "$target" == "--clean" || "$target" == "clean" ]]; then
+    ARGS=("$subtarget")
+    action_flush
     return
   fi
 
@@ -2878,6 +2902,7 @@ show_help() {
   echo "  live <name>      Open live cockpit for a process"
   echo "  doctor           Run system health diagnostics"
   echo "  logs [name]      Stream logs"
+  echo "  flush [name|all] Flush accumulated service logs and journal"
   echo "  monit            Real-time monitoring dashboard"
   echo "  migrate          Migrate legacy fire services to new format"
   echo "  update           Update Fire PM to the latest version"
@@ -2930,6 +2955,7 @@ case "$CMD" in
   live)          action_live ;;
   doctor)        action_doctor ;;
   logs|log)      action_logs ;;
+  flush|clean-logs) action_flush ;;
   limit)         action_limit ;;
   monit)         action_monit ;;
   migrate)       action_migrate ;;

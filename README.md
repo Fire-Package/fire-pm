@@ -54,6 +54,10 @@ fire doctor
 # Tail live output logs
 fire logs my-api
 
+# Flush and clean accumulated service logs
+fire flush my-api
+fire flush all
+
 # Stop, restart, or delete processes
 fire stop my-api
 fire restart my-api
