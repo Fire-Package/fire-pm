@@ -308,7 +308,7 @@ command_needs_root() {
   local cmd="$1"
   local subcmd="$2"
   case "$cmd" in
-    start|create|stop|restart|delete|del|rm|limit|migrate)
+    start|create|stop|restart|delete|del|rm|limit|migrate|update)
       return 0
       ;;
     tunnel)
@@ -852,6 +852,7 @@ ARGS=()
 NAME_OPT=""
 INTERPRETER_OPT=""
 ENV_VARS=()
+ENV_FILE=""
 PASSTHROUGH_ARGS=()
 JSON_OPT=0
 
@@ -868,6 +869,10 @@ parse_args() {
         ;;
       --env)
         ENV_VARS+=("$2")
+        shift 2
+        ;;
+      --env-file)
+        ENV_FILE="$2"
         shift 2
         ;;
       --user)
@@ -950,6 +955,23 @@ action_start() {
 
   # Build Environment Section
   local env_section=""
+
+  # Load --env-file via systemd EnvironmentFile directive
+  if [[ -n "$ENV_FILE" ]]; then
+    local resolved_env_file=""
+    if [[ "$ENV_FILE" == /* ]]; then
+      resolved_env_file="$ENV_FILE"
+    else
+      resolved_env_file="$WORKDIR/$ENV_FILE"
+    fi
+    if [[ ! -f "$resolved_env_file" ]]; then
+      error "Env file not found: $resolved_env_file"
+      exit 1
+    fi
+    env_section+="EnvironmentFile=$resolved_env_file"$'\n'
+  fi
+
+  # Explicit --env flags (override env-file values for same keys)
   for e in "${ENV_VARS[@]}"; do
     env_section+="Environment=\"$e\""$'\n'
   done
@@ -2388,6 +2410,85 @@ action_dashboard() {
   done
 }
 
+# ================== UPDATE ==================
+
+action_update() {
+  # Find the Fire PM source directory
+  local source_dir=""
+  local candidates=("/opt/fire-pm" "/usr/local/share/fire-pm")
+
+  # Check if the running script itself is inside a git repo
+  local script_path
+  script_path="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "")"
+  if [[ -n "$script_path" ]]; then
+    local script_dir
+    script_dir="$(dirname "$script_path")"
+    # If script is at /usr/local/bin/fire, check common source dirs
+    # If script is inside a repo (e.g. /opt/fire-pm/app/fire), use that
+    if [[ -d "$script_dir/../.git" ]]; then
+      candidates=("$(cd "$script_dir/.." && pwd)" "${candidates[@]}")
+    fi
+  fi
+
+  for dir in "${candidates[@]}"; do
+    if [[ -d "$dir/.git" && -f "$dir/app/fire" && -f "$dir/install.sh" ]]; then
+      source_dir="$dir"
+      break
+    fi
+  done
+
+  if [[ -z "$source_dir" ]]; then
+    # No existing clone found — clone fresh into /opt/fire-pm
+    info "No existing Fire PM installation found. Cloning into /opt/fire-pm..."
+    source_dir="/opt/fire-pm"
+    mkdir -p /opt
+    git clone https://github.com/Fire-Package/fire-pm.git "$source_dir"
+  fi
+
+  info "Updating Fire PM from ${CYAN}${source_dir}${NC}"
+
+  # Record current commit
+  local old_commit
+  old_commit=$(git -C "$source_dir" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+  # Pull latest
+  echo ""
+  git -C "$source_dir" fetch --all --prune 2>/dev/null || true
+  if ! git -C "$source_dir" pull --rebase 2>/dev/null; then
+    # If rebase fails (local changes), try merge
+    git -C "$source_dir" rebase --abort 2>/dev/null || true
+    git -C "$source_dir" pull --ff-only 2>/dev/null || {
+      error "Could not pull latest changes. You may have local modifications in $source_dir"
+      error "Resolve conflicts manually, then re-run: fire update"
+      exit 1
+    }
+  fi
+
+  local new_commit
+  new_commit=$(git -C "$source_dir" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+  if [[ "$old_commit" == "$new_commit" ]]; then
+    success "Already up to date (${GREY}${old_commit}${NC})"
+    return 0
+  fi
+
+  echo ""
+  info "Updated: ${YELLOW}${old_commit}${NC} → ${GREEN}${new_commit}${NC}"
+  echo ""
+
+  # Show what changed
+  echo -e "  ${BOLD}Changes:${NC}"
+  git -C "$source_dir" log --oneline "${old_commit}..${new_commit}" 2>/dev/null | while read -r line; do
+    echo -e "    ${CYAN}•${NC} $line"
+  done
+  echo ""
+
+  # Re-run installer
+  info "Re-running installer..."
+  echo ""
+  bash "$source_dir/install.sh" "$@"
+}
+
 show_help() {
   echo "Usage: fire <command> [options]"
   echo ""
@@ -2395,6 +2496,7 @@ show_help() {
   echo "  start <script>   Start a script (py, js, sh) as a service"
   echo "    --name <name>    Set a custom name"
   echo "    --env KEY=VAL    Set environment variable (repeatable)"
+  echo "    --env-file <path> Load environment variables from a .env file"
   echo "    -- <args>        Pass arguments to the script"
   echo "  list             List all managed processes
   status [--json]  Show status summary in JSON format"
@@ -2408,14 +2510,17 @@ show_help() {
   echo "  logs [name]      Stream logs"
   echo "  monit            Real-time monitoring dashboard"
   echo "  migrate          Migrate legacy fire services to new format"
-  echo "  tunnel open <port>  Open a tunnel at https://<hash>${TUNNEL_HOST_SUFFIX}.${TUNNEL_BASE_DOMAIN}"
-  echo "  tunnel list         List active temporary tunnels"
-  echo "  tunnel close <port> Close a temporary tunnel"
+  echo "  update           Update Fire PM to the latest version"
+  echo "  tunnel open <port>  Open a public HTTPS tunnel"
+  echo "  tunnel list         List active tunnels"
+  echo "  tunnel close <port> Close a tunnel"
+  echo "  tunnel setup        Configure custom domain tunnels"
   echo ""
   echo "Examples:"
-  echo "  fire start server.py --name api --port 8080"
-  echo "  fire start app.js --env NODE_ENV=production"
+  echo "  fire start server.py --name api"
+  echo "  fire start app.js --env-file .env --env NODE_ENV=production"
   echo "  fire tunnel open 3000"
+  echo "  fire update"
 }
 
 # ================== ROUTING ==================
@@ -2454,6 +2559,7 @@ case "$CMD" in
   limit)         action_limit ;;
   monit)         action_monit ;;
   migrate)       action_migrate ;;
+  update|upgrade) action_update ;;
   tunnel)        action_tunnel ;;
   help|--help|-h) show_help ;;
   *)

@@ -33,10 +33,13 @@ Fire PM is a Linux-native process supervisor and application management ecosyste
 
 ```bash
 # Start a script or binary as a managed service
-fire start <script_or_binary> --name <service_name> [--env KEY=VALUE] [--watch]
+fire start <script_or_binary> --name <service_name> [--env KEY=VALUE] [--env-file .env] [--watch]
 
 # Start with resource limits
 fire start app.py --name api --memory 512M --cpu 50%
+
+# Load environment from a .env file (explicit --env flags override file values)
+fire start app.py --name api --env-file .env --env DEBUG=true
 
 # List all services with status, CPU, memory, uptime, and port
 fire list
@@ -64,6 +67,9 @@ fire monit
 # System diagnostics & health check
 fire doctor
 fire doctor --json
+
+# Self-update Fire PM to the latest version
+fire update
 ```
 
 ### Reverse-Proxy Tunnels
