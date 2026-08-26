@@ -59,6 +59,13 @@ fire stop my-api
 fire restart my-api
 fire delete my-api
 
+# Enable or disable auto-start on Linux system boot
+fire startup my-api
+fire unstartup my-api
+
+# Start a temporary service without boot persistence
+fire start app.py --name test-worker --no-startup
+
 # Save snapshot of all running processes (for backup / migration)
 fire save
 

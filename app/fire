@@ -308,7 +308,7 @@ command_needs_root() {
   local cmd="$1"
   local subcmd="$2"
   case "$cmd" in
-    start|create|stop|restart|delete|del|rm|limit|migrate|update|save|dump|restore|resurrect)
+    start|create|stop|restart|delete|del|rm|limit|migrate|update|save|dump|restore|resurrect|startup|unstartup)
       return 0
       ;;
     tunnel)
@@ -853,6 +853,7 @@ NAME_OPT=""
 INTERPRETER_OPT=""
 ENV_VARS=()
 ENV_FILE=""
+NO_STARTUP_OPT=0
 PASSTHROUGH_ARGS=()
 JSON_OPT=0
 
@@ -874,6 +875,10 @@ parse_args() {
       --env-file)
         ENV_FILE="$2"
         shift 2
+        ;;
+      --no-startup|--no-boot)
+        NO_STARTUP_OPT=1
+        shift
         ;;
       --user)
         RUN_USER="$2"
@@ -1018,13 +1023,22 @@ WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  systemctl enable "$service_name" >/dev/null
+  if [[ "$NO_STARTUP_OPT" -eq 1 ]]; then
+    systemctl disable "$service_name" >/dev/null 2>&1 || true
+  else
+    systemctl enable "$service_name" >/dev/null 2>&1 || true
+  fi
   systemctl start "$service_name"
   
   success "Process started"
   echo -e "   ${BOLD}Name:${NC} $safe_name"
   echo -e "   ${BOLD}Cmd:${NC}  $full_exec"
   echo -e "   ${BOLD}Mode:${NC} $RUN_USER"
+  if [[ "$NO_STARTUP_OPT" -eq 1 ]]; then
+    echo -e "   ${BOLD}Boot:${NC} ${YELLOW}disabled${NC} (--no-startup)"
+  else
+    echo -e "   ${BOLD}Boot:${NC} ${GREEN}enabled${NC}"
+  fi
 }
 
 # ================== TABLE DRAWING FUNCTIONS (Dynamically Defined) ==================
@@ -1537,6 +1551,76 @@ action_delete() {
   fi
 }
 
+action_startup() {
+  local target="${ARGS[0]}"
+  [[ -z "$target" ]] && error "Usage: fire startup <name|all>" && exit 1
+
+  if [[ "$target" == "all" ]]; then
+    local count=0
+    for sfile in "$SYSTEM_DIR"/${PREFIX}-*.service; do
+      [[ -f "$sfile" ]] || continue
+      local svc=$(basename "$sfile")
+      [[ "$svc" == *"-reload@.service" ]] && continue
+      systemctl enable "$svc" >/dev/null 2>&1 || true
+      local name="${svc#$PREFIX-}"
+      name="${name%.service}"
+      success "Enabled on boot: $name"
+      ((count++))
+    done
+    if [[ $count -eq 0 ]]; then
+      warn "No managed fire processes found."
+    else
+      info "All $count process(es) enabled on system boot."
+    fi
+  else
+    local svc_name=$(resolve_service_name "$target")
+    if [[ -n "$svc_name" ]]; then
+      systemctl enable "$svc_name" >/dev/null 2>&1 || true
+      local display_name="${svc_name#$PREFIX-}"
+      display_name="${display_name%.service}"
+      success "Enabled on system boot: $display_name"
+    else
+      error "Process not found: $target"
+      exit 1
+    fi
+  fi
+}
+
+action_unstartup() {
+  local target="${ARGS[0]}"
+  [[ -z "$target" ]] && error "Usage: fire unstartup <name|all>" && exit 1
+
+  if [[ "$target" == "all" ]]; then
+    local count=0
+    for sfile in "$SYSTEM_DIR"/${PREFIX}-*.service; do
+      [[ -f "$sfile" ]] || continue
+      local svc=$(basename "$sfile")
+      [[ "$svc" == *"-reload@.service" ]] && continue
+      systemctl disable "$svc" >/dev/null 2>&1 || true
+      local name="${svc#$PREFIX-}"
+      name="${name%.service}"
+      warn "Disabled from boot: $name"
+      ((count++))
+    done
+    if [[ $count -eq 0 ]]; then
+      warn "No managed fire processes found."
+    else
+      info "All $count process(es) disabled from system boot."
+    fi
+  else
+    local svc_name=$(resolve_service_name "$target")
+    if [[ -n "$svc_name" ]]; then
+      systemctl disable "$svc_name" >/dev/null 2>&1 || true
+      local display_name="${svc_name#$PREFIX-}"
+      display_name="${display_name%.service}"
+      success "Disabled from system boot: $display_name"
+    else
+      error "Process not found: $target"
+      exit 1
+    fi
+  fi
+}
+
 action_info() {
   local target="${ARGS[0]}"
   [[ -z "$target" ]] && error "Usage: fire info <name|file>" && exit 1
@@ -1559,6 +1643,7 @@ action_info() {
   local work_dir=$(echo "$props" | grep WorkingDirectory | cut -d= -f2-)
   local user=$(echo "$props" | grep User | cut -d= -f2-)
   local raw_name=$(echo "$props" | grep Description | sed 's/Description=Fire Service: //')
+  local is_boot_enabled=$(systemctl is-enabled "$svc_name" 2>/dev/null || echo "disabled")
 
   # Parse ExecStart for Interpreter, Script, Args
   # Format of systemctl ExecStart: { path=/... ; argv[]=/... ; ignore_errors=no ; ... }
@@ -1615,13 +1700,17 @@ action_info() {
     local safe_interpreter=$(echo "$interpreter" | sed 's/\\/\\\\/g; s/"/\\"/g')
     local safe_time_info=$(echo "$time_info" | sed 's/\\/\\\\/g; s/"/\\"/g')
 
-    echo "{\"name\":\"$safe_raw_name\",\"service\":\"$svc_name\",\"status\":\"$state\",\"pid\":$pid_num,\"restarts\":$restarts_num,\"uptime\":\"$([[ "$state" == "active" ]] && echo "$safe_time_info" || echo "-")\",\"stopped_at\":\"$([[ "$state" != "active" ]] && echo "$safe_time_info" || echo "-")\",\"mem\":\"$mem\",\"cpu\":\"$cpu\",\"interpreter\":\"$safe_interpreter\",\"script\":\"$safe_script\",\"args\":\"$safe_args\",\"working_directory\":\"$safe_work_dir\",\"user\":\"$user\",\"log_path\":\"journalctl -u $svc_name -f\"}"
+    echo "{\"name\":\"$safe_raw_name\",\"service\":\"$svc_name\",\"status\":\"$state\",\"boot_enabled\":\"$is_boot_enabled\",\"pid\":$pid_num,\"restarts\":$restarts_num,\"uptime\":\"$([[ "$state" == "active" ]] && echo "$safe_time_info" || echo "-")\",\"stopped_at\":\"$([[ "$state" != "active" ]] && echo "$safe_time_info" || echo "-")\",\"mem\":\"$mem\",\"cpu\":\"$cpu\",\"interpreter\":\"$safe_interpreter\",\"script\":\"$safe_script\",\"args\":\"$safe_args\",\"working_directory\":\"$safe_work_dir\",\"user\":\"$user\",\"log_path\":\"journalctl -u $svc_name -f\"}"
     return
   fi
+
+  local boot_color=$GREEN
+  [[ "$is_boot_enabled" != "enabled" ]] && boot_color=$YELLOW
 
   echo -e "${BOLD}Describing process with name ${CYAN}$raw_name${NC}"
   echo -e "${GREY}---------------------------------------------------------------------------${NC}"
   printf "  %-17s : ${status_color}%s${NC}\n" "status" "$state"
+  printf "  %-17s : ${boot_color}%s${NC}\n" "boot persistence" "$is_boot_enabled"
   printf "  %-17s : %s\n" "name" "$raw_name"
   printf "  %-17s : %s\n" "interpreter" "$interpreter"
   printf "  %-17s : %s\n" "script" "$script"
@@ -2792,6 +2881,8 @@ show_help() {
   echo "  monit            Real-time monitoring dashboard"
   echo "  migrate          Migrate legacy fire services to new format"
   echo "  update           Update Fire PM to the latest version"
+  echo "  startup <name|all> Enable service auto-start on system boot"
+  echo "  unstartup <name|all> Disable service auto-start on system boot"
   echo "  save [path]      Save running process snapshot to dump.json (alias: dump)"
   echo "  restore [path]   Restore all processes from dump.json (alias: resurrect)"
   echo "  tunnel open <port>  Open a public HTTPS tunnel"
@@ -2843,6 +2934,8 @@ case "$CMD" in
   monit)         action_monit ;;
   migrate)       action_migrate ;;
   update|upgrade) action_update ;;
+  startup|enable-boot) action_startup ;;
+  unstartup|disable-boot) action_unstartup ;;
   save|dump)     action_save ;;
   restore|resurrect) action_restore ;;
   tunnel)        action_tunnel ;;

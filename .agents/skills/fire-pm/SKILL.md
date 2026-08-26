@@ -68,6 +68,13 @@ fire monit
 fire doctor
 fire doctor --json
 
+# Toggle system boot auto-start persistence
+fire startup <service_name|all>
+fire unstartup <service_name|all>
+
+# Start without boot persistence (temporary testing)
+fire start app.py --name test --no-startup
+
 # Snapshot running process state to /etc/fire-pm/dump.json
 fire save
 fire save /path/to/backup.json
