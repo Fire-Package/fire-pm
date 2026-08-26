@@ -248,11 +248,13 @@ fi
 
 # 7. Install CLI binary
 echo -e "${CYAN}1/4 Installing Fire CLI engine...${NC}"
-cp "${INSTALL_SOURCE_DIR}/app/fire" /usr/local/bin/fire
-chmod +x /usr/local/bin/fire
+cp "${INSTALL_SOURCE_DIR}/app/fire" /usr/local/bin/fire.tmp
+chmod +x /usr/local/bin/fire.tmp
+mv -f /usr/local/bin/fire.tmp /usr/local/bin/fire
 if [[ -f "${INSTALL_SOURCE_DIR}/app/ff-service" ]]; then
-  cp "${INSTALL_SOURCE_DIR}/app/ff-service" /usr/local/bin/ff-service
-  chmod +x /usr/local/bin/ff-service
+  cp "${INSTALL_SOURCE_DIR}/app/ff-service" /usr/local/bin/ff-service.tmp
+  chmod +x /usr/local/bin/ff-service.tmp
+  mv -f /usr/local/bin/ff-service.tmp /usr/local/bin/ff-service
 fi
 
 # Configure sudoers rule so fire can manage systemd without password prompts

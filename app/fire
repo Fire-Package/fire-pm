@@ -2610,7 +2610,7 @@ action_update() {
   # Re-run installer
   info "Re-running installer..."
   echo ""
-  bash "$source_dir/install.sh" "$@"
+  exec bash "$source_dir/install.sh" "$@"
 }
 
 # ================== SAVE & RESTORE ==================
