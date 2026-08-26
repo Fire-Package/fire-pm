@@ -2934,6 +2934,8 @@ case "$CMD" in
   monit)         action_monit ;;
   migrate)       action_migrate ;;
   update|upgrade) action_update ;;
+  startup|enable-boot) action_startup ;;
+  unstartup|disable-boot) action_unstartup ;;
   save|dump)     action_save ;;
   restore|resurrect) action_restore ;;
   tunnel)        action_tunnel ;;
