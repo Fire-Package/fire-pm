@@ -42,6 +42,9 @@ fire
 # Start a Python, Node.js, or Shell script as a persistent service
 fire start app.py --name my-api --env PORT=8080
 
+# Load environment variables from a .env file
+fire start app.py --name my-api --env-file .env
+
 # List all managed services with CPU, memory, and port statistics
 fire list
 
@@ -58,6 +61,9 @@ fire delete my-api
 
 # Set Memory and CPU limits
 fire limit my-api 500M 50%
+
+# Update Fire PM to the latest version
+fire update
 ```
 
 ### 3. Public HTTPS Tunnels
