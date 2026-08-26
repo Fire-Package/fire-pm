@@ -59,8 +59,11 @@ fire stop my-api
 fire restart my-api
 fire delete my-api
 
-# Set Memory and CPU limits
-fire limit my-api 500M 50%
+# Save snapshot of all running processes (for backup / migration)
+fire save
+
+# Restore all processes from saved dump
+fire restore
 
 # Update Fire PM to the latest version
 fire update

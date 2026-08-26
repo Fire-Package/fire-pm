@@ -68,6 +68,15 @@ fire monit
 fire doctor
 fire doctor --json
 
+# Snapshot running process state to /etc/fire-pm/dump.json
+fire save
+fire save /path/to/backup.json
+fire save --json
+
+# Restore processes from snapshot
+fire restore
+fire restore /path/to/backup.json
+
 # Self-update Fire PM to the latest version
 fire update
 ```
