@@ -275,6 +275,15 @@ if [[ -d "/etc/sudoers.d" ]]; then
 fi
 echo -e "    ${GREEN}✔${NC} Fire CLI installed to /usr/local/bin/fire"
 
+# Install Shell Auto-Completion
+if [[ -d "/etc/bash_completion.d" ]]; then
+  /usr/local/bin/fire completion bash > /etc/bash_completion.d/fire 2>/dev/null || true
+  chmod 644 /etc/bash_completion.d/fire 2>/dev/null || true
+elif [[ -d "/usr/share/bash-completion/completions" ]]; then
+  /usr/local/bin/fire completion bash > /usr/share/bash-completion/completions/fire 2>/dev/null || true
+fi
+echo -e "    ${GREEN}✔${NC} Shell auto-completion configured"
+
 # 8. Install TUI
 echo -e "${CYAN}2/4 Installing Terminal UI (TUI)...${NC}"
 cp "${INSTALL_SOURCE_DIR}/tui/fire_tui.py" /usr/local/bin/fire_tui.py

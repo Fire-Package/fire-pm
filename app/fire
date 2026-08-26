@@ -2883,6 +2883,270 @@ else:
 PYEOF
 }
 
+# ================== AUTO-COMPLETION ==================
+
+generate_bash_completion() {
+  cat << 'EOF'
+# Fire PM Bash Completion
+_fire_completions() {
+  local cur prev words cword
+  _init_completion || return
+
+  local commands="start create list ls status stop restart delete del rm info show live doctor logs log flush clean-logs limit monit migrate update upgrade startup enable-boot unstartup disable-boot save dump restore resurrect tunnel completion help"
+  local tunnel_subcmds="open start close stop list setup config"
+  local start_flags="--name --env --env-file --no-startup --no-boot --interpreter --user --json"
+
+  _fire_services() {
+    local sfiles=(/etc/systemd/system/fire-*.service)
+    if [[ -e "${sfiles[0]}" ]]; then
+      for f in "${sfiles[@]}"; do
+        local b=$(basename "$f")
+        [[ "$b" == *"-reload@.service" || "$b" == "*.bak" || "$b" == "*~" ]] && continue
+        local name="${b#fire-}"
+        name="${name%.service}"
+        echo "$name"
+      done
+    fi
+  }
+
+  case "$cword" in
+    1)
+      COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
+      return 0
+      ;;
+    2)
+      case "${words[1]}" in
+        stop|restart|delete|del|rm|info|show|live|logs|log|flush|clean-logs|startup|enable-boot|unstartup|disable-boot|limit)
+          local svcs
+          svcs=$(_fire_services)
+          if [[ "${words[1]}" =~ ^(stop|restart|logs|log|flush|clean-logs|startup|enable-boot|unstartup|disable-boot)$ ]]; then
+            svcs="$svcs all"
+          fi
+          COMPREPLY=( $(compgen -W "$svcs" -- "$cur") )
+          return 0
+          ;;
+        tunnel)
+          COMPREPLY=( $(compgen -W "$tunnel_subcmds" -- "$cur") )
+          return 0
+          ;;
+        completion)
+          COMPREPLY=( $(compgen -W "bash zsh fish install" -- "$cur") )
+          return 0
+          ;;
+        start|create)
+          if [[ "$cur" == -* ]]; then
+            COMPREPLY=( $(compgen -W "$start_flags" -- "$cur") )
+          else
+            _filedir
+          fi
+          return 0
+          ;;
+        save|dump|restore|resurrect)
+          _filedir
+          return 0
+          ;;
+      esac
+      ;;
+    *)
+      case "${words[1]}" in
+        start|create)
+          case "$prev" in
+            --env-file)
+              _filedir
+              return 0
+              ;;
+            --interpreter)
+              COMPREPLY=( $(compgen -W "python3 python node bash sh bun deno" -- "$cur") )
+              return 0
+              ;;
+            *)
+              if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "$start_flags" -- "$cur") )
+                return 0
+              fi
+              ;;
+          esac
+          ;;
+        tunnel)
+          if [[ "${words[2]}" == "open" && "$cur" == -* ]]; then
+            COMPREPLY=( $(compgen -W "--provider --quick --custom" -- "$cur") )
+            return 0
+          fi
+          if [[ "$prev" == "--provider" ]]; then
+            COMPREPLY=( $(compgen -W "quick custom" -- "$cur") )
+            return 0
+          fi
+          ;;
+      esac
+      ;;
+  esac
+}
+complete -F _fire_completions fire
+EOF
+}
+
+generate_zsh_completion() {
+  cat << 'EOF'
+#compdef fire
+
+_fire() {
+  local -a commands
+  commands=(
+    'start:Start a script as a managed service'
+    'list:List all managed processes'
+    'stop:Stop a running process'
+    'restart:Restart a process'
+    'delete:Delete a managed process'
+    'info:Show detailed process information'
+    'live:Open live dashboard cockpit'
+    'doctor:Run system diagnostics'
+    'logs:Stream process logs'
+    'flush:Flush accumulated service logs'
+    'limit:Set CPU and memory limits'
+    'monit:Real-time terminal monitor'
+    'update:Update Fire PM to latest version'
+    'startup:Enable service auto-start on boot'
+    'unstartup:Disable service auto-start on boot'
+    'save:Save process snapshot to dump.json'
+    'restore:Restore processes from dump.json'
+    'tunnel:Manage public HTTPS tunnels'
+    'completion:Generate shell auto-completion'
+  )
+
+  _fire_services() {
+    local -a svcs
+    for f in /etc/systemd/system/fire-*.service(N); do
+      local b=${f:t}
+      [[ "$b" == *"-reload@.service" ]] && continue
+      local name=${b#fire-}
+      name=${name%.service}
+      svcs+=("$name")
+    done
+    _describe -t services 'service' svcs
+  }
+
+  _arguments -C \
+    '1: :->command' \
+    '*:: :->args'
+
+  case $state in
+    command)
+      _describe -t commands 'fire command' commands
+      ;;
+    args)
+      case $words[1] in
+        stop|restart|delete|info|show|live|logs|flush|startup|unstartup|limit)
+          _fire_services
+          ;;
+        tunnel)
+          local -a subcmds
+          subcmds=('open:Open a tunnel' 'list:List active tunnels' 'close:Close a tunnel' 'setup:Configure custom domain')
+          _describe -t subcmds 'tunnel command' subcmds
+          ;;
+        completion)
+          local -a shells
+          shells=('bash:Bash completion' 'zsh:Zsh completion' 'fish:Fish completion' 'install:Install completions')
+          _describe -t shells 'shell' shells
+          ;;
+        *)
+          _files
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_fire "$@"
+EOF
+}
+
+generate_fish_completion() {
+  cat << 'EOF'
+complete -c fire -f -n '__fish_use_subcommand' -a start -d 'Start a script as a managed service'
+complete -c fire -f -n '__fish_use_subcommand' -a list -d 'List all managed processes'
+complete -c fire -f -n '__fish_use_subcommand' -a stop -d 'Stop a process'
+complete -c fire -f -n '__fish_use_subcommand' -a restart -d 'Restart a process'
+complete -c fire -f -n '__fish_use_subcommand' -a delete -d 'Delete a process'
+complete -c fire -f -n '__fish_use_subcommand' -a info -d 'Show process information'
+complete -c fire -f -n '__fish_use_subcommand' -a live -d 'Open live cockpit'
+complete -c fire -f -n '__fish_use_subcommand' -a doctor -d 'Run system diagnostics'
+complete -c fire -f -n '__fish_use_subcommand' -a logs -d 'Stream process logs'
+complete -c fire -f -n '__fish_use_subcommand' -a flush -d 'Flush accumulated logs'
+complete -c fire -f -n '__fish_use_subcommand' -a limit -d 'Set resource limits'
+complete -c fire -f -n '__fish_use_subcommand' -a monit -d 'Real-time terminal monitor'
+complete -c fire -f -n '__fish_use_subcommand' -a update -d 'Update Fire PM'
+complete -c fire -f -n '__fish_use_subcommand' -a startup -d 'Enable auto-start on boot'
+complete -c fire -f -n '__fish_use_subcommand' -a unstartup -d 'Disable auto-start on boot'
+complete -c fire -f -n '__fish_use_subcommand' -a save -d 'Save process snapshot'
+complete -c fire -f -n '__fish_use_subcommand' -a restore -d 'Restore processes from snapshot'
+complete -c fire -f -n '__fish_use_subcommand' -a tunnel -d 'Manage public HTTPS tunnels'
+complete -c fire -f -n '__fish_use_subcommand' -a completion -d 'Generate shell completions'
+
+function __fire_services
+    for f in /etc/systemd/system/fire-*.service
+        if test -e $f
+            set -l b (basename $f)
+            if not string match -q "*-reload@.service" $b
+                set -l name (string replace -r '^fire-' '' $b | string replace -r '\.service$' '')
+                echo $name
+            end
+        end
+    end
+end
+
+complete -c fire -f -n '__fish_seen_subcommand_from stop restart delete info live logs flush startup unstartup limit' -a '(__fire_services)'
+EOF
+}
+
+action_completion() {
+  local target="${ARGS[0]}"
+
+  case "$target" in
+    bash)
+      generate_bash_completion
+      ;;
+    zsh)
+      generate_zsh_completion
+      ;;
+    fish)
+      generate_fish_completion
+      ;;
+    install|--install)
+      if [[ -d "/etc/bash_completion.d" ]]; then
+        generate_bash_completion > /etc/bash_completion.d/fire 2>/dev/null || sudo bash -c "fire completion bash > /etc/bash_completion.d/fire"
+        chmod 644 /etc/bash_completion.d/fire 2>/dev/null || true
+        success "Bash completion installed to /etc/bash_completion.d/fire"
+      elif [[ -d "/usr/share/bash-completion/completions" ]]; then
+        generate_bash_completion > /usr/share/bash-completion/completions/fire 2>/dev/null || sudo bash -c "fire completion bash > /usr/share/bash-completion/completions/fire"
+        success "Bash completion installed to /usr/share/bash-completion/completions/fire"
+      else
+        mkdir -p "$HOME/.bash_completion.d"
+        generate_bash_completion > "$HOME/.bash_completion.d/fire"
+        grep -q "source.*\.bash_completion\.d/fire" "$HOME/.bashrc" 2>/dev/null || echo "[[ -f ~/.bash_completion.d/fire ]] && source ~/.bash_completion.d/fire" >> "$HOME/.bashrc"
+        success "Bash completion installed to ~/.bash_completion.d/fire and added to ~/.bashrc"
+      fi
+      ;;
+    *)
+      info "Fire PM Shell Auto-Completion"
+      echo ""
+      echo "  To enable auto-completion for your shell:"
+      echo ""
+      echo "  Bash (auto-install):"
+      echo -e "    ${CYAN}fire completion install${NC}"
+      echo ""
+      echo "  Bash (manual):"
+      echo -e "    ${CYAN}source <(fire completion bash)${NC}"
+      echo ""
+      echo "  Zsh:"
+      echo -e "    ${CYAN}fire completion zsh > ~/.zsh/completion/_fire${NC}"
+      echo ""
+      echo "  Fish:"
+      echo -e "    ${CYAN}fire completion fish > ~/.config/fish/completions/fire.fish${NC}"
+      echo ""
+      ;;
+  esac
+}
+
 show_help() {
   echo "Usage: fire <command> [options]"
   echo ""
@@ -2910,6 +3174,7 @@ show_help() {
   echo "  unstartup <name|all> Disable service auto-start on system boot"
   echo "  save [path]      Save running process snapshot to dump.json (alias: dump)"
   echo "  restore [path]   Restore all processes from dump.json (alias: resurrect)"
+  echo "  completion [sh]  Generate or install shell auto-completion (bash, zsh, fish)"
   echo "  tunnel open <port>  Open a public HTTPS tunnel"
   echo "  tunnel list         List active tunnels"
   echo "  tunnel close <port> Close a tunnel"
@@ -2964,6 +3229,7 @@ case "$CMD" in
   unstartup|disable-boot) action_unstartup ;;
   save|dump)     action_save ;;
   restore|resurrect) action_restore ;;
+  completion|completions) action_completion ;;
   tunnel)        action_tunnel ;;
   help|--help|-h) show_help ;;
   *)

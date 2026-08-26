@@ -88,6 +88,12 @@ fire save --json
 fire restore
 fire restore /path/to/backup.json
 
+# Generate or install shell auto-completions
+fire completion bash
+fire completion zsh
+fire completion fish
+fire completion install
+
 # Self-update Fire PM to the latest version
 fire update
 ```

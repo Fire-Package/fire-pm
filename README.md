@@ -76,6 +76,9 @@ fire save
 # Restore all processes from saved dump
 fire restore
 
+# Install shell auto-completion (Bash, Zsh, Fish)
+fire completion install
+
 # Update Fire PM to the latest version
 fire update
 ```
