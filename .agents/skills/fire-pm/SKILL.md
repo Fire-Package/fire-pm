@@ -96,6 +96,7 @@ fire completion install
 
 # Self-update Fire PM to the latest version
 fire update
+fire update --force
 ```
 
 ### Reverse-Proxy Tunnels
