@@ -52,6 +52,7 @@ if [[ -n "$FIRE_INSTALL_WEB" ]]; then
   fi
 fi
 
+FORCE_INSTALL=false
 for arg in "$@"; do
   case "$arg" in
     --with-web)
@@ -60,12 +61,16 @@ for arg in "$@"; do
     --no-web|--without-web)
       INSTALL_WEB=false
       ;;
+    --force|-f)
+      FORCE_INSTALL=true
+      ;;
     -h|--help)
       echo "Usage: sudo ./install.sh [options]"
       echo ""
       echo "Options:"
       echo "  --with-web        Build and configure the Web UI Dashboard"
       echo "  --no-web          Skip building the Web UI Dashboard (CLI & TUI only)"
+      echo "  --force, -f       Force overwrite unstaged local modifications"
       echo "  -h, --help        Show this help message"
       exit 0
       ;;
@@ -239,7 +244,20 @@ else
   echo -e "${CYAN}Setting up Fire PM repository in ${TARGET_OPT_DIR}...${NC}"
   mkdir -p /opt
   if [[ -d "${TARGET_OPT_DIR}/.git" ]]; then
-    git -C "${TARGET_OPT_DIR}" pull --rebase || true
+    if [[ "$FORCE_INSTALL" == "true" ]]; then
+      git -C "${TARGET_OPT_DIR}" fetch --all --prune &>/dev/null || true
+      git -C "${TARGET_OPT_DIR}" checkout main 2>/dev/null || git -C "${TARGET_OPT_DIR}" checkout master 2>/dev/null || true
+      git -C "${TARGET_OPT_DIR}" reset --hard origin/main 2>/dev/null || git -C "${TARGET_OPT_DIR}" reset --hard origin/master 2>/dev/null || true
+      git -C "${TARGET_OPT_DIR}" clean -fd &>/dev/null || true
+    else
+      if ! git -C "${TARGET_OPT_DIR}" pull --ff-only &>/dev/null; then
+        # Reset local unstaged/untracked modifications to allow clean upgrade
+        git -C "${TARGET_OPT_DIR}" fetch --all --prune &>/dev/null || true
+        git -C "${TARGET_OPT_DIR}" checkout main 2>/dev/null || git -C "${TARGET_OPT_DIR}" checkout master 2>/dev/null || true
+        git -C "${TARGET_OPT_DIR}" reset --hard origin/main 2>/dev/null || git -C "${TARGET_OPT_DIR}" reset --hard origin/master 2>/dev/null || true
+        git -C "${TARGET_OPT_DIR}" clean -fd &>/dev/null || true
+      fi
+    fi
   else
     git clone https://github.com/Fire-Package/fire-pm.git "${TARGET_OPT_DIR}"
   fi

@@ -2530,6 +2530,11 @@ action_dashboard() {
 # ================== UPDATE ==================
 
 action_update() {
+  local force_update=0
+  for arg in "${ARGS[@]}" "${ORIG_CLI_ARGS[@]}"; do
+    [[ "$arg" == "--force" || "$arg" == "-f" ]] && force_update=1
+  done
+
   # Find the Fire PM source directory
   local source_dir=""
   local candidates=("/opt/fire-pm" "/usr/local/share/fire-pm")
@@ -2578,14 +2583,20 @@ action_update() {
   # Pull latest
   echo ""
   git -C "$source_dir" fetch --all --prune 2>/dev/null || true
-  if ! git -C "$source_dir" pull --rebase 2>/dev/null; then
-    # If rebase fails (local changes), try merge
-    git -C "$source_dir" rebase --abort 2>/dev/null || true
-    git -C "$source_dir" pull --ff-only 2>/dev/null || {
-      error "Could not pull latest changes. You may have local modifications in $source_dir"
-      error "Resolve conflicts manually, then re-run: fire update"
-      exit 1
-    }
+
+  if [[ $force_update -eq 1 ]]; then
+    warn "Force update: resetting all local modifications in $source_dir..."
+    git -C "$source_dir" reset --hard origin/main 2>/dev/null || git -C "$source_dir" reset --hard origin/master 2>/dev/null || true
+    git -C "$source_dir" clean -fd 2>/dev/null || true
+  else
+    if ! git -C "$source_dir" pull --rebase 2>/dev/null; then
+      git -C "$source_dir" rebase --abort 2>/dev/null || true
+      if ! git -C "$source_dir" pull --ff-only 2>/dev/null; then
+        error "Could not pull latest changes due to local modifications in $source_dir"
+        echo -e "  Run: ${YELLOW}fire update --force${NC} to overwrite local modifications and update."
+        exit 1
+      fi
+    fi
   fi
 
   local new_commit
@@ -3188,7 +3199,7 @@ show_help() {
   echo "  flush [name|all] Flush accumulated service logs and journal"
   echo "  monit            Real-time monitoring dashboard"
   echo "  migrate          Migrate legacy fire services to new format"
-  echo "  update           Update Fire PM to the latest version"
+  echo "  update [--force] Update Fire PM to the latest version (--force to overwrite local mods)"
   echo "  startup <name|all> Enable service auto-start on system boot"
   echo "  unstartup <name|all> Disable service auto-start on system boot"
   echo "  save [path]      Save running process snapshot to dump.json (alias: dump)"
@@ -3201,9 +3212,15 @@ show_help() {
   echo ""
   echo "Examples:"
   echo "  fire start server.py --name api"
-  echo "  fire start app.js --env-file .env --env NODE_ENV=production"
+  echo "  fire start app.js --env-file .env --no-startup"
+  echo "  fire completion install"
+  echo "  fire flush api"
+  echo "  fire startup api"
+  echo "  fire unstartup api"
+  echo "  fire save"
+  echo "  fire restore"
   echo "  fire tunnel open 3000"
-  echo "  fire update"
+  echo "  fire update --force"
 }
 
 # ================== ROUTING ==================

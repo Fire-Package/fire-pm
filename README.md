@@ -79,8 +79,9 @@ fire restore
 # Install shell auto-completion (Bash, Zsh, Fish)
 fire completion install
 
-# Update Fire PM to the latest version
+# Update Fire PM to the latest version (--force to overwrite local modifications)
 fire update
+fire update --force
 ```
 
 ### 3. Public HTTPS Tunnels
