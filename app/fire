@@ -2568,6 +2568,13 @@ action_update() {
   local old_commit
   old_commit=$(git -C "$source_dir" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
+  # Ensure default branch
+  local current_branch
+  current_branch=$(git -C "$source_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+  if [[ "$current_branch" != "main" && "$current_branch" != "master" && "$current_branch" != "HEAD" ]]; then
+    git -C "$source_dir" checkout main 2>/dev/null || git -C "$source_dir" checkout master 2>/dev/null || true
+  fi
+
   # Pull latest
   echo ""
   git -C "$source_dir" fetch --all --prune 2>/dev/null || true

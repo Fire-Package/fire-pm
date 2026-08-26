@@ -96,10 +96,10 @@ if [[ -z "$INSTALL_WEB" ]]; then
   user_choice=""
   if [[ -t 0 ]]; then
     read -r user_choice
-  elif [[ -e /dev/tty && -r /dev/tty ]]; then
-    read -r user_choice < /dev/tty
+  elif [[ -r /dev/tty ]] && read -r user_choice < /dev/tty 2>/dev/null; then
+    :
   else
-    echo "n"
+    echo "n (headless mode)"
     user_choice="n"
   fi
 
