@@ -2671,23 +2671,12 @@ action_ssh_start() {
   local public_url="http://localhost:$port"
 
   if [[ $no_tunnel -eq 0 ]]; then
-    info "Starting zero-config tunnel for remote web terminal..."
-    local start_ts=$(date +%s)
-    open_quick_tunnel "$port" "$start_ts" >/dev/null 2>&1 &
-    
-    local t_log
-    t_log="$(tunnel_log_file "$port")"
-    for ((w=0; w<40; w++)); do
-      if [[ -f "$t_log" ]]; then
-        local found_url
-        found_url=$(grep -o 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com' "$t_log" | head -1)
-        if [[ -n "$found_url" ]]; then
-          public_url="$found_url"
-          break
-        fi
-      fi
-      sleep 0.25
-    done
+    local start_ts
+    start_ts=$(date +%s)
+    open_quick_tunnel "$port" "$start_ts"
+    if read_tunnel_state "$port"; then
+      public_url="$TUNNEL_STATE_URL"
+    fi
   fi
 
   cat << JSONEOF > "$SSH_STATE_DIR/${port}.json"

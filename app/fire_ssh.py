@@ -231,7 +231,7 @@ def ws_make_frame(payload: bytes, opcode: int = 1) -> bytes:
 
 # ==================== HTML / CLIENT ASSETS ====================
 
-HTML_TEMPLATE = """<!DOCTYPE html>
+HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en" class="h-full bg-slate-950 text-slate-100">
 <head>
   <meta charset="UTF-8">
@@ -533,9 +533,19 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             return True
         return False
 
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         ip = self.get_client_ip()
+
+        if parsed.path == '/favicon.ico':
+            self.send_response(204)
+            self.end_headers()
+            return
 
         # WebSocket Upgrade
         if parsed.path == '/ws':
