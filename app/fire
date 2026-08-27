@@ -19,10 +19,21 @@ if [[ -f "/etc/fire-pm/config.json" ]]; then
   if [[ -n "$_cfg_dom" ]]; then
     TUNNEL_BASE_DOMAIN="$_cfg_dom"
     TUNNEL_DOMAIN="tunnel.$_cfg_dom"
+    TUNNEL_DEFAULT_PROVIDER="custom"
   fi
   _cfg_prov=$(python3 -c "import json; c=json.load(open('/etc/fire-pm/config.json')); print(c.get('tunnel', {}).get('provider', ''))" 2>/dev/null || true)
   if [[ -n "$_cfg_prov" ]]; then
     TUNNEL_DEFAULT_PROVIDER="$_cfg_prov"
+  fi
+fi
+
+# Also check /etc/nginx/sites-available/fire-tunnel.conf if domain not set
+if [[ -z "$TUNNEL_BASE_DOMAIN" && -f "/etc/nginx/sites-available/fire-tunnel.conf" ]]; then
+  _nginx_dom=$(grep -E 'server_name\s+\*\.' /etc/nginx/sites-available/fire-tunnel.conf 2>/dev/null | awk '{print $2}' | sed 's/^\*\.//; s/;//' | head -1)
+  if [[ -n "$_nginx_dom" ]]; then
+    TUNNEL_BASE_DOMAIN="$_nginx_dom"
+    TUNNEL_DOMAIN="tunnel.$_nginx_dom"
+    TUNNEL_DEFAULT_PROVIDER="custom"
   fi
 fi
 
@@ -1963,12 +1974,18 @@ open_quick_tunnel() {
   nohup cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$port" > "$log_file" 2>&1 &
   local tunnel_pid=$!
 
-  # Wait for public URL to appear in log (up to 20 seconds)
+  # Wait for public URL and active edge connection in log (up to 20 seconds)
   local url=""
+  local connected=0
   for ((i=0; i<40; i++)); do
     if [[ -f "$log_file" ]]; then
-      url=$(grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' "$log_file" | head -n 1)
-      if [[ -n "$url" ]]; then
+      if [[ -z "$url" ]]; then
+        url=$(grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' "$log_file" | head -n 1)
+      fi
+      if grep -q "Registered tunnel connection" "$log_file" 2>/dev/null; then
+        connected=1
+      fi
+      if [[ -n "$url" && $connected -eq 1 ]]; then
         break
       fi
     fi
@@ -2171,10 +2188,10 @@ action_tunnel_open() {
   local start_ts
   start_ts=$(date +%s)
 
-  # Determine provider: command flag overrides config; otherwise if customDomain configured, use custom, else quick.
+  # Determine provider: command flag overrides config; otherwise if custom domain configured, ALWAYS prefer custom first!
   local chosen_provider="$provider_opt"
   if [[ -z "$chosen_provider" ]]; then
-    if [[ -n "$TUNNEL_BASE_DOMAIN" && "$TUNNEL_DEFAULT_PROVIDER" == "custom" ]]; then
+    if [[ -n "$TUNNEL_BASE_DOMAIN" || "$TUNNEL_DEFAULT_PROVIDER" == "custom" ]]; then
       chosen_provider="custom"
     else
       chosen_provider="quick"
@@ -2574,6 +2591,7 @@ action_ssh_start() {
   local port=""
   local daemon_mode=0
   local no_tunnel=0
+  local provider_opt=""
 
   for ((i=0; i<${#ARGS[@]}; i++)); do
     local a="${ARGS[i]}"
@@ -2601,6 +2619,21 @@ action_ssh_start() {
         ;;
       --no-tunnel)
         no_tunnel=1
+        ;;
+      --provider=*)
+        provider_opt="${a#*=}"
+        ;;
+      --provider)
+        if [[ $((i+1)) -lt ${#ARGS[@]} ]]; then
+          provider_opt="${ARGS[i+1]}"
+          i=$((i+1))
+        fi
+        ;;
+      --custom|--nginx)
+        provider_opt="custom"
+        ;;
+      --quick|--cloudflare)
+        provider_opt="quick"
         ;;
     esac
   done
@@ -2672,9 +2705,27 @@ action_ssh_start() {
   local public_url="http://localhost:$port"
 
   if [[ $no_tunnel -eq 0 ]]; then
+    local chosen_provider="$provider_opt"
+    if [[ -z "$chosen_provider" ]]; then
+      if [[ -n "$TUNNEL_BASE_DOMAIN" || "$TUNNEL_DEFAULT_PROVIDER" == "custom" ]]; then
+        chosen_provider="custom"
+      else
+        chosen_provider="quick"
+      fi
+    fi
+
     local start_ts
     start_ts=$(date +%s)
-    open_quick_tunnel "$port" "$start_ts"
+
+    case "$chosen_provider" in
+      custom|nginx)
+        open_custom_tunnel "$port" "$start_ts"
+        ;;
+      quick|cloudflare|*)
+        open_quick_tunnel "$port" "$start_ts"
+        ;;
+    esac
+
     if read_tunnel_state "$port"; then
       public_url="$TUNNEL_STATE_URL"
     fi
