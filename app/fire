@@ -325,6 +325,17 @@ command_needs_root() {
       [[ "$subcmd" == "install" || "$subcmd" == "--install" ]] && return 0
       return 1
       ;;
+    ssh)
+      case "$subcmd" in
+        password|set-password|start|open|close|stop)
+          return 0
+          ;;
+        *)
+          [[ -z "$subcmd" || "$subcmd" == -* ]] && return 0
+          return 1
+          ;;
+      esac
+      ;;
     *)
       return 1
       ;;
@@ -2424,6 +2435,331 @@ action_tunnel() {
   esac
 }
 
+# ================== REMOTE WEB TERMINAL (FIRE SSH) ==================
+
+SSH_STATE_DIR="/tmp/fire-ssh"
+
+find_fire_ssh_script() {
+  local candidates=(
+    "/usr/local/bin/fire_ssh.py"
+    "/opt/fire-pm/app/fire_ssh.py"
+    "${WORKDIR}/app/fire_ssh.py"
+  )
+  for c in "${candidates[@]}"; do
+    if [[ -f "$c" ]]; then
+      echo "$c"
+      return 0
+    fi
+  done
+  return 1
+}
+
+find_free_ssh_port() {
+  local port=7681
+  while [[ $port -lt 65000 ]]; do
+    if ! ss -tuln 2>/dev/null | grep -q ":$port " && ! netstat -tuln 2>/dev/null | grep -q ":$port "; then
+      echo "$port"
+      return 0
+    fi
+    port=$((port + 1))
+  done
+  echo "7681"
+}
+
+action_ssh_password() {
+  local py_script
+  py_script=$(find_fire_ssh_script) || { error "fire_ssh.py not found"; exit 1; }
+
+  local pwd=""
+  local pwd2=""
+  echo -ne "${CYAN}Enter new default password for remote SSH access: ${NC}"
+  read -s pwd
+  echo ""
+  if [[ -z "$pwd" ]]; then
+    error "Password cannot be empty"
+    exit 1
+  fi
+  echo -ne "${CYAN}Confirm password: ${NC}"
+  read -s pwd2
+  echo ""
+  if [[ "$pwd" != "$pwd2" ]]; then
+    error "Passwords do not match"
+    exit 1
+  fi
+
+  local res
+  res=$(python3 "$py_script" hash-password "$pwd" --save)
+  if echo "$res" | grep -q '"success": true'; then
+    success "Password hashed (PBKDF2-HMAC-SHA256) and saved to /etc/fire-pm/ssh-auth.json"
+  else
+    error "Failed saving password: $res"
+    exit 1
+  fi
+}
+
+action_ssh_list() {
+  echo ""
+  echo -e "  ${BOLD}🔥 Fire PM Remote Web Terminal Sessions${NC}"
+  echo -e "  ${GREY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  printf "  ${BOLD}%-8s %-18s %-10s %-38s${NC}\n" "PORT" "STATUS" "PID" "PUBLIC ACCESS URL"
+  echo -e "  ${GREY}─────────────────────────────────────────────────────────────────────────────────────${NC}"
+
+  local count=0
+  if [[ -d "$SSH_STATE_DIR" ]]; then
+    for state_file in "$SSH_STATE_DIR"/*.json; do
+      [[ -f "$state_file" ]] || continue
+      local port pid url
+      port=$(basename "$state_file" .json)
+      pid=$(grep -o '"pid": *[0-9]*' "$state_file" | awk -F: '{print $2}' | tr -d ' ')
+      url=$(grep -o '"url": *"[^"]*"' "$state_file" | awk -F'"' '{print $4}')
+      
+      if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        printf "  %-8s ${GREEN}%-18s${NC} %-10s ${CYAN}%-38s${NC}\n" "$port" "ACTIVE" "$pid" "${url:-http://localhost:$port}"
+        count=$((count + 1))
+      else
+        rm -f "$state_file"
+      fi
+    done
+  fi
+
+  if [[ $count -eq 0 ]]; then
+    echo -e "  ${GREY}No active SSH web terminal sessions.${NC}"
+    echo -e "  ${GREY}Start one with: fire ssh${NC}"
+  fi
+  echo -e "  ${GREY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo ""
+}
+
+action_ssh_close() {
+  local target_port="${ARGS[0]}"
+  local closed=0
+
+  if [[ -d "$SSH_STATE_DIR" ]]; then
+    for state_file in "$SSH_STATE_DIR"/*.json; do
+      [[ -f "$state_file" ]] || continue
+      local port pid
+      port=$(basename "$state_file" .json)
+      
+      if [[ -n "$target_port" && "$target_port" != "$port" && "$target_port" != "all" ]]; then
+        continue
+      fi
+
+      pid=$(grep -o '"pid": *[0-9]*' "$state_file" | awk -F: '{print $2}' | tr -d ' ')
+      if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+      fi
+      action_tunnel_close "$port" >/dev/null 2>&1 || true
+      rm -f "$state_file"
+      rm -f "$SSH_STATE_DIR/${port}.log"
+      success "Closed SSH web terminal on port ${CYAN}$port${NC}"
+      closed=$((closed + 1))
+    done
+  fi
+
+  if [[ $closed -eq 0 ]]; then
+    if [[ -n "$target_port" && "$target_port" != "all" ]]; then
+      warn "No active SSH session found on port $target_port"
+    else
+      info "No active SSH sessions to close"
+    fi
+  fi
+}
+
+action_ssh_start() {
+  local py_script
+  py_script=$(find_fire_ssh_script) || { error "fire_ssh.py not found"; exit 1; }
+
+  local password=""
+  local port=""
+  local daemon_mode=0
+  local no_tunnel=0
+
+  for ((i=0; i<${#ARGS[@]}; i++)); do
+    local a="${ARGS[i]}"
+    case "$a" in
+      --password=*|-p=*|-password=*)
+        password="${a#*=}"
+        ;;
+      --password|-p|-password|--pass)
+        if [[ $((i+1)) -lt ${#ARGS[@]} ]]; then
+          password="${ARGS[i+1]}"
+          i=$((i+1))
+        fi
+        ;;
+      --port=*)
+        port="${a#*=}"
+        ;;
+      --port)
+        if [[ $((i+1)) -lt ${#ARGS[@]} ]]; then
+          port="${ARGS[i+1]}"
+          i=$((i+1))
+        fi
+        ;;
+      --daemon|-d|--detach)
+        daemon_mode=1
+        ;;
+      --no-tunnel)
+        no_tunnel=1
+        ;;
+    esac
+  done
+
+  local has_saved=0
+  if [[ -f "/etc/fire-pm/ssh-auth.json" || -f "$HOME/.fire/ssh-auth.json" ]]; then
+    has_saved=1
+  fi
+
+  if [[ -z "$password" && $has_saved -eq 0 ]]; then
+    info "No saved password found. Set a password for this remote terminal session."
+    echo -ne "${CYAN}Enter access password: ${NC}"
+    read -s password
+    echo ""
+    if [[ -z "$password" ]]; then
+      error "Password is required for security"
+      exit 1
+    fi
+    echo -ne "${CYAN}Confirm password: ${NC}"
+    local pwd_confirm=""
+    read -s pwd_confirm
+    echo ""
+    if [[ "$password" != "$pwd_confirm" ]]; then
+      error "Passwords do not match"
+      exit 1
+    fi
+
+    echo -ne "${CYAN}Save as default password for future 'fire ssh' sessions? (y/N): ${NC}"
+    local save_ans=""
+    read save_ans
+    if [[ "$save_ans" =~ ^[yY] ]]; then
+      python3 "$py_script" hash-password "$password" --save >/dev/null 2>&1
+      success "Password saved securely (PBKDF2-HMAC-SHA256 salted)"
+    fi
+  fi
+
+  if [[ -z "$port" ]]; then
+    port=$(find_free_ssh_port)
+  fi
+
+  mkdir -p "$SSH_STATE_DIR"
+  local log_file="$SSH_STATE_DIR/${port}.log"
+  > "$log_file"
+
+  local pass_args=()
+  if [[ -n "$password" ]]; then
+    pass_args+=("--password" "$password")
+  fi
+
+  # Start Python Web Terminal daemon
+  python3 "$py_script" start --port "$port" "${pass_args[@]}" > "$log_file" 2>&1 &
+  local server_pid=$!
+
+  local server_ready=0
+  for ((attempt=0; attempt<30; attempt++)); do
+    if grep -q '"status": "ready"' "$log_file" 2>/dev/null; then
+      server_ready=1
+      break
+    fi
+    sleep 0.1
+  done
+
+  if [[ $server_ready -eq 0 ]] && ! kill -0 "$server_pid" 2>/dev/null; then
+    error "Failed to start SSH web terminal engine"
+    cat "$log_file"
+    exit 1
+  fi
+
+  local public_url="http://localhost:$port"
+
+  if [[ $no_tunnel -eq 0 ]]; then
+    info "Starting zero-config tunnel for remote web terminal..."
+    local start_ts=$(date +%s)
+    open_quick_tunnel "$port" "$start_ts" >/dev/null 2>&1 &
+    
+    local t_log
+    t_log="$(tunnel_log_file "$port")"
+    for ((w=0; w<40; w++)); do
+      if [[ -f "$t_log" ]]; then
+        local found_url
+        found_url=$(grep -o 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com' "$t_log" | head -1)
+        if [[ -n "$found_url" ]]; then
+          public_url="$found_url"
+          break
+        fi
+      fi
+      sleep 0.25
+    done
+  fi
+
+  cat << JSONEOF > "$SSH_STATE_DIR/${port}.json"
+{
+  "port": "$port",
+  "pid": $server_pid,
+  "url": "$public_url",
+  "created_at": $(date +%s)
+}
+JSONEOF
+
+  echo ""
+  echo -e "  ${BOLD}🔥 Fire PM Remote Web Terminal (SSH)${NC}"
+  echo -e "  ${GREY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo -e "  ${ORANGE}🔗${NC} ${YELLOW}${BOLD}Web Terminal URL:${NC} ${CYAN}${BOLD}${public_url}${NC}"
+  echo -e "  ${GREY}⚡${NC} ${BOLD}Local Endpoint:${NC}   ${GREY}http://127.0.0.1:${port}${NC}"
+  echo -e "  ${GREEN}🔒${NC} ${BOLD}Authentication:${NC}   ${GREEN}Password Protected (PBKDF2-HMAC-SHA256)${NC}"
+  echo -e "  ${BLUE}🛡️${NC}  ${BOLD}Rate Limiting:${NC}    ${BLUE}Active (Max 5 attempts / 5min lockout)${NC}"
+  echo -e "  ${GREY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo ""
+
+  if [[ $daemon_mode -eq 1 ]]; then
+    success "Remote terminal running in background (PID: $server_pid)"
+    echo -e "  To close session: ${CYAN}fire ssh close $port${NC}"
+    return 0
+  fi
+
+  echo -e "  ${GREY}Press Ctrl+C to close the remote session.${NC}"
+  
+  cleanup_ssh() {
+    echo ""
+    info "Closing remote SSH session on port $port..."
+    kill "$server_pid" 2>/dev/null || true
+    action_tunnel_close "$port" >/dev/null 2>&1 || true
+    rm -f "$SSH_STATE_DIR/${port}.json" "$log_file"
+    success "Session closed"
+    exit 0
+  }
+  trap cleanup_ssh INT TERM
+
+  wait "$server_pid" 2>/dev/null || true
+  cleanup_ssh
+}
+
+action_ssh() {
+  local subcmd="${ARGS[0]}"
+  case "$subcmd" in
+    list|ls|status)
+      action_ssh_list
+      ;;
+    close|stop|kill)
+      ARGS=("${ARGS[@]:1}")
+      action_ssh_close
+      ;;
+    password|set-password)
+      action_ssh_password
+      ;;
+    start|"")
+      action_ssh_start
+      ;;
+    *)
+      if [[ "$subcmd" == -* ]]; then
+        action_ssh_start
+      else
+        error "Unknown ssh command: $subcmd"
+        echo "Usage: fire ssh [start|list|close|password] [options]"
+        exit 1
+      fi
+      ;;
+  esac
+}
+
 action_dashboard() {
   # Locate TUI script
   local tui_script=""
@@ -2915,8 +3251,9 @@ _fire_completions() {
   local prev="${COMP_WORDS[COMP_CWORD-1]}"
   local cword=$COMP_CWORD
 
-  local commands="start create list ls status stop restart delete del rm info show live doctor logs log flush clean-logs limit monit migrate update upgrade startup enable-boot unstartup disable-boot save dump restore resurrect tunnel completion help"
+  local commands="start create list ls status stop restart delete del rm info show live doctor logs log flush clean-logs limit monit migrate update upgrade startup enable-boot unstartup disable-boot save dump restore resurrect tunnel completion ssh help"
   local tunnel_subcmds="open start close stop list setup config"
+  local ssh_subcmds="start list close stop password"
   local start_flags="--name --env --env-file --no-startup --no-boot --interpreter --user --json"
 
   _fire_services() {
@@ -2950,6 +3287,14 @@ _fire_completions() {
           ;;
         tunnel)
           COMPREPLY=( $(compgen -W "$tunnel_subcmds" -- "$cur") )
+          return 0
+          ;;
+        ssh)
+          if [[ "$cur" == -* ]]; then
+            COMPREPLY=( $(compgen -W "--password -p --port --daemon -d --no-tunnel" -- "$cur") )
+          else
+            COMPREPLY=( $(compgen -W "$ssh_subcmds" -- "$cur") )
+          fi
           return 0
           ;;
         completion)
@@ -3000,6 +3345,12 @@ _fire_completions() {
             return 0
           fi
           ;;
+        ssh)
+          if [[ "$cur" == -* ]]; then
+            COMPREPLY=( $(compgen -W "--password -p --port --daemon -d --no-tunnel" -- "$cur") )
+            return 0
+          fi
+          ;;
       esac
       ;;
   esac
@@ -3033,6 +3384,7 @@ _fire() {
     'save:Save process snapshot to dump.json'
     'restore:Restore processes from dump.json'
     'tunnel:Manage public HTTPS tunnels'
+    'ssh:Remote web terminal via secure tunnel'
     'completion:Generate shell auto-completion'
   )
 
@@ -3065,6 +3417,11 @@ _fire() {
           local -a subcmds
           subcmds=('open:Open a tunnel' 'list:List active tunnels' 'close:Close a tunnel' 'setup:Configure custom domain')
           _describe -t subcmds 'tunnel command' subcmds
+          ;;
+        ssh)
+          local -a ssh_subcmds
+          ssh_subcmds=('start:Start remote web terminal' 'list:List active terminal sessions' 'close:Close terminal session' 'password:Set default access password')
+          _describe -t ssh_subcmds 'ssh command' ssh_subcmds
           ;;
         completion)
           local -a shells
@@ -3103,6 +3460,7 @@ complete -c fire -f -n '__fish_use_subcommand' -a unstartup -d 'Disable auto-sta
 complete -c fire -f -n '__fish_use_subcommand' -a save -d 'Save process snapshot'
 complete -c fire -f -n '__fish_use_subcommand' -a restore -d 'Restore processes from snapshot'
 complete -c fire -f -n '__fish_use_subcommand' -a tunnel -d 'Manage public HTTPS tunnels'
+complete -c fire -f -n '__fish_use_subcommand' -a ssh -d 'Remote web terminal via secure tunnel'
 complete -c fire -f -n '__fish_use_subcommand' -a completion -d 'Generate shell completions'
 
 function __fire_services
@@ -3209,6 +3567,7 @@ show_help() {
   echo "  tunnel list         List active tunnels"
   echo "  tunnel close <port> Close a tunnel"
   echo "  tunnel setup        Configure custom domain tunnels"
+  echo "  ssh [start|list|close|password] Remote web terminal via secure tunnel (password protected)"
   echo ""
   echo "Examples:"
   echo "  fire start server.py --name api"
@@ -3220,6 +3579,10 @@ show_help() {
   echo "  fire save"
   echo "  fire restore"
   echo "  fire tunnel open 3000"
+  echo "  fire ssh"
+  echo "  fire ssh --password mysecret --daemon"
+  echo "  fire ssh list"
+  echo "  fire ssh close"
   echo "  fire update --force"
 }
 
@@ -3267,6 +3630,7 @@ case "$CMD" in
   restore|resurrect) action_restore ;;
   completion|completions) action_completion ;;
   tunnel)        action_tunnel ;;
+  ssh)           action_ssh ;;
   help|--help|-h) show_help ;;
   *)
     if [[ -z "$CMD" ]]; then

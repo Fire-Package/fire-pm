@@ -119,8 +119,8 @@ fire tunnel open 3000 --provider quick
 
 #### How Does Fire PM Compare?
 
-| Feature | Fire PM (Quick) | Fire PM (Custom) | ngrok (Free) | localtunnel | Tailscale Funnel |
-|---|---|---|---|---|---|
+| Feature | **Fire PM (Quick)** | **Fire PM (Custom)** | **ngrok (Free)** | **localtunnel** | **Tailscale Funnel** |
+|:---|:---:|:---:|:---:|:---:|:---:|
 | **Setup** | None | `fire tunnel setup` | Account signup | `npm install` | Tailscale login |
 | **Account Required** | ❌ No | ❌ No | ✅ Yes | ❌ No | ✅ Yes |
 | **Custom Domain** | ❌ | ✅ Your domain | Paid plan only | ❌ | ❌ |
@@ -132,7 +132,34 @@ fire tunnel open 3000 --provider quick
 | **Time Limit** | Until you close it | Until you close it | 2 hours (free) | Unreliable | No limit |
 | **Built Into PM** | ✅ | ✅ | ❌ Separate tool | ❌ Separate tool | ❌ Separate tool |
 
-### 4. Developer Web Dashboard & API
+### 4. Remote Web Terminal (`fire ssh`)
+
+Access your server terminal from any browser securely over an encrypted public HTTPS URL:
+
+```bash
+# Start remote web terminal (interactively prompts for password)
+fire ssh
+
+# Start with password and run in background
+fire ssh --password mysecret123 --daemon
+
+# Set or update default password (salted PBKDF2-HMAC-SHA256)
+fire ssh password
+
+# List active SSH web terminal sessions
+fire ssh list
+
+# Close remote terminal session
+fire ssh close
+```
+
+**Security & Built-in Hardening:**
+- **Password Protected**: Cryptographically hashed with PBKDF2-HMAC-SHA256 and unique 16-byte random salt.
+- **Brute-Force Rate Limiting**: Automatic IP lockout (maximum 5 failed attempts per 5 minutes).
+- **Session Tokens**: Cryptographic session tokens with 4-hour automatic expiration and secure cookies.
+- **Full Terminal Emulation**: Backed by Xterm.js with 256-color support, window resize (`TIOCSWINSZ`), and full support for interactive TUIs (`fire`, `htop`, `vim`, `nano`, `tmux`).
+
+### 5. Developer Web Dashboard & API
 Start the Web UI as a managed background service:
 ```bash
 fire start /opt/fire-pm/web/start.sh --name fire-web --env PORT=3000

@@ -122,6 +122,25 @@ fire tunnel close <port>
 
 **Provider priority:** CLI `--provider` flag > `tunnel.provider` in `/etc/fire-pm/config.json` > fallback to `quick`.
 
+### Remote Web Terminal (`fire ssh`)
+
+```bash
+# Start remote web terminal over secure HTTPS tunnel
+fire ssh
+
+# Start with a specific password and run in background
+fire ssh --password <secret> --daemon
+
+# Set or update persistent default password (salted PBKDF2-HMAC-SHA256)
+fire ssh password
+
+# List active remote terminal sessions
+fire ssh list
+
+# Close remote terminal session
+fire ssh close [port|all]
+```
+
 ---
 
 ## Subsystem Development Workflows
