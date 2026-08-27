@@ -8,7 +8,8 @@ Fire PM is a Linux-native process and application management platform providing 
 fire-pm/
 ├── app/                  # Core Bash Process Manager & CLI
 │   ├── fire              # Main executable CLI engine
-│   └── ff-service        # Service status helper
+│   ├── ff-service        # Service status helper
+│   └── fire_ssh.py       # Remote Web Terminal (PTY/WebSocket) engine
 │
 ├── web/                  # Full-stack Next.js Web UI & REST/SSE API
 │   ├── src/              # React 19 UI, Next.js 15 App Router, Tailwind v4

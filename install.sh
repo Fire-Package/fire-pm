@@ -274,6 +274,11 @@ if [[ -f "${INSTALL_SOURCE_DIR}/app/ff-service" ]]; then
   chmod +x /usr/local/bin/ff-service.tmp
   mv -f /usr/local/bin/ff-service.tmp /usr/local/bin/ff-service
 fi
+if [[ -f "${INSTALL_SOURCE_DIR}/app/fire_ssh.py" ]]; then
+  cp "${INSTALL_SOURCE_DIR}/app/fire_ssh.py" /usr/local/bin/fire_ssh.py.tmp
+  chmod +x /usr/local/bin/fire_ssh.py.tmp
+  mv -f /usr/local/bin/fire_ssh.py.tmp /usr/local/bin/fire_ssh.py
+fi
 
 # Configure sudoers rule so fire can manage systemd without password prompts
 if [[ -d "/etc/sudoers.d" ]]; then
