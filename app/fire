@@ -2075,8 +2075,8 @@ server {
     ssl_certificate_key $ssl_key;
 
     location / {
+        default_type text/html;
         if (\$fire_tunnel_port = "") {
-            default_type text/html;
             return 404 '<!DOCTYPE html><html><head><title>Tunnel Inactive</title></head><body style="font-family:system-ui,-apple-system,sans-serif; text-align:center; padding-top:100px; background:#0d1117; color:#c9d1d9;"><h1>404 &mdash; Tunnel Inactive</h1><p>The requested Fire PM tunnel is inactive or does not exist.</p></body></html>\n';
         }
 
