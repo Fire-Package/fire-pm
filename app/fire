@@ -2563,6 +2563,7 @@ action_ssh_close() {
       info "No active SSH sessions to close"
     fi
   fi
+  return 0
 }
 
 action_ssh_start() {
