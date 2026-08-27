@@ -3,6 +3,10 @@
 > **The lightweight, Linux-native process & application management platform.**  
 > Fast CLI &bull; Rich Terminal UI (TUI) &bull; Developer Web Dashboard &bull; Zero-Config Public HTTPS Tunnels
 
+<p align="center">
+  <img src="assets/web-dashboard.png" alt="Fire PM Web Dashboard" width="100%" />
+</p>
+
 ---
 
 ## ⚡ 1-Liner Quick Install
@@ -88,6 +92,10 @@ fire update --force
 
 Fire PM supports two tunnel providers. The default requires **zero configuration**.
 
+<p align="center">
+  <img src="assets/web-tunnels.png" alt="Fire PM Tunnel Management" width="100%" />
+</p>
+
 #### Quick Tunnels (Default — No Setup Required)
 Instantly expose any local port over a public HTTPS URL powered by Cloudflare:
 ```bash
@@ -136,6 +144,10 @@ fire tunnel open 3000 --provider quick
 
 Access your server terminal from any browser securely over an encrypted public HTTPS URL:
 
+<p align="center">
+  <img src="assets/web-terminal.png" alt="Fire PM Remote Web Terminal" width="100%" />
+</p>
+
 ```bash
 # Start remote web terminal (interactively prompts for password)
 fire ssh
@@ -160,6 +172,11 @@ fire ssh close
 - **Full Terminal Emulation**: Backed by Xterm.js with 256-color support, window resize (`TIOCSWINSZ`), and full support for interactive TUIs (`fire`, `htop`, `vim`, `nano`, `tmux`).
 
 ### 5. Developer Web Dashboard & API
+
+<p align="center">
+  <img src="assets/web-logs.png" alt="Fire PM Live Log Streamer" width="100%" />
+</p>
+
 Start the Web UI as a managed background service:
 ```bash
 fire start /opt/fire-pm/web/start.sh --name fire-web --env PORT=3000
@@ -180,6 +197,7 @@ fire-pm/
 ├── app/                  # Core process manager Bash engine (fire)
 ├── web/                  # Full-stack Next.js Web UI & REST/SSE API
 ├── tui/                  # Python Textual interactive terminal dashboard
+├── assets/               # Screenshots and visual documentation assets
 ├── shared/               # Shared systemd templates, Nginx configs, examples
 ├── install.sh            # 1-liner automated Linux installer
 ├── AGENT.md              # Architecture reference for AI coding agents

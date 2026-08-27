@@ -324,7 +324,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         grid.innerHTML = data.files.map(f => `
           <div class="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden group hover:border-slate-700 transition-all flex flex-col">
             <div class="h-32 bg-slate-900 flex items-center justify-center overflow-hidden relative">
-              <img src="/assets/${encodeURIComponent(f.name)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+              <img src="/assets/${encodeURIComponent(f.name)}?t=${Date.now()}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
             </div>
             <div class="p-3 space-y-1 flex-1 flex flex-col justify-between">
               <div>
@@ -332,7 +332,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
                 <p class="text-[11px] text-slate-500 font-mono">${(f.size / 1024).toFixed(1)} KB</p>
               </div>
               <div class="flex items-center justify-between pt-2 border-t border-slate-900 text-xs">
-                <a href="/assets/${encodeURIComponent(f.name)}" target="_blank" class="text-orange-400 hover:text-orange-300">View ↗</a>
+                <a href="/assets/${encodeURIComponent(f.name)}?t=${Date.now()}" target="_blank" class="text-orange-400 hover:text-orange-300">View ↗</a>
                 <button onclick="deleteAsset('${f.name}')" class="text-rose-400 hover:text-rose-300">Delete</button>
               </div>
             </div>
