@@ -17,8 +17,9 @@ TUNNEL_DEFAULT_PROVIDER="${TUNNEL_DEFAULT_PROVIDER:-quick}"
 if [[ -f "/etc/fire-pm/config.json" ]]; then
   _cfg_dom=$(python3 -c "import json; c=json.load(open('/etc/fire-pm/config.json')); print(c.get('tunnel', {}).get('domain', ''))" 2>/dev/null || true)
   if [[ -n "$_cfg_dom" ]]; then
-    TUNNEL_BASE_DOMAIN="$_cfg_dom"
-    TUNNEL_DOMAIN="tunnel.$_cfg_dom"
+    _cfg_base="${_cfg_dom#tunnel.}"
+    TUNNEL_BASE_DOMAIN="$_cfg_base"
+    TUNNEL_DOMAIN="tunnel.$_cfg_base"
     TUNNEL_DEFAULT_PROVIDER="custom"
   fi
   _cfg_prov=$(python3 -c "import json; c=json.load(open('/etc/fire-pm/config.json')); print(c.get('tunnel', {}).get('provider', ''))" 2>/dev/null || true)
@@ -27,14 +28,19 @@ if [[ -f "/etc/fire-pm/config.json" ]]; then
   fi
 fi
 
-# Also check /etc/nginx/sites-available/fire-tunnel.conf if domain not set
-if [[ -z "$TUNNEL_BASE_DOMAIN" && -f "/etc/nginx/sites-available/fire-tunnel.conf" ]]; then
-  _nginx_dom=$(grep -E 'server_name\s+\*\.' /etc/nginx/sites-available/fire-tunnel.conf 2>/dev/null | awk '{print $2}' | sed 's/^\*\.//; s/;//' | head -1)
-  if [[ -n "$_nginx_dom" ]]; then
-    TUNNEL_BASE_DOMAIN="$_nginx_dom"
-    TUNNEL_DOMAIN="tunnel.$_nginx_dom"
-    TUNNEL_DEFAULT_PROVIDER="custom"
-  fi
+# Also check /etc/nginx/sites-available/ or /etc/nginx/conf.d/ if domain not set
+if [[ -z "$TUNNEL_BASE_DOMAIN" ]]; then
+  for _conf in /etc/nginx/sites-available/tunnel.* /etc/nginx/sites-available/fire-tunnel.conf /etc/nginx/conf.d/fire-tunnel.conf; do
+    [[ -f "$_conf" ]] || continue
+    _nginx_dom=$(grep -E 'server_name\s+' "$_conf" 2>/dev/null | grep -oE '[a-zA-Z0-9-]+\.[a-zA-Z0-9.-]+' | grep -vE '^(127\.0\.0\.1|localhost)$' | head -1)
+    if [[ -n "$_nginx_dom" ]]; then
+      _nginx_base="${_nginx_dom#tunnel.}"
+      TUNNEL_BASE_DOMAIN="$_nginx_base"
+      TUNNEL_DOMAIN="tunnel.$_nginx_base"
+      TUNNEL_DEFAULT_PROVIDER="custom"
+      break
+    fi
+  done
 fi
 
 # ================== COLORS & STYLING ==================
@@ -2035,6 +2041,11 @@ ensure_nginx_custom_tunnel_config() {
   [[ -z "$TUNNEL_BASE_DOMAIN" ]] && return 1
   mkdir -p /etc/nginx/conf.d /etc/fire-pm/ssl
   touch "$TUNNEL_NGINX_MAP"
+
+  # If Nginx already tests ok, preserve existing configuration!
+  if nginx -t >/dev/null 2>&1; then
+    return 0
+  fi
 
   local conf_file="/etc/nginx/conf.d/fire-tunnel.conf"
   local ssl_cert="/etc/fire-pm/ssl/cert.pem"
