@@ -3,7 +3,7 @@
 Fire PM — Remote Web Terminal (fire ssh)
 Provides secure, persistent, browser-based remote terminal access over WebSockets/PTY
 with salted PBKDF2 password authentication, session persistence, automatic reconnection,
-and brute-force rate limiting.
+reliable signal interception (Ctrl+C / Ctrl+Z), and brute-force rate limiting.
 """
 
 import os
@@ -308,7 +308,7 @@ class TerminalSession:
                 if not rlist:
                     continue
 
-                data = os.read(self.master_fd, 4096)
+                data = os.read(self.master_fd, 8192)
                 if not data:
                     self.closed = True
                     break
@@ -356,6 +356,32 @@ class TerminalSession:
                 os.write(self.master_fd, data)
             except Exception:
                 pass
+
+    def send_signal(self, sig=signal.SIGINT):
+        """Sends signal to the active foreground process group in the PTY."""
+        signaled = False
+        if self.master_fd and not self.closed:
+            try:
+                pgrp = os.tcgetpgrp(self.master_fd)
+                if pgrp > 0:
+                    os.killpg(pgrp, sig)
+                    signaled = True
+            except Exception:
+                pass
+        
+        if not signaled and self.pid and not self.closed:
+            try:
+                os.kill(self.pid, sig)
+                signaled = True
+            except Exception:
+                pass
+
+        if sig == signal.SIGINT:
+            self.write_input(b'\x03')
+        elif sig == signal.SIGTSTP:
+            self.write_input(b'\x1a')
+        elif sig == signal.SIGQUIT:
+            self.write_input(b'\x1c')
 
     def resize(self, cols: int, rows: int):
         if self.master_fd and not self.closed:
@@ -523,19 +549,27 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   <!-- TERMINAL CONTAINER -->
   <div id="terminal-view" class="hidden flex-1 flex flex-col h-full">
-    <!-- Header bar -->
-    <header class="h-12 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between select-none">
-      <div class="flex items-center space-x-3">
+    <!-- Header bar with Quick Action Signal Buttons -->
+    <header class="h-12 bg-slate-900 border-b border-slate-800 px-3 sm:px-4 flex items-center justify-between select-none">
+      <div class="flex items-center space-x-2 sm:space-x-3">
         <span class="text-lg">🔥</span>
-        <span class="text-sm font-semibold text-white">Fire PM Terminal</span>
-        <span id="conn-badge" class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono flex items-center gap-1">
+        <span class="text-xs sm:text-sm font-semibold text-white">Fire PM Terminal</span>
+        <span id="conn-badge" class="text-[11px] sm:text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono flex items-center gap-1">
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
           Connected
         </span>
       </div>
 
-      <div class="flex items-center space-x-2">
-        <button onclick="termFit()" title="Fit Window" class="px-2.5 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fit</button>
+      <!-- Quick Control Action Toolbar -->
+      <div class="flex items-center space-x-1.5 sm:space-x-2">
+        <button onclick="sendInterrupt()" title="Break / Interrupt (Ctrl+C)" class="px-2.5 py-1 text-xs bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 rounded-lg transition font-mono font-bold flex items-center gap-1">
+          <span>⎋</span>
+          <span>Ctrl+C</span>
+        </button>
+        <button onclick="sendSuspend()" title="Suspend Foreground Job (Ctrl+Z)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono">^Z</button>
+        <button onclick="sendEOF()" title="EOF / Exit (Ctrl+D)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono">^D</button>
+        <button onclick="clearTerm()" title="Clear Terminal Output" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">Clear</button>
+        <button onclick="termFit()" title="Fit Terminal Window" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fit</button>
         <button onclick="handleLogout()" class="px-2.5 py-1 text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-lg transition">Disconnect</button>
       </div>
     </header>
@@ -603,6 +637,36 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       initTerminal();
     }
 
+    function sendInterrupt() {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'signal', signal: 'SIGINT' }));
+        socket.send(JSON.stringify({ type: 'input', data: '\x03' }));
+      }
+      if (term) term.focus();
+    }
+
+    function sendSuspend() {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'signal', signal: 'SIGTSTP' }));
+        socket.send(JSON.stringify({ type: 'input', data: '\x1a' }));
+      }
+      if (term) term.focus();
+    }
+
+    function sendEOF() {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'input', data: '\x04' }));
+      }
+      if (term) term.focus();
+    }
+
+    function clearTerm() {
+      if (term) {
+        term.clear();
+        term.focus();
+      }
+    }
+
     function initTerminal() {
       if (term) return;
 
@@ -645,6 +709,38 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       term.open(mount);
       fitAddon.fit();
 
+      // Intercept special keyboard events reliably (Ctrl+C, Ctrl+Z, Ctrl+D)
+      term.attachCustomKeyEventHandler((e) => {
+        if (e.type === 'keydown') {
+          // Ctrl+C
+          if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+            if (term.hasSelection()) {
+              return true; // Allow browser copy if text highlighted
+            }
+            sendInterrupt();
+            return false;
+          }
+          // Ctrl+Z
+          if (e.ctrlKey && (e.key === 'z' || e.key === 'Z')) {
+            sendSuspend();
+            return false;
+          }
+          // Ctrl+D
+          if (e.ctrlKey && (e.key === 'd' || e.key === 'D')) {
+            sendEOF();
+            return false;
+          }
+          // Ctrl+L (Clear screen)
+          if (e.ctrlKey && (e.key === 'l' || e.key === 'L')) {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({ type: 'input', data: '\x0c' }));
+            }
+            return false;
+          }
+        }
+        return true;
+      });
+
       connectWebSocket();
 
       term.onData(data => {
@@ -677,11 +773,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       socket.onopen = () => {
         document.getElementById('conn-badge').innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Connected';
-        document.getElementById('conn-badge').className = 'text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono flex items-center gap-1';
+        document.getElementById('conn-badge').className = 'text-[11px] sm:text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono flex items-center gap-1';
         termFit();
         term.focus();
 
-        // 15-second heartbeat to prevent any proxy idle timeouts
         pingTimer = setInterval(() => {
           if (socket && socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({ type: 'ping' }));
@@ -710,7 +805,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       socket.onclose = () => {
         if (pingTimer) clearInterval(pingTimer);
         document.getElementById('conn-badge').innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span> Reconnecting...';
-        document.getElementById('conn-badge').className = 'text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-mono flex items-center gap-1';
+        document.getElementById('conn-badge').className = 'text-[11px] sm:text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-mono flex items-center gap-1';
         
         reconnectTimer = setTimeout(() => {
           if (!document.getElementById('terminal-view').classList.contains('hidden')) {
@@ -915,7 +1010,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             while session.is_alive():
                 rlist, _, _ = select.select([sock], [], [], 5.0)
 
-                # Send proactive WebSocket ping frame every 20 seconds to keep edge proxies alive
+                # Proactive server WebSocket ping frame every 20 seconds
                 now = time.time()
                 if now - last_ping_sent > 20:
                     try:
@@ -929,21 +1024,26 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
 
                 opcode, payload = ws_read_frame(sock)
                 if opcode is None or opcode == 8:
-                    # Client closed socket or connection dropped
                     break
                 elif opcode == 9:
-                    # Ping -> reply Pong
                     sock.sendall(ws_make_frame(payload, opcode=10))
                 elif opcode == 10:
-                    # Pong ack
                     pass
                 elif opcode == 1:
-                    # Text JSON message
                     try:
                         msg = json.loads(payload.decode('utf-8', errors='ignore'))
                         mtype = msg.get('type')
                         if mtype == 'input':
                             session.write_input(msg.get('data', '').encode('utf-8'))
+                        elif mtype == 'signal' or mtype == 'interrupt':
+                            sig_name = msg.get('signal', 'SIGINT')
+                            sig_map = {
+                                'SIGINT': signal.SIGINT,
+                                'SIGQUIT': signal.SIGQUIT,
+                                'SIGTSTP': signal.SIGTSTP,
+                                'SIGKILL': signal.SIGKILL
+                            }
+                            session.send_signal(sig_map.get(sig_name, signal.SIGINT))
                         elif mtype == 'resize':
                             cols = int(msg.get('cols', 80))
                             rows = int(msg.get('rows', 24))
@@ -953,11 +1053,9 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
                 elif opcode == 2:
-                    # Binary data
                     session.write_input(payload)
 
         finally:
-            # Detach socket without killing the persistent shell session!
             session.detach_socket(sock)
 
     def log_message(self, format, *args):
