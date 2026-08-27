@@ -652,6 +652,7 @@ nginx_map_add() {
   local key="$1"
   local port="$2"
 
+  mkdir -p "$(dirname "$TUNNEL_NGINX_MAP")"
   touch "$TUNNEL_NGINX_MAP" 2>/dev/null || {
     error "Cannot write tunnel map: $TUNNEL_NGINX_MAP"
     return 1
@@ -663,14 +664,33 @@ nginx_map_add() {
   sed -i "/^[a-f0-9]\{8\}\\.${TUNNEL_DOMAIN//./\\.} ${port};$/d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
   sed -i "/^[a-f0-9]\{8\} ${port};$/d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
   echo "${key} ${port};" >> "$TUNNEL_NGINX_MAP"
-  nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1
+
+  # Validate nginx configuration
+  local err_out=""
+  if ! err_out=$(nginx -t 2>&1); then
+    error "Nginx configuration test failed:"
+    echo -e "${GREY}$err_out${NC}"
+    return 1
+  fi
+
+  # Reload or start Nginx
+  if ! systemctl reload nginx 2>/dev/null && ! nginx -s reload 2>/dev/null; then
+    if ! systemctl start nginx 2>/dev/null && ! nginx 2>/dev/null; then
+      error "Could not reload or start Nginx. Check 'systemctl status nginx'."
+      return 1
+    fi
+  fi
+  return 0
 }
 
 nginx_map_remove() {
   local key="$1"
   [[ -f "$TUNNEL_NGINX_MAP" ]] || return 0
   sed -i "/^${key//./\\.} /d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
-  nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1
+  if nginx -t >/dev/null 2>&1; then
+    systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null || true
+  fi
+  return 0
 }
 
 stop_background_process() {
@@ -2011,6 +2031,75 @@ open_quick_tunnel() {
   echo "$url"
 }
 
+ensure_nginx_custom_tunnel_config() {
+  [[ -z "$TUNNEL_BASE_DOMAIN" ]] && return 1
+  mkdir -p /etc/nginx/conf.d /etc/fire-pm/ssl
+  touch "$TUNNEL_NGINX_MAP"
+
+  local conf_file="/etc/nginx/conf.d/fire-tunnel.conf"
+  local ssl_cert="/etc/fire-pm/ssl/cert.pem"
+  local ssl_key="/etc/fire-pm/ssl/key.pem"
+
+  if [[ -f "/etc/fire-pm/config.json" ]]; then
+    local c_cert c_key
+    c_cert=$(python3 -c "import json; print(json.load(open('/etc/fire-pm/config.json')).get('tunnel',{}).get('sslCert',''))" 2>/dev/null || true)
+    c_key=$(python3 -c "import json; print(json.load(open('/etc/fire-pm/config.json')).get('tunnel',{}).get('sslKey',''))" 2>/dev/null || true)
+    [[ -n "$c_cert" && -f "$c_cert" ]] && ssl_cert="$c_cert"
+    [[ -n "$c_key" && -f "$c_key" ]] && ssl_key="$c_key"
+  fi
+
+  if [[ ! -f "$ssl_cert" || ! -f "$ssl_key" ]]; then
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+      -keyout /etc/fire-pm/ssl/key.pem \
+      -out /etc/fire-pm/ssl/cert.pem \
+      -subj "/CN=*.$TUNNEL_BASE_DOMAIN" >/dev/null 2>&1 || true
+    ssl_cert="/etc/fire-pm/ssl/cert.pem"
+    ssl_key="/etc/fire-pm/ssl/key.pem"
+  fi
+
+  local domain_regex="${TUNNEL_BASE_DOMAIN//./\\.}"
+  cat > "$conf_file" <<EOF
+map \$host \$fire_tunnel_port {
+    default "";
+    include $TUNNEL_NGINX_MAP;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name $TUNNEL_BASE_DOMAIN "~^[a-f0-9]{8}-tunnel\\.${domain_regex}\$";
+
+    ssl_certificate $ssl_cert;
+    ssl_certificate_key $ssl_key;
+
+    location / {
+        if (\$fire_tunnel_port = "") {
+            default_type text/html;
+            return 404 '<!DOCTYPE html><html><head><title>Tunnel Inactive</title></head><body style="font-family:system-ui,-apple-system,sans-serif; text-align:center; padding-top:100px; background:#0d1117; color:#c9d1d9;"><h1>404 &mdash; Tunnel Inactive</h1><p>The requested Fire PM tunnel is inactive or does not exist.</p></body></html>\n';
+        }
+
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+
+        proxy_pass http://127.0.0.1:\$fire_tunnel_port;
+    }
+}
+EOF
+
+  # Clean up old locations that caused map or variable conflicts
+  rm -f /etc/nginx/sites-enabled/fire-tunnel.conf /etc/nginx/sites-available/fire-tunnel.conf /etc/nginx/tunnel_map.conf 2>/dev/null || true
+  return 0
+}
+
 open_custom_tunnel() {
   local port="$1"
   local start_ts="$2"
@@ -2025,6 +2114,8 @@ open_custom_tunnel() {
     error "Nginx is not installed. Run 'fire tunnel setup' or use '--provider quick' for zero-config tunnels."
     exit 1
   fi
+
+  ensure_nginx_custom_tunnel_config
 
   # Generate 8-char hex hash
   local hash
@@ -2060,8 +2151,8 @@ action_tunnel_setup() {
   read -r -p "Enter your base domain (e.g. mydomain.com or tunnel.mydomain.com): " input_domain
   [[ -z "$input_domain" ]] && error "Domain cannot be empty." && exit 1
 
-  read -r -p "Enter SSL Certificate path (fullchain.pem) [leave blank to configure later]: " input_cert
-  read -r -p "Enter SSL Private Key path (privkey.pem) [leave blank to configure later]: " input_key
+  read -r -p "Enter SSL Certificate path (fullchain.pem) [leave blank for automatic certificate]: " input_cert
+  read -r -p "Enter SSL Private Key path (privkey.pem) [leave blank for automatic certificate]: " input_key
 
   mkdir -p /etc/fire-pm /etc/nginx
   local config_file="/etc/fire-pm/config.json"
@@ -2084,56 +2175,16 @@ with open(path, 'w') as f:
   json.dump(data, f, indent=2)
 " 2>/dev/null || true
 
-  mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
-  touch "$TUNNEL_NGINX_MAP"
+  TUNNEL_BASE_DOMAIN="$input_domain"
+  TUNNEL_DOMAIN="tunnel.$input_domain"
+  TUNNEL_DEFAULT_PROVIDER="custom"
 
-  if [[ ! -f "/etc/nginx/tunnel_map.conf" ]]; then
-    cat > "/etc/nginx/tunnel_map.conf" <<EOF
-map \$host \$fire_tunnel_port {
-    default "";
-    include $TUNNEL_NGINX_MAP;
-}
-EOF
-  fi
-
-  local domain_regex="${input_domain//./\\.}"
-  local vhost_file="/etc/nginx/sites-available/fire-tunnel.conf"
-  cat > "$vhost_file" <<EOF
-server {
-    listen 80;
-    listen [::]:80;
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    server_name $input_domain "~^[a-f0-9]{8}-tunnel\\.${domain_regex}\$";
-
-    ssl_certificate ${input_cert:-/etc/ssl/certs/ssl-cert-snakeoil.pem};
-    ssl_certificate_key ${input_key:-/etc/ssl/private/ssl-cert-snakeoil.key};
-
-    location / {
-        if (\$fire_tunnel_port = "") {
-            default_type text/html;
-            return 404 '<!DOCTYPE html><html><head><title>Tunnel Inactive</title></head><body style="font-family:system-ui,-apple-system,sans-serif; text-align:center; padding-top:100px; background:#0d1117; color:#c9d1d9;"><h1>404 &mdash; Tunnel Inactive</h1><p>The requested Fire PM tunnel is inactive or does not exist.</p></body></html>\n';
-        }
-
-        proxy_http_version 1.1;
-        proxy_set_header Host \$http_host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
-
-        proxy_pass http://127.0.0.1:\$fire_tunnel_port;
-    }
-}
-EOF
-
-  ln -sf "$vhost_file" /etc/nginx/sites-enabled/fire-tunnel.conf 2>/dev/null || true
+  ensure_nginx_custom_tunnel_config
 
   if command -v nginx &>/dev/null; then
-    nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || warn "Nginx configuration generated. Run 'sudo nginx -t && sudo systemctl reload nginx' after configuring valid SSL certificates."
+    if nginx -t >/dev/null 2>&1; then
+      systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null || true
+    fi
   fi
 
   success "Custom tunnel domain configured for ${CYAN}$input_domain${NC}"
