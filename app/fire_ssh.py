@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 Fire PM — Remote Web Terminal (fire ssh)
-Provides secure, browser-based remote terminal access over WebSockets/PTY
-with salted PBKDF2 password authentication, brute-force rate limiting, and session security.
+Provides secure, persistent, browser-based remote terminal access over WebSockets/PTY
+with salted PBKDF2 password authentication, session persistence, automatic reconnection,
+and brute-force rate limiting.
 """
 
 import os
@@ -29,10 +30,12 @@ import threading
 DEFAULT_PORT = 7681
 AUTH_FILE = "/etc/fire-pm/ssh-auth.json"
 USER_AUTH_FILE = os.path.expanduser("~/.fire/ssh-auth.json")
-SESSION_EXPIRY_SECONDS = 14400  # 4 hours
+SESSION_EXPIRY_SECONDS = 86400  # 24 hours
 MAX_ATTEMPTS = 5
 LOCKOUT_SECONDS = 300  # 5 minutes
 WINDOW_SECONDS = 300
+SCROLLBACK_BUFFER_SIZE = 128 * 1024  # 128 KB scrollback replay buffer
+DETACHED_SESSION_TTL = 7200  # Keep detached sessions alive for 2 hours
 
 # ==================== PASSWORD & SECURITY ====================
 
@@ -229,6 +232,222 @@ def ws_make_frame(payload: bytes, opcode: int = 1) -> bytes:
     return header + payload
 
 
+# ==================== PERSISTENT TERMINAL ENGINE ====================
+
+class TerminalSession:
+    """Manages a persistent PTY process that survives network disconnects and page reloads."""
+    def __init__(self, session_id: str, shell: str = None):
+        self.session_id = session_id
+        self.shell = shell or '/bin/bash'
+        self.master_fd = None
+        self.pid = None
+        self.sock = None
+        self.sock_lock = threading.Lock()
+        self.output_buffer = bytearray()
+        self.buffer_lock = threading.Lock()
+        self.cols = 80
+        self.rows = 24
+        self.created_at = time.time()
+        self.last_seen = time.time()
+        self.closed = False
+        self.reader_thread = None
+        self.start()
+
+    def start(self):
+        master_fd, slave_fd = pty.openpty()
+        self.master_fd = master_fd
+
+        winsize = struct.pack("HHHH", self.rows, self.cols, 0, 0)
+        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+
+        shell = self.shell
+        if not os.path.exists(shell):
+            shell = '/bin/bash' if os.path.exists('/bin/bash') else '/bin/sh'
+
+        pid = os.fork()
+        if pid == 0:
+            os.close(master_fd)
+            os.setsid()
+            fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
+            os.dup2(slave_fd, 0)
+            os.dup2(slave_fd, 1)
+            os.dup2(slave_fd, 2)
+            if slave_fd > 2:
+                os.close(slave_fd)
+
+            env = os.environ.copy()
+            env["TERM"] = "xterm-256color"
+            env["COLORTERM"] = "truecolor"
+            env["LANG"] = env.get("LANG", "C.UTF-8")
+            env["LC_ALL"] = env.get("LC_ALL", "C.UTF-8")
+            
+            try:
+                os.execvpe(shell, [shell, "-l"], env)
+            except Exception:
+                os.execvpe(shell, [shell], env)
+            sys.exit(1)
+
+        os.close(slave_fd)
+        flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
+        fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+        self.pid = pid
+
+        self.reader_thread = threading.Thread(target=self._pty_reader_loop, daemon=True)
+        self.reader_thread.start()
+
+    def _pty_reader_loop(self):
+        while not self.closed:
+            try:
+                if self.pid:
+                    pid_res, _ = os.waitpid(self.pid, os.WNOHANG)
+                    if pid_res != 0:
+                        self.closed = True
+                        break
+
+                rlist, _, _ = select.select([self.master_fd], [], [], 0.5)
+                if not rlist:
+                    continue
+
+                data = os.read(self.master_fd, 4096)
+                if not data:
+                    self.closed = True
+                    break
+
+                with self.buffer_lock:
+                    self.output_buffer.extend(data)
+                    if len(self.output_buffer) > SCROLLBACK_BUFFER_SIZE:
+                        self.output_buffer = self.output_buffer[-SCROLLBACK_BUFFER_SIZE:]
+
+                with self.sock_lock:
+                    if self.sock:
+                        try:
+                            frame = ws_make_frame(data, opcode=2)
+                            self.sock.sendall(frame)
+                        except Exception:
+                            self.sock = None
+            except (BlockingIOError, InterruptedError):
+                continue
+            except Exception:
+                break
+
+        self.close()
+
+    def attach_socket(self, sock):
+        with self.sock_lock:
+            self.sock = sock
+            self.last_seen = time.time()
+            with self.buffer_lock:
+                if self.output_buffer:
+                    try:
+                        frame = ws_make_frame(bytes(self.output_buffer), opcode=2)
+                        sock.sendall(frame)
+                    except Exception:
+                        self.sock = None
+
+    def detach_socket(self, sock=None):
+        with self.sock_lock:
+            if sock is None or self.sock == sock:
+                self.sock = None
+                self.last_seen = time.time()
+
+    def write_input(self, data: bytes):
+        if self.master_fd and not self.closed:
+            try:
+                os.write(self.master_fd, data)
+            except Exception:
+                pass
+
+    def resize(self, cols: int, rows: int):
+        if self.master_fd and not self.closed:
+            try:
+                self.cols = cols
+                self.rows = rows
+                wsz = struct.pack("HHHH", rows, cols, 0, 0)
+                fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, wsz)
+            except Exception:
+                pass
+
+    def is_alive(self) -> bool:
+        if self.closed or not self.pid:
+            return False
+        try:
+            pid_res, _ = os.waitpid(self.pid, os.WNOHANG)
+            return pid_res == 0
+        except Exception:
+            return False
+
+    def close(self):
+        self.closed = True
+        with self.sock_lock:
+            if self.sock:
+                try:
+                    self.sock.sendall(ws_make_frame(b"", opcode=8))
+                except Exception:
+                    pass
+                self.sock = None
+
+        if self.master_fd:
+            try:
+                os.close(self.master_fd)
+            except Exception:
+                pass
+            self.master_fd = None
+
+        if self.pid:
+            try:
+                os.kill(self.pid, signal.SIGTERM)
+                time.sleep(0.05)
+                os.kill(self.pid, signal.SIGKILL)
+            except Exception:
+                pass
+            try:
+                os.waitpid(self.pid, os.WNOHANG)
+            except Exception:
+                pass
+            self.pid = None
+
+
+class TerminalSessionManager:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.sessions = {}  # token -> TerminalSession
+        self.reaper_thread = threading.Thread(target=self._reaper_loop, daemon=True)
+        self.reaper_thread.start()
+
+    def get_or_create(self, token: str, shell: str = None) -> TerminalSession:
+        with self.lock:
+            session = self.sessions.get(token)
+            if session and session.is_alive():
+                return session
+            if session:
+                session.close()
+            session = TerminalSession(token, shell)
+            self.sessions[token] = session
+            return session
+
+    def remove(self, token: str):
+        with self.lock:
+            session = self.sessions.pop(token, None)
+            if session:
+                session.close()
+
+    def _reaper_loop(self):
+        while True:
+            time.sleep(30)
+            now = time.time()
+            with self.lock:
+                to_delete = []
+                for token, session in self.sessions.items():
+                    if not session.is_alive():
+                        to_delete.append(token)
+                    elif session.sock is None and (now - session.last_seen > DETACHED_SESSION_TTL):
+                        to_delete.append(token)
+                for token in to_delete:
+                    sess = self.sessions.pop(token, None)
+                    if sess:
+                        sess.close()
+
+
 # ==================== HTML / CLIENT ASSETS ====================
 
 HTML_TEMPLATE = r"""<!DOCTYPE html>
@@ -245,7 +464,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <style>
     .xterm { height: 100%; padding: 4px; }
     .xterm-viewport { background-color: #020617 !important; }
-    /* Scrollbar */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #020617; }
     ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
@@ -266,7 +484,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             Fire PM
             <span class="text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 font-mono font-medium">SSH</span>
           </h1>
-          <p class="text-xs text-slate-400">Secure Remote Terminal Access</p>
+          <p class="text-xs text-slate-400">Persistent Remote Terminal</p>
         </div>
       </div>
 
@@ -296,7 +514,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div class="mt-6 pt-6 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-500">
         <span class="flex items-center gap-1.5">
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-          PBKDF2-HMAC Salted
+          Persistent Session
         </span>
         <span>Rate Limited (5 max)</span>
       </div>
@@ -327,7 +545,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   </div>
 
   <script>
-    let term, fitAddon, socket, sessionToken = '';
+    let term, fitAddon, socket, sessionToken = '', pingTimer = null, reconnectTimer = null;
 
     function togglePassword() {
       const el = document.getElementById('password');
@@ -448,6 +666,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function connectWebSocket() {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (pingTimer) clearInterval(pingTimer);
+
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${proto}//${window.location.host}/ws?token=${encodeURIComponent(sessionToken)}`;
 
@@ -459,6 +680,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         document.getElementById('conn-badge').className = 'text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono flex items-center gap-1';
         termFit();
         term.focus();
+
+        // 15-second heartbeat to prevent any proxy idle timeouts
+        pingTimer = setInterval(() => {
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 15000);
       };
 
       socket.onmessage = (event) => {
@@ -467,6 +695,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const msg = JSON.parse(event.data);
             if (msg.type === 'output') {
               term.write(msg.data);
+            } else if (msg.type === 'pong') {
+              // Heartbeat ack
             }
           } catch(e) {
             term.write(event.data);
@@ -478,14 +708,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       };
 
       socket.onclose = () => {
-        document.getElementById('conn-badge').innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-red-400"></span> Disconnected';
-        document.getElementById('conn-badge').className = 'text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 font-mono flex items-center gap-1';
-        term.write('\r\n\x1b[31m[Session terminated. Reconnecting in 3s...]\x1b[0m\r\n');
-        setTimeout(() => {
+        if (pingTimer) clearInterval(pingTimer);
+        document.getElementById('conn-badge').innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span> Reconnecting...';
+        document.getElementById('conn-badge').className = 'text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-mono flex items-center gap-1';
+        
+        reconnectTimer = setTimeout(() => {
           if (!document.getElementById('terminal-view').classList.contains('hidden')) {
             connectWebSocket();
           }
-        }, 3000);
+        }, 1500);
       };
 
       socket.onerror = (err) => {
@@ -494,6 +725,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     async function handleLogout() {
+      if (pingTimer) clearInterval(pingTimer);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       if (socket) socket.close();
       await fetch('/api/logout', { method: 'POST' });
       window.location.reload();
@@ -563,7 +796,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
 
             self.wfile.write(ws_handshake_response(ws_key))
             self.wfile.flush()
-            self.handle_websocket()
+            self.handle_websocket(token)
             return
 
         elif parsed.path == '/api/status':
@@ -649,6 +882,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             token = self.get_cookie_token()
             if token:
                 self.server.sessions.revoke(token)
+                self.server.terminals.remove(token)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Set-Cookie", "fire_ssh_session=; Path=/; HttpOnly; Max-Age=0")
@@ -667,111 +901,64 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def handle_websocket(self):
-        """Spawns user PTY shell and bridges I/O with WebSocket client."""
+    def handle_websocket(self, token: str):
+        """Bridges WebSocket client with a persistent TerminalSession."""
         sock = self.connection
         sock.setblocking(True)
 
-        master_fd, slave_fd = pty.openpty()
-        
-        winsize = struct.pack("HHHH", 24, 80, 0, 0)
-        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+        session = self.server.terminals.get_or_create(token, self.server.target_shell)
+        session.attach_socket(sock)
 
-        shell = self.server.target_shell or os.environ.get('SHELL', '/bin/bash')
-        if not os.path.exists(shell):
-            shell = '/bin/bash' if os.path.exists('/bin/bash') else '/bin/sh'
-
-        pid = os.fork()
-        if pid == 0:
-            os.close(master_fd)
-            os.setsid()
-            fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
-            os.dup2(slave_fd, 0)
-            os.dup2(slave_fd, 1)
-            os.dup2(slave_fd, 2)
-            if slave_fd > 2:
-                os.close(slave_fd)
-
-            env = os.environ.copy()
-            env["TERM"] = "xterm-256color"
-            env["COLORTERM"] = "truecolor"
-            env["LANG"] = env.get("LANG", "C.UTF-8")
-            env["LC_ALL"] = env.get("LC_ALL", "C.UTF-8")
-            
-            try:
-                os.execvpe(shell, [shell, "-l"], env)
-            except Exception:
-                os.execvpe(shell, [shell], env)
-            sys.exit(1)
-
-        os.close(slave_fd)
-        flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
-        fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-
-        running = True
+        last_ping_sent = time.time()
 
         try:
-            while running:
-                rlist, _, _ = select.select([sock, master_fd], [], [], 30.0)
-                
-                pid_res, status = os.waitpid(pid, os.WNOHANG)
-                if pid_res != 0:
-                    running = False
+            while session.is_alive():
+                rlist, _, _ = select.select([sock], [], [], 5.0)
+
+                # Send proactive WebSocket ping frame every 20 seconds to keep edge proxies alive
+                now = time.time()
+                if now - last_ping_sent > 20:
+                    try:
+                        sock.sendall(ws_make_frame(b"", opcode=9))
+                        last_ping_sent = now
+                    except Exception:
+                        break
+
+                if not rlist:
+                    continue
+
+                opcode, payload = ws_read_frame(sock)
+                if opcode is None or opcode == 8:
+                    # Client closed socket or connection dropped
                     break
-
-                for src in rlist:
-                    if src == master_fd:
-                        try:
-                            data = os.read(master_fd, 4096)
-                            if not data:
-                                running = False
-                                break
-                            frame = ws_make_frame(data, opcode=2)
-                            sock.sendall(frame)
-                        except (BlockingIOError, InterruptedError):
-                            continue
-                        except Exception:
-                            running = False
-                            break
-
-                    elif src == sock:
-                        opcode, payload = ws_read_frame(sock)
-                        if opcode is None or opcode == 8:
-                            running = False
-                            break
-                        elif opcode == 9:
-                            sock.sendall(ws_make_frame(payload, opcode=10))
-                        elif opcode == 1:
-                            try:
-                                msg = json.loads(payload.decode('utf-8', errors='ignore'))
-                                mtype = msg.get('type')
-                                if mtype == 'input':
-                                    os.write(master_fd, msg.get('data', '').encode('utf-8'))
-                                elif mtype == 'resize':
-                                    cols = int(msg.get('cols', 80))
-                                    rows = int(msg.get('rows', 24))
-                                    wsz = struct.pack("HHHH", rows, cols, 0, 0)
-                                    fcntl.ioctl(master_fd, termios.TIOCSWINSZ, wsz)
-                            except Exception:
-                                pass
-                        elif opcode == 2:
-                            os.write(master_fd, payload)
+                elif opcode == 9:
+                    # Ping -> reply Pong
+                    sock.sendall(ws_make_frame(payload, opcode=10))
+                elif opcode == 10:
+                    # Pong ack
+                    pass
+                elif opcode == 1:
+                    # Text JSON message
+                    try:
+                        msg = json.loads(payload.decode('utf-8', errors='ignore'))
+                        mtype = msg.get('type')
+                        if mtype == 'input':
+                            session.write_input(msg.get('data', '').encode('utf-8'))
+                        elif mtype == 'resize':
+                            cols = int(msg.get('cols', 80))
+                            rows = int(msg.get('rows', 24))
+                            session.resize(cols, rows)
+                        elif mtype == 'ping':
+                            sock.sendall(ws_make_frame(json.dumps({"type": "pong"}), opcode=1))
+                    except Exception:
+                        pass
+                elif opcode == 2:
+                    # Binary data
+                    session.write_input(payload)
 
         finally:
-            try:
-                os.close(master_fd)
-            except Exception:
-                pass
-            try:
-                os.kill(pid, signal.SIGTERM)
-                time.sleep(0.1)
-                os.kill(pid, signal.SIGKILL)
-            except Exception:
-                pass
-            try:
-                os.waitpid(pid, 0)
-            except Exception:
-                pass
+            # Detach socket without killing the persistent shell session!
+            session.detach_socket(sock)
 
     def log_message(self, format, *args):
         pass
@@ -788,6 +975,7 @@ def run_server(port: int, plain_password: str = None, salt_hex: str = None, hash
     server.target_shell = shell
     server.rate_limiter = RateLimiter()
     server.sessions = SessionManager()
+    server.terminals = TerminalSessionManager()
 
     print(json.dumps({
         "status": "ready",
