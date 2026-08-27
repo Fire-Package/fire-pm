@@ -1990,8 +1990,8 @@ open_quick_tunnel() {
     fi
   fi
 
-  # Run cloudflared in background
-  nohup cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$port" > "$log_file" 2>&1 &
+  # Run cloudflared in background with http2 protocol for reliable TCP transport (prevents ERR_QUIC_PROTOCOL_ERROR)
+  nohup cloudflared tunnel --no-autoupdate --protocol http2 --url "http://127.0.0.1:$port" > "$log_file" 2>&1 &
   local tunnel_pid=$!
 
   # Wait for public URL and active edge connection in log (up to 20 seconds)
