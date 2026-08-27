@@ -2550,13 +2550,14 @@ action_ssh_close() {
       fi
       action_tunnel_close "$port" >/dev/null 2>&1 || true
       rm -f "$state_file"
+      rm -f "$SSH_STATE_DIR/${port}.log"
       success "Closed SSH web terminal on port ${CYAN}$port${NC}"
       closed=$((closed + 1))
     done
   fi
 
   if [[ $closed -eq 0 ]]; then
-    if [[ -n "$target_port" ]]; then
+    if [[ -n "$target_port" && "$target_port" != "all" ]]; then
       warn "No active SSH session found on port $target_port"
     else
       info "No active SSH sessions to close"
@@ -2738,7 +2739,7 @@ action_ssh() {
       action_ssh_list
       ;;
     close|stop|kill)
-      shift_args
+      ARGS=("${ARGS[@]:1}")
       action_ssh_close
       ;;
     password|set-password)
