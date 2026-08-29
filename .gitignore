@@ -10,8 +10,15 @@ web/node_modules/
 
 # Config & Environment
 .env
+.env.*
 .env*.local
+*.env
 config.json
+dump.json
+*.pem
+*.key
+*.cert
+*.crt
 
 # Logs
 *.log
