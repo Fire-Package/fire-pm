@@ -393,6 +393,21 @@ class TerminalSession:
             except Exception:
                 pass
 
+    def measure_pty_latency(self) -> float:
+        """Measures PTY subsystem and process communication responsiveness in ms."""
+        if self.closed or not self.master_fd or not self.pid:
+            return -1
+        try:
+            t0 = time.perf_counter()
+            _ = os.tcgetpgrp(self.master_fd)
+            os.kill(self.pid, 0)
+            _ = termios.tcgetattr(self.master_fd)
+            t1 = time.perf_counter()
+            elapsed_ms = (t1 - t0) * 1000
+            return max(0.1, round(elapsed_ms, 2))
+        except Exception:
+            return -1
+
     def is_alive(self) -> bool:
         if self.closed or not self.pid:
             return False
@@ -570,6 +585,44 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <button onclick="sendEOF()" title="EOF / Exit (Ctrl+D)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono">^D</button>
         <button onclick="clearTerm()" title="Clear Terminal Output" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">Clear</button>
         <button onclick="termFit()" title="Fit Terminal Window" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fit</button>
+        <div class="relative">
+          <button id="network-btn" onclick="toggleLatencyPanel()" title="Network Latency" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition flex items-center gap-1.5">
+            <svg id="wifi-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+              <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+              <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+              <circle cx="12" cy="20" r="1.5" fill="currentColor" stroke="none"/>
+            </svg>
+            <span id="latency-badge" class="text-[10px] font-mono hidden">--</span>
+          </button>
+          <div id="latency-panel" class="hidden absolute right-0 top-full mt-1.5 w-64 bg-slate-900/95 backdrop-blur-sm border border-slate-700/80 rounded-xl shadow-2xl shadow-black/50 p-3.5 z-50">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-[11px] font-semibold text-slate-200 uppercase tracking-wider">Network Latency</span>
+              <button onclick="measureLatency()" title="Refresh" class="text-slate-500 hover:text-white transition p-0.5">
+                <svg id="refresh-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+                </svg>
+              </button>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center justify-between py-1">
+                <div class="flex items-center gap-2">
+                  <span id="latency-cs-dot" class="w-1.5 h-1.5 rounded-full bg-slate-600 shrink-0"></span>
+                  <span class="text-[11px] text-slate-400">Client ↔ Server</span>
+                </div>
+                <span id="latency-cs" class="text-[11px] font-mono text-slate-300">—</span>
+              </div>
+              <div class="flex items-center justify-between py-1">
+                <div class="flex items-center gap-2">
+                  <span id="latency-st-dot" class="w-1.5 h-1.5 rounded-full bg-slate-600 shrink-0"></span>
+                  <span class="text-[11px] text-slate-400">Server ↔ Terminal</span>
+                </div>
+                <span id="latency-st" class="text-[11px] font-mono text-slate-300">—</span>
+              </div>
+            </div>
+            <div class="mt-3 pt-2.5 border-t border-slate-800/80 text-[10px] text-slate-500 text-center">Auto-refreshing every 3s</div>
+          </div>
+        </div>
         <button onclick="handleLogout()" class="px-2.5 py-1 text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-lg transition">Disconnect</button>
       </div>
     </header>
@@ -580,6 +633,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   <script>
     let term, fitAddon, socket, sessionToken = '', pingTimer = null, reconnectTimer = null;
+    let latencyPingSent = 0, clientServerLatency = -1, serverTerminalLatency = -1, latencyInterval = null;
 
     function togglePassword() {
       const el = document.getElementById('password');
@@ -782,6 +836,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             socket.send(JSON.stringify({ type: 'ping' }));
           }
         }, 15000);
+        setTimeout(measureLatency, 1000);
       };
 
       socket.onmessage = (event) => {
@@ -792,6 +847,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               term.write(msg.data);
             } else if (msg.type === 'pong') {
               // Heartbeat ack
+            } else if (msg.type === 'latency_pong') {
+              clientServerLatency = performance.now() - msg.timestamp;
+              updateLatencyDisplay();
+            } else if (msg.type === 'latency_terminal_result') {
+              serverTerminalLatency = msg.latency;
+              updateLatencyDisplay();
             }
           } catch(e) {
             term.write(event.data);
@@ -804,6 +865,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       socket.onclose = () => {
         if (pingTimer) clearInterval(pingTimer);
+        if (latencyInterval) { clearInterval(latencyInterval); latencyInterval = null; }
         document.getElementById('conn-badge').innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span> Reconnecting...';
         document.getElementById('conn-badge').className = 'text-[11px] sm:text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-mono flex items-center gap-1';
         
@@ -821,11 +883,71 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     async function handleLogout() {
       if (pingTimer) clearInterval(pingTimer);
+      if (latencyInterval) { clearInterval(latencyInterval); latencyInterval = null; }
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (socket) socket.close();
       await fetch('/api/logout', { method: 'POST' });
       window.location.reload();
     }
+
+    function toggleLatencyPanel() {
+      const panel = document.getElementById('latency-panel');
+      const isHidden = panel.classList.contains('hidden');
+      panel.classList.toggle('hidden');
+      if (isHidden) {
+        measureLatency();
+        latencyInterval = setInterval(measureLatency, 3000);
+      } else {
+        if (latencyInterval) { clearInterval(latencyInterval); latencyInterval = null; }
+      }
+      if (term) term.focus();
+    }
+
+    function measureLatency() {
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      latencyPingSent = performance.now();
+      socket.send(JSON.stringify({ type: 'latency_ping', timestamp: latencyPingSent }));
+      socket.send(JSON.stringify({ type: 'latency_terminal' }));
+    }
+
+    function updateLatencyDisplay() {
+      const csEl = document.getElementById('latency-cs');
+      const stEl = document.getElementById('latency-st');
+      const csDot = document.getElementById('latency-cs-dot');
+      const stDot = document.getElementById('latency-st-dot');
+      const badge = document.getElementById('latency-badge');
+      const wifiIcon = document.getElementById('wifi-icon');
+
+      if (clientServerLatency >= 0) {
+        const ms = Math.round(clientServerLatency);
+        csEl.textContent = ms + ' ms';
+        csDot.className = 'w-1.5 h-1.5 rounded-full shrink-0 ' + latencyDotColor(clientServerLatency);
+        badge.textContent = ms + 'ms';
+        badge.classList.remove('hidden');
+      }
+      if (serverTerminalLatency >= 0) {
+        stEl.textContent = serverTerminalLatency < 1 ? '<1 ms' : Math.round(serverTerminalLatency) + ' ms';
+        stDot.className = 'w-1.5 h-1.5 rounded-full shrink-0 ' + latencyDotColor(serverTerminalLatency);
+      }
+
+      const lat = clientServerLatency >= 0 ? clientServerLatency : 999;
+      wifiIcon.style.color = lat < 80 ? '#4ade80' : lat < 200 ? '#fbbf24' : '#f87171';
+    }
+
+    function latencyDotColor(ms) {
+      if (ms < 80) return 'bg-emerald-400';
+      if (ms < 200) return 'bg-amber-400';
+      return 'bg-red-400';
+    }
+
+    document.addEventListener('click', (e) => {
+      const panel = document.getElementById('latency-panel');
+      const btn = document.getElementById('network-btn');
+      if (panel && btn && !panel.contains(e.target) && !btn.contains(e.target)) {
+        panel.classList.add('hidden');
+        if (latencyInterval) { clearInterval(latencyInterval); latencyInterval = null; }
+      }
+    });
 
     checkAuth();
   </script>
@@ -1050,6 +1172,12 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                             session.resize(cols, rows)
                         elif mtype == 'ping':
                             sock.sendall(ws_make_frame(json.dumps({"type": "pong"}), opcode=1))
+                        elif mtype == 'latency_ping':
+                            ts = msg.get('timestamp', 0)
+                            sock.sendall(ws_make_frame(json.dumps({"type": "latency_pong", "timestamp": ts}), opcode=1))
+                        elif mtype == 'latency_terminal':
+                            pty_lat = session.measure_pty_latency()
+                            sock.sendall(ws_make_frame(json.dumps({"type": "latency_terminal_result", "latency": round(pty_lat, 2)}), opcode=1))
                     except Exception:
                         pass
                 elif opcode == 2:

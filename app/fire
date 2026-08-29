@@ -2427,7 +2427,7 @@ action_tunnel_list() {
 }
 
 action_tunnel_close() {
-  local port="${ARGS[0]}"
+  local port="${1:-${ARGS[0]}}"
   local hash=""
   local map_key=""
 
@@ -2746,8 +2746,13 @@ action_ssh_start() {
   fi
 
   # Start Python Web Terminal daemon
-  python3 "$py_script" start --port "$port" "${pass_args[@]}" > "$log_file" 2>&1 &
+  if command -v setsid &>/dev/null; then
+    setsid python3 "$py_script" start --port "$port" "${pass_args[@]}" </dev/null > "$log_file" 2>&1 &
+  else
+    nohup python3 "$py_script" start --port "$port" "${pass_args[@]}" </dev/null > "$log_file" 2>&1 &
+  fi
   local server_pid=$!
+  disown "$server_pid" 2>/dev/null || true
 
   local server_ready=0
   for ((attempt=0; attempt<30; attempt++)); do
