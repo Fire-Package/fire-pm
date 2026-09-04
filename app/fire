@@ -2823,7 +2823,7 @@ JSONEOF
     return 0
   fi
 
-  echo -e "  ${GREY}Press Ctrl+C to close the remote session.${NC}"
+  echo -e "  ${GREY}Press ${WHITE}${BOLD}Ctrl+C${NC}${GREY} to close session, or ${WHITE}${BOLD}Ctrl+B${NC}${GREY} to detach into background.${NC}"
   
   cleanup_ssh() {
     trap - INT TERM EXIT
@@ -2835,11 +2835,25 @@ JSONEOF
     success "Session closed"
     exit 0
   }
+
+  detach_ssh() {
+    trap - INT TERM EXIT
+    disown "$server_pid" 2>/dev/null || true
+    echo ""
+    success "Remote terminal detached to background (PID: $server_pid)"
+    echo -e "  To close session: ${CYAN}fire ssh close $port${NC}"
+    exit 0
+  }
+
   trap cleanup_ssh INT TERM EXIT
 
+  local key=""
   while kill -0 "$server_pid" 2>/dev/null; do
-    sleep 1 &
-    wait $! 2>/dev/null || true
+    if read -rsn1 -t 1 key 2>/dev/null; then
+      if [[ "$key" == $'\x02' || "$key" == "b" || "$key" == "B" || "$key" == "d" || "$key" == "D" ]]; then
+        detach_ssh
+      fi
+    fi
   done
   cleanup_ssh
 }
