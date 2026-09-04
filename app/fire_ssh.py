@@ -35,7 +35,7 @@ MAX_ATTEMPTS = 5
 LOCKOUT_SECONDS = 300  # 5 minutes
 WINDOW_SECONDS = 300
 SCROLLBACK_BUFFER_SIZE = 128 * 1024  # 128 KB scrollback replay buffer
-DETACHED_SESSION_TTL = 7200  # Keep detached sessions alive for 2 hours
+DETACHED_SESSION_TTL = 3 * 86400  # Keep detached sessions alive for 3 days (259,200 seconds)
 
 # ==================== PASSWORD & SECURITY ====================
 
@@ -1074,7 +1074,14 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
 
             if valid:
                 self.server.rate_limiter.record_success(ip)
+                old_token = self.get_cookie_token()
                 token = self.server.sessions.create_session(ip)
+                if old_token and old_token in self.server.terminals.sessions:
+                    with self.server.terminals.lock:
+                        old_sess = self.server.terminals.sessions.pop(old_token, None)
+                        if old_sess and old_sess.is_alive():
+                            old_sess.session_id = token
+                            self.server.terminals.sessions[token] = old_sess
                 
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
