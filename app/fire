@@ -2752,7 +2752,6 @@ action_ssh_start() {
     nohup python3 "$py_script" start --port "$port" "${pass_args[@]}" </dev/null > "$log_file" 2>&1 &
   fi
   local server_pid=$!
-  disown "$server_pid" 2>/dev/null || true
 
   local server_ready=0
   for ((attempt=0; attempt<30; attempt++)); do
@@ -2818,14 +2817,16 @@ JSONEOF
   echo ""
 
   if [[ $daemon_mode -eq 1 ]]; then
+    disown "$server_pid" 2>/dev/null || true
     success "Remote terminal running in background (PID: $server_pid)"
     echo -e "  To close session: ${CYAN}fire ssh close $port${NC}"
     return 0
   fi
 
-  echo -e "  ${GREY}Press Ctrl+C to close the remote session.${NC}"
+  echo -e "  ${GREY}Press ${WHITE}${BOLD}Ctrl+C${NC}${GREY} to close session, or ${WHITE}${BOLD}Ctrl+B${NC}${GREY} to detach into background.${NC}"
   
   cleanup_ssh() {
+    trap - INT TERM EXIT
     echo ""
     info "Closing remote SSH session on port $port..."
     kill "$server_pid" 2>/dev/null || true
@@ -2834,9 +2835,26 @@ JSONEOF
     success "Session closed"
     exit 0
   }
-  trap cleanup_ssh INT TERM
 
-  wait "$server_pid" 2>/dev/null || true
+  detach_ssh() {
+    trap - INT TERM EXIT
+    disown "$server_pid" 2>/dev/null || true
+    echo ""
+    success "Remote terminal detached to background (PID: $server_pid)"
+    echo -e "  To close session: ${CYAN}fire ssh close $port${NC}"
+    exit 0
+  }
+
+  trap cleanup_ssh INT TERM EXIT
+
+  local key=""
+  while kill -0 "$server_pid" 2>/dev/null; do
+    if read -rsn1 -t 1 key 2>/dev/null; then
+      if [[ "$key" == $'\x02' || "$key" == "b" || "$key" == "B" || "$key" == "d" || "$key" == "D" ]]; then
+        detach_ssh
+      fi
+    fi
+  done
   cleanup_ssh
 }
 
