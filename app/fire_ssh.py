@@ -714,6 +714,36 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (term) term.focus();
     }
 
+    function copySelectionToClipboard() {
+      if (!term || !term.hasSelection()) return;
+      const text = term.getSelection();
+      if (!text) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(() => {
+          fallbackCopyText(text);
+        });
+      } else {
+        fallbackCopyText(text);
+      }
+    }
+
+    function fallbackCopyText(text) {
+      const el = document.createElement('textarea');
+      el.value = text;
+      el.setAttribute('readonly', '');
+      el.style.position = 'fixed';
+      el.style.top = '-9999px';
+      el.style.left = '-9999px';
+      document.body.appendChild(el);
+      el.focus();
+      el.select();
+      try {
+        document.execCommand('copy');
+      } catch (e) {}
+      document.body.removeChild(el);
+      if (term) term.focus();
+    }
+
     function clearTerm() {
       if (term) {
         term.clear();
@@ -763,13 +793,27 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       term.open(mount);
       fitAddon.fit();
 
+      document.addEventListener('copy', (e) => {
+        if (term && term.hasSelection()) {
+          const text = term.getSelection();
+          if (text && e.clipboardData) {
+            e.clipboardData.setData('text/plain', text);
+            e.preventDefault();
+          }
+        }
+      });
+
       // Intercept special keyboard events reliably (Ctrl+C, Ctrl+Z, Ctrl+D)
       term.attachCustomKeyEventHandler((e) => {
         if (e.type === 'keydown') {
-          // Ctrl+C
+          // Ctrl+C (or Ctrl+Shift+C)
           if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
             if (term.hasSelection()) {
-              return true; // Allow browser copy if text highlighted
+              copySelectionToClipboard();
+              return false;
+            }
+            if (e.shiftKey) {
+              return false;
             }
             sendInterrupt();
             return false;
