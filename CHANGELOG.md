@@ -8,6 +8,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 
 ## [Unreleased]
 
+- `[2026-09-04]{12:44:00} CLI: Fix fire ssh immediately closing in foreground mode #PR 30`
 - `[2026-09-04]{12:22:00} Web Terminal: Extend detached session TTL to 3 days and support session reattachment on re-login #PR 28`
 - `[2026-09-04]{12:13:00} Web Terminal: Fix clipboard copy on Ctrl+C and native copy events in web terminal #PR 27`
 - `[2026-09-02]{20:25:00} Documentation Refresh: Overhaul README.md with comprehensive guides, feature comparisons, TUI keybindings, CLI references, and architecture breakdown`

@@ -2752,7 +2752,6 @@ action_ssh_start() {
     nohup python3 "$py_script" start --port "$port" "${pass_args[@]}" </dev/null > "$log_file" 2>&1 &
   fi
   local server_pid=$!
-  disown "$server_pid" 2>/dev/null || true
 
   local server_ready=0
   for ((attempt=0; attempt<30; attempt++)); do
@@ -2818,6 +2817,7 @@ JSONEOF
   echo ""
 
   if [[ $daemon_mode -eq 1 ]]; then
+    disown "$server_pid" 2>/dev/null || true
     success "Remote terminal running in background (PID: $server_pid)"
     echo -e "  To close session: ${CYAN}fire ssh close $port${NC}"
     return 0
@@ -2826,6 +2826,7 @@ JSONEOF
   echo -e "  ${GREY}Press Ctrl+C to close the remote session.${NC}"
   
   cleanup_ssh() {
+    trap - INT TERM EXIT
     echo ""
     info "Closing remote SSH session on port $port..."
     kill "$server_pid" 2>/dev/null || true
@@ -2834,9 +2835,12 @@ JSONEOF
     success "Session closed"
     exit 0
   }
-  trap cleanup_ssh INT TERM
+  trap cleanup_ssh INT TERM EXIT
 
-  wait "$server_pid" 2>/dev/null || true
+  while kill -0 "$server_pid" 2>/dev/null; do
+    sleep 1 &
+    wait $! 2>/dev/null || true
+  done
   cleanup_ssh
 }
 
