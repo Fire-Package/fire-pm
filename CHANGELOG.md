@@ -8,6 +8,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 
 ## [Unreleased]
 
+- `[2026-09-06]{21:54:00} Web Terminal: Add window capture-phase keydown listener and fullscreenchange lock for Ctrl+W and Alt+W support #Issue 31`
 - `[2026-09-06]{21:49:00} Web Terminal: Implement stream buffer reconciliation and instant local newline for 0ms typing on high-latency connections #Issue 31`
 - `[2026-09-06]{21:28:00} Web Terminal: Add direct in-terminal 0ms typing echo with server echo cancellation for interactive shells like bash and antigravity #Issue 31`
 - `[2026-09-06]{21:08:00} Web Terminal: Add local command input buffer (line mode) for 0ms typing lag on high latency / 2000ms ping connections #Issue 31`

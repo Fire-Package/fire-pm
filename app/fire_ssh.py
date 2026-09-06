@@ -813,6 +813,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function sendCtrlW() {
+      if (localLine && localLine.length > 0) {
+        const trimmed = localLine.replace(/\s+$/, '');
+        const lastSpace = trimmed.lastIndexOf(' ');
+        const newLen = lastSpace >= 0 ? lastSpace + 1 : 0;
+        const toErase = localLine.length - newLen;
+        localLine = localLine.slice(0, newLen);
+        if (term && toErase > 0) term.write('\b \b'.repeat(toErase));
+      }
       if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: 'input', data: '\x17' }));
       }
@@ -843,6 +851,35 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
       }
     }
+
+    document.addEventListener('fullscreenchange', () => {
+      if (document.fullscreenElement) {
+        if (navigator.keyboard && navigator.keyboard.lock) {
+          navigator.keyboard.lock(['KeyW', 'KeyN', 'KeyT']).catch(() => {});
+        }
+        showToast('Fullscreen: Ctrl+W locked to terminal');
+      } else {
+        if (navigator.keyboard && navigator.keyboard.unlock) {
+          navigator.keyboard.unlock();
+        }
+      }
+      setTimeout(termFit, 100);
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'w' || e.key === 'W')) {
+        e.preventDefault();
+        e.stopPropagation();
+        sendCtrlW();
+        return false;
+      }
+      if (((e.ctrlKey && e.shiftKey) || e.altKey) && (e.key === 'w' || e.key === 'W')) {
+        e.preventDefault();
+        e.stopPropagation();
+        sendCtrlW();
+        return false;
+      }
+    }, { capture: true });
 
     let predictiveEchoEnabled = true;
     let localLine = '';
