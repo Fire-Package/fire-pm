@@ -1057,6 +1057,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       panel.classList.toggle('hidden');
       if (isHidden) {
         updateNotifyPanelUI();
+        if ('Notification' in window && Notification.permission === 'default') {
+          requestDesktopNotificationPerm();
+        }
       }
     }
 
@@ -1090,15 +1093,23 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function requestDesktopNotificationPerm() {
-      playNotificationChime();
-      if (!('Notification' in window)) return;
+      if (!('Notification' in window)) {
+        showToast('Desktop notifications not supported in this browser');
+        return;
+      }
+      let handled = false;
       function onDone(perm) {
+        if (handled) return;
+        handled = true;
         updateNotifyPanelUI();
         if (perm === 'granted') {
-          showToast('Desktop notifications enabled!');
+          playNotificationChime();
+          showToast('Notifications enabled!');
           try {
             new Notification('Fire SSH', { body: 'Notifications enabled successfully!' });
           } catch(e) {}
+        } else if (perm === 'denied') {
+          showToast('Notifications blocked in browser settings.');
         }
       }
       try {
@@ -1106,7 +1117,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (req && typeof req.then === 'function') {
           req.then(onDone).catch(() => {});
         }
-      } catch(e) {}
+      } catch(e) {
+        console.error(e);
+      }
     }
 
     document.addEventListener('click', (e) => {
