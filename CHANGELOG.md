@@ -8,6 +8,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 
 ## [Unreleased]
 
+- `[2026-09-06]{23:38:00} Web Terminal: In-terminal multi-tab sessions with process-aware badges, keyboard shortcuts, background bell alerts, and independent PTY multiplexing #Issue 37`
 - `[2026-09-06]{23:12:00} Web Terminal: Add drag-and-drop file upload to $PWD, toolbar upload/download buttons, and streaming file transfer endpoints #Issue 35`
 - `[2026-09-06]{22:45:00} Web Terminal: Add background task alerts with desktop notifications, audio chime, and Antigravity bell/OSC integration #Issue 33`
 - `[2026-09-06]{21:54:00} Web Terminal: Add window capture-phase keydown listener and fullscreenchange lock for Ctrl+W and Alt+W support #Issue 31`
