@@ -8,6 +8,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 
 ## [Unreleased]
 
+- `[2026-09-07]{00:24:30} Security Hardening: Add WebSocket Origin validation, restrict forwarded IP trust to loopback, verify regular files on download, cap uploads at 500MB, add dynamic Secure cookies, and relocate cloudflared binary #Issue 41`
 - `[2026-09-06]{23:59:00} Web Terminal: Add read-only live session sharing links with configurable expiration and instant revocation #Issue 39`
 - `[2026-09-06]{23:38:00} Web Terminal: In-terminal multi-tab sessions with process-aware badges, keyboard shortcuts, background bell alerts, and independent PTY multiplexing #Issue 37`
 - `[2026-09-06]{23:12:00} Web Terminal: Add drag-and-drop file upload to $PWD, toolbar upload/download buttons, and streaming file transfer endpoints #Issue 35`

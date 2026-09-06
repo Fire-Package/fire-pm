@@ -1958,12 +1958,15 @@ install_cloudflared() {
     return 0
   fi
 
-  # Fallback to local fire bin directory
-  mkdir -p /tmp/fire-bin
-  if curl -fsSL "$dl_url" -o "/tmp/fire-bin/cloudflared" 2>/dev/null; then
-    chmod +x "/tmp/fire-bin/cloudflared"
-    export PATH="/tmp/fire-bin:$PATH"
-    success "cloudflared installed to /tmp/fire-bin/cloudflared"
+  # Fallback to user local bin directory
+  local user_bin="${HOME}/.local/bin"
+  mkdir -p "$user_bin"
+  if curl -fsSL "$dl_url" -o "$user_bin/cloudflared" 2>/dev/null; then
+    chmod +x "$user_bin/cloudflared"
+    if [[ ":$PATH:" != *":$user_bin:"* ]]; then
+      export PATH="$user_bin:$PATH"
+    fi
+    success "cloudflared installed to $user_bin/cloudflared"
     return 0
   fi
 

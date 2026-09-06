@@ -48,7 +48,7 @@ fire-pm/
 - **File Transfer & Drag-and-Drop:** Drag-and-drop file upload directly to terminal's active `$PWD`, streaming `/api/upload` and `/api/download` with progress cards and chimes.
 - **Read-Only Session Sharing:** Cryptographically secure 256-bit share tokens (`ShareTokenManager`) with configurable TTLs (1h, 6h, 24h, or session lifespan). Read-only observers stream stdout and scrollback buffers in real time, while all stdin inputs, signals, resizing, and file transfers are strictly rejected and dropped on the server.
 - **Signal Dispatching:** Fast loop / process interrupts (`Ctrl+C`, `Ctrl+Z`, `Ctrl+D`) resolve the active foreground process group via `os.tcgetpgrp` and dispatch direct kernel signals (`os.killpg`) to instantly break infinite stdout loops (e.g. `yes`).
-- **Authentication & Security:** Salted PBKDF2-HMAC-SHA256 password hashing, brute-force IP rate limiting (5 attempts / 5-min lockout), 24-hour cryptographically signed session tokens, and Xterm.js emulation.
+- **Authentication & Security:** Salted PBKDF2-HMAC-SHA256 password hashing, brute-force IP rate limiting with loopback proxy header verification (5 attempts / 5-min lockout), 24-hour session tokens with dynamic HTTPS Secure cookies, WebSocket Origin validation against CSWSH, and 500MB upload limits.
 - **Tunnel Routing:** Automatically routes through custom Nginx domain tunnels when configured, or falls back to Cloudflare tunnels.
 
 ### 3. Public HTTPS Tunnels
