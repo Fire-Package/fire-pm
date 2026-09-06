@@ -980,19 +980,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       playNotificationChime();
 
       if (document.hidden || !document.hasFocus()) {
-        if ('Notification' in window && Notification.permission === 'granted') {
-          try {
+        try {
+          if ('Notification' in window && Notification.permission === 'granted') {
             const notif = new Notification(title, {
               body: message,
-              icon: '/favicon.ico',
               tag: 'fire-task-alert'
             });
             notif.onclick = () => {
               window.focus();
               notif.close();
             };
-          } catch(e) {}
-        }
+          }
+        } catch(e) {}
 
         if (!titleBlinkInterval) {
           let blink = false;
@@ -1027,34 +1026,52 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function toggleNotifications() {
+      playNotificationChime();
+
       if (!('Notification' in window)) {
         showToast('Desktop notifications not supported in this browser. Audio chime is active.');
-        playNotificationChime();
         return;
       }
-      if (Notification.permission === 'granted') {
-        playNotificationChime();
-        showToast('Notifications active (Chime + Desktop alert)');
-        try {
-          new Notification('Fire SSH', { body: 'Task alerts active! You will be alerted when long commands or Antigravity finish.', icon: '/favicon.ico' });
-        } catch(e) {}
-      } else if (Notification.permission === 'denied') {
-        showToast('Desktop notifications blocked in browser settings. Audio chime will still play.');
-        playNotificationChime();
-      } else {
-        Notification.requestPermission().then(perm => {
+
+      function handlePerm(perm) {
+        updateNotifyBtnState();
+        if (perm === 'granted') {
+          showToast('Notifications enabled (Chime + Desktop alerts)');
+          try {
+            new Notification('Fire SSH', { body: 'Task alerts active! You will be alerted when long tasks finish.' });
+          } catch(e) {}
+        } else if (perm === 'denied') {
+          showToast('Notifications blocked in browser. Audio chime will still play.');
+        } else {
+          showToast('Notification permission dismissed. Audio chime is active.');
+        }
+      }
+
+      try {
+        const cur = Notification.permission;
+        if (cur === 'granted') {
+          showToast('Notifications active (Chime + Desktop alert)');
+          try {
+            new Notification('Fire SSH', { body: 'Task alerts are active!' });
+          } catch(e) {}
           updateNotifyBtnState();
-          if (perm === 'granted') {
-            playNotificationChime();
-            showToast('Notifications enabled!');
-            try {
-              new Notification('Fire SSH', { body: 'Notifications enabled! You will be alerted when long tasks finish.', icon: '/favicon.ico' });
-            } catch(e) {}
-          } else {
-            showToast('Permission not granted. Audio chime will still play.');
-            playNotificationChime();
+          return;
+        } else if (cur === 'denied') {
+          showToast('Notifications blocked in browser settings. Audio chime will still play.');
+          updateNotifyBtnState();
+          return;
+        }
+
+        try {
+          const res = Notification.requestPermission(handlePerm);
+          if (res && typeof res.then === 'function') {
+            res.then(handlePerm).catch(() => {});
           }
-        });
+        } catch(err) {
+          showToast('Could not request notification permission. Audio chime is active.');
+        }
+      } catch(e) {
+        showToast('Notification alert: Audio chime active');
       }
     }
 
