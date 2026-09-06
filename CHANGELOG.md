@@ -8,6 +8,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 
 ## [Unreleased]
 
+- `[2026-09-06]{23:12:00} Web Terminal: Add drag-and-drop file upload to $PWD, toolbar upload/download buttons, and streaming file transfer endpoints #Issue 35`
 - `[2026-09-06]{22:45:00} Web Terminal: Add background task alerts with desktop notifications, audio chime, and Antigravity bell/OSC integration #Issue 33`
 - `[2026-09-06]{21:54:00} Web Terminal: Add window capture-phase keydown listener and fullscreenchange lock for Ctrl+W and Alt+W support #Issue 31`
 - `[2026-09-06]{21:49:00} Web Terminal: Implement stream buffer reconciliation and instant local newline for 0ms typing on high-latency connections #Issue 31`
