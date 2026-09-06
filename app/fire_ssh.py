@@ -21,6 +21,7 @@ import secrets
 import hashlib
 import hmac
 import base64
+import mimetypes
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -473,6 +474,17 @@ class TerminalSession:
         except Exception:
             return False
 
+    def get_cwd(self) -> str:
+        """Returns the current working directory of the shell session."""
+        if self.pid and not self.closed:
+            try:
+                cwd = os.readlink(f"/proc/{self.pid}/cwd")
+                if os.path.isdir(cwd):
+                    return cwd
+            except Exception:
+                pass
+        return os.environ.get("HOME", "/root")
+
     def close(self):
         self.closed = True
         with self.sock_lock:
@@ -510,6 +522,18 @@ class TerminalSessionManager:
         self.sessions = {}  # token -> TerminalSession
         self.reaper_thread = threading.Thread(target=self._reaper_loop, daemon=True)
         self.reaper_thread.start()
+
+    def get(self, token: str):
+        with self.lock:
+            if token and token in self.sessions:
+                sess = self.sessions[token]
+                if sess.is_alive():
+                    return sess
+            if len(self.sessions) == 1:
+                sess = next(iter(self.sessions.values()))
+                if sess.is_alive():
+                    return sess
+            return None
 
     def get_or_create(self, token: str, shell: str = None) -> TerminalSession:
         with self.lock:
@@ -619,7 +643,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   </div>
 
   <!-- TERMINAL CONTAINER -->
-  <div id="terminal-view" class="hidden flex-1 flex flex-col h-full">
+  <div id="terminal-view" class="hidden flex-1 flex flex-col h-full relative">
     <!-- Header bar with Quick Action Signal Buttons -->
     <header class="h-12 bg-slate-900 border-b border-slate-800 px-3 sm:px-4 flex items-center justify-between select-none">
       <div class="flex items-center space-x-2 sm:space-x-3">
@@ -740,12 +764,43 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <div class="mt-3 pt-2.5 border-t border-slate-800/80 text-[10px] text-slate-500 text-center">Auto-refreshing every 3s</div>
           </div>
         </div>
+        <button id="upload-btn" onclick="triggerFileInput()" title="Upload File to Terminal Directory" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1.5">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <span class="hidden md:inline">Upload</span>
+        </button>
+        <input id="file-upload-input" type="file" multiple class="hidden" onchange="handleFileSelect(event)">
+        <button id="download-btn" onclick="openDownloadModal()" title="Download File from Remote Server" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1.5">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <span class="hidden md:inline">Download</span>
+        </button>
         <button onclick="handleLogout()" class="px-2.5 py-1 text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-lg transition">Disconnect</button>
       </div>
     </header>
 
     <!-- Xterm mount -->
     <div id="terminal" class="flex-1 w-full bg-[#020617] relative"></div>
+
+    <!-- Drag & Drop Upload Overlay -->
+    <div id="drop-overlay" class="hidden absolute inset-0 z-40 bg-slate-950/85 backdrop-blur-sm border-2 border-dashed border-orange-500 rounded-lg flex flex-col items-center justify-center pointer-events-none transition-all duration-150">
+      <div class="p-6 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl flex flex-col items-center gap-3 text-center max-w-sm mx-4">
+        <div class="w-14 h-14 rounded-2xl bg-orange-500/20 text-orange-400 flex items-center justify-center text-3xl animate-bounce">
+          📁
+        </div>
+        <div>
+          <div class="font-semibold text-white text-sm sm:text-base">Drop files to upload</div>
+          <div id="drop-target-dir" class="text-xs font-mono text-orange-300 mt-1.5 px-2.5 py-1 bg-slate-950 rounded-lg border border-slate-800 break-all">...</div>
+        </div>
+        <div class="text-[11px] text-slate-400">Files will be uploaded directly to the active shell directory</div>
+      </div>
+    </div>
 
     <!-- Local Command Buffer Bar (Low-Latency Line Mode for High Ping Connections) -->
     <div id="local-buffer-bar" class="hidden bg-slate-900 border-t border-slate-800 p-2 sm:px-3 sm:py-2 flex items-center gap-2 select-none">
@@ -773,6 +828,52 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <!-- Toast Notification -->
     <div id="term-toast" class="pointer-events-none fixed bottom-6 right-6 z-50 transition-all duration-200 opacity-0 translate-y-2 bg-slate-800/95 border border-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-lg shadow-xl font-mono flex items-center gap-2">
       <span id="term-toast-msg">Copied to clipboard</span>
+    </div>
+
+    <!-- Upload Progress Card -->
+    <div id="upload-progress-card" class="hidden fixed bottom-6 left-6 z-50 bg-slate-900/95 backdrop-blur border border-slate-700/80 rounded-xl shadow-2xl p-3.5 w-80 max-w-[calc(100vw-3rem)] font-sans text-xs">
+      <div class="flex items-center justify-between mb-1.5">
+        <span id="upload-filename" class="font-mono text-slate-200 truncate max-w-[190px]">uploading...</span>
+        <span id="upload-percent" class="font-mono text-orange-400 font-semibold">0%</span>
+      </div>
+      <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+        <div id="upload-bar" class="bg-orange-500 h-full w-0 transition-all duration-100"></div>
+      </div>
+      <div class="flex items-center justify-between mt-1.5 text-[10px] text-slate-500 font-mono">
+        <span id="upload-bytes">0 B / 0 B</span>
+        <span>Uploading...</span>
+      </div>
+    </div>
+
+    <!-- Download Modal Dialog -->
+    <div id="download-modal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-5 w-full max-w-md text-left font-sans">
+        <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
+          <div class="flex items-center gap-2">
+            <span class="text-base">📥</span>
+            <span class="font-semibold text-sm text-white">Download Remote File</span>
+          </div>
+          <button type="button" onclick="closeDownloadModal()" class="text-slate-400 hover:text-slate-200 text-sm p-1">✕</button>
+        </div>
+        <form onsubmit="handleDownloadSubmit(event)" class="space-y-3.5">
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">File Path to Download</label>
+            <div class="text-[11px] text-slate-400 mb-1.5 font-mono truncate">
+              Working directory: <span id="download-cwd-hint" class="text-orange-300">/root</span>
+            </div>
+            <input type="text" id="download-path-input" required placeholder="e.g. filename.ext or /var/log/syslog"
+                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500">
+            <p class="text-[10px] text-slate-500 mt-1">Relative paths are resolved against the active terminal directory.</p>
+          </div>
+          <div class="flex items-center justify-end gap-2 pt-2">
+            <button type="button" onclick="closeDownloadModal()" class="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition">Cancel</button>
+            <button type="submit" class="px-3.5 py-1.5 text-xs bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl transition flex items-center gap-1.5 shadow-lg shadow-orange-500/20">
+              <span>Download</span>
+              <span class="text-[10px]">↓</span>
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
 
     <!-- Custom Right-Click Context Menu -->
@@ -811,6 +912,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <span>Buffer Mode</span>
         </span>
         <span class="text-[10px] text-slate-500 font-mono">Alt+B</span>
+      </button>
+      <div class="h-px bg-slate-800 my-1"></div>
+      <button onclick="triggerFileInput(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <span>Upload File...</span>
+        </span>
+      </button>
+      <button onclick="openDownloadModal(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span>Download File...</span>
+        </span>
       </button>
       <div class="h-px bg-slate-800 my-1"></div>
       <button onclick="clearTerm(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
@@ -1136,6 +1250,214 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     function toggleNotifications() {
       toggleNotificationPanel();
+    }
+
+    // ==================== FILE TRANSFER & DRAG-AND-DROP ====================
+    let dragCounter = 0;
+    let currentCwd = '/root';
+
+    async function updateCwd() {
+      try {
+        const res = await fetch('/api/cwd');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.cwd) {
+            currentCwd = data.cwd;
+            const dropDirEl = document.getElementById('drop-target-dir');
+            if (dropDirEl) dropDirEl.textContent = currentCwd;
+            const dlHintEl = document.getElementById('download-cwd-hint');
+            if (dlHintEl) dlHintEl.textContent = currentCwd;
+          }
+        }
+      } catch(e) {}
+    }
+
+    function formatBytes(bytes) {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    window.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      dragCounter++;
+      if (dragCounter === 1) {
+        updateCwd();
+        const overlay = document.getElementById('drop-overlay');
+        if (overlay) overlay.classList.remove('hidden');
+      }
+    });
+
+    window.addEventListener('dragover', (e) => {
+      e.preventDefault();
+    });
+
+    window.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      dragCounter--;
+      if (dragCounter <= 0) {
+        dragCounter = 0;
+        const overlay = document.getElementById('drop-overlay');
+        if (overlay) overlay.classList.add('hidden');
+      }
+    });
+
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dragCounter = 0;
+      const overlay = document.getElementById('drop-overlay');
+      if (overlay) overlay.classList.add('hidden');
+
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        uploadFiles(e.dataTransfer.files);
+      }
+    });
+
+    function triggerFileInput() {
+      updateCwd();
+      const fileInput = document.getElementById('file-upload-input');
+      if (fileInput) {
+        fileInput.value = '';
+        fileInput.click();
+      }
+    }
+
+    function handleFileSelect(e) {
+      if (e.target && e.target.files && e.target.files.length > 0) {
+        uploadFiles(e.target.files);
+      }
+    }
+
+    async function uploadFiles(files) {
+      if (!files || files.length === 0) return;
+      await updateCwd();
+
+      const progressCard = document.getElementById('upload-progress-card');
+      const filenameEl = document.getElementById('upload-filename');
+      const percentEl = document.getElementById('upload-percent');
+      const barEl = document.getElementById('upload-bar');
+      const bytesEl = document.getElementById('upload-bytes');
+
+      let successCount = 0;
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (progressCard) progressCard.classList.remove('hidden');
+        if (filenameEl) filenameEl.textContent = files.length > 1 ? `(${i + 1}/${files.length}) ${file.name}` : file.name;
+        if (percentEl) percentEl.textContent = '0%';
+        if (barEl) barEl.style.width = '0%';
+        if (bytesEl) bytesEl.textContent = `0 B / ${formatBytes(file.size)}`;
+
+        try {
+          await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            const url = `/api/upload?name=${encodeURIComponent(file.name)}&dest=${encodeURIComponent(currentCwd)}`;
+            xhr.open('POST', url, true);
+
+            xhr.upload.onprogress = (evt) => {
+              if (evt.lengthComputable) {
+                const pct = Math.round((evt.loaded / evt.total) * 100);
+                if (percentEl) percentEl.textContent = `${pct}%`;
+                if (barEl) barEl.style.width = `${pct}%`;
+                if (bytesEl) bytesEl.textContent = `${formatBytes(evt.loaded)} / ${formatBytes(evt.total)}`;
+              }
+            };
+
+            xhr.onload = () => {
+              if (xhr.status === 200) {
+                successCount++;
+                showToast(`Uploaded ${file.name} to ${currentCwd}`);
+                resolve();
+              } else {
+                let errMsg = 'Upload failed';
+                try {
+                  const res = JSON.parse(xhr.responseText);
+                  if (res && res.error) errMsg = res.error;
+                } catch(e) {}
+                showToast(`Upload failed: ${errMsg}`);
+                reject(new Error(errMsg));
+              }
+            };
+
+            xhr.onerror = () => {
+              showToast(`Network error uploading ${file.name}`);
+              reject(new Error('Network error'));
+            };
+
+            xhr.send(file);
+          });
+        } catch(err) {
+          console.error('File upload error:', err);
+        }
+      }
+
+      if (progressCard) {
+        setTimeout(() => {
+          progressCard.classList.add('hidden');
+        }, 1200);
+      }
+
+      if (successCount > 0) {
+        playNotificationChime();
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('Fire SSH', {
+            body: `Uploaded ${successCount} file(s) to ${currentCwd}`
+          });
+        }
+      }
+    }
+
+    function openDownloadModal() {
+      updateCwd();
+      const modal = document.getElementById('download-modal');
+      const input = document.getElementById('download-path-input');
+      if (modal) modal.classList.remove('hidden');
+      if (input) {
+        input.value = '';
+        setTimeout(() => input.focus(), 50);
+      }
+    }
+
+    function closeDownloadModal() {
+      const modal = document.getElementById('download-modal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function handleDownloadSubmit(e) {
+      e.preventDefault();
+      const input = document.getElementById('download-path-input');
+      if (!input) return;
+      const val = input.value.trim();
+      if (!val) return;
+
+      closeDownloadModal();
+      const dlUrl = `/api/download?file=${encodeURIComponent(val)}`;
+
+      fetch(dlUrl, { method: 'HEAD' }).then(res => {
+        if (res.ok) {
+          const a = document.createElement('a');
+          a.href = dlUrl;
+          a.download = val.split('/').pop() || 'download';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          showToast(`Downloading ${val}...`);
+        } else {
+          res.json().then(data => {
+            showToast(`Download error: ${data.error || res.statusText}`);
+          }).catch(() => {
+            showToast(`Download failed with status ${res.status}`);
+          });
+        }
+      }).catch(() => {
+        const a = document.createElement('a');
+        a.href = dlUrl;
+        a.download = val.split('/').pop() || 'download';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      });
     }
 
     let predictiveEchoEnabled = true;
@@ -1762,6 +2084,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           }
         }, 15000);
         setTimeout(measureLatency, 1000);
+        setTimeout(updateCwd, 500);
       };
 
       socket.onmessage = (event) => {
@@ -1922,13 +2245,59 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 return part.split('=', 1)[1]
         return None
 
-    def is_authenticated(self) -> bool:
+    def get_auth_token(self) -> str:
         token = self.get_cookie_token()
+        if token:
+            return token
+        parsed = urllib.parse.urlparse(self.path)
+        q = urllib.parse.parse_qs(parsed.query)
+        if 'token' in q and q['token']:
+            return q['token'][0]
+        auth_header = self.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            return auth_header[7:].strip()
+        if 'X-Session-Token' in self.headers:
+            return self.headers.get('X-Session-Token')
+        return None
+
+    def is_authenticated(self) -> bool:
+        token = self.get_auth_token()
         if token and self.server.sessions.is_valid(token, self.get_client_ip()):
             return True
         return False
 
     def do_HEAD(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == '/api/download':
+            if not self.is_authenticated():
+                self.send_error(401, "Unauthorized")
+                return
+            token = self.get_auth_token()
+            session = self.server.terminals.get(token)
+            cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
+            query = urllib.parse.parse_qs(parsed.query)
+            file_param = query.get('file', [None])[0] or query.get('path', [None])[0]
+            if not file_param:
+                self.send_error(400, "Missing file parameter")
+                return
+            target_path = os.path.realpath(file_param) if os.path.isabs(file_param) else os.path.realpath(os.path.join(cwd, file_param))
+            if not os.path.exists(target_path) or os.path.isdir(target_path):
+                self.send_error(404, "File not found or is directory")
+                return
+            try:
+                file_size = os.path.getsize(target_path)
+                content_type = mimetypes.guess_type(target_path)[0] or "application/octet-stream"
+                filename = os.path.basename(target_path)
+                safe_name = urllib.parse.quote(filename)
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(file_size))
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"; filename*=UTF-8\'\'{safe_name}')
+                self.end_headers()
+            except Exception:
+                self.send_error(500, "Error reading file")
+            return
+
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
@@ -1966,6 +2335,64 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             locked, rem = self.server.rate_limiter.is_locked(ip)
             data = {"authenticated": auth, "locked": locked, "lockout_remaining": rem}
             self.send_json(data)
+            return
+
+        elif parsed.path == '/api/cwd':
+            if not self.is_authenticated():
+                self.send_error(401, "Unauthorized")
+                return
+            token = self.get_auth_token()
+            session = self.server.terminals.get(token)
+            cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
+            self.send_json({"success": True, "cwd": cwd})
+            return
+
+        elif parsed.path == '/api/download':
+            if not self.is_authenticated():
+                self.send_error(401, "Unauthorized")
+                return
+
+            token = self.get_auth_token()
+            session = self.server.terminals.get(token)
+            cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
+
+            query = urllib.parse.parse_qs(parsed.query)
+            file_param = query.get('file', [None])[0] or query.get('path', [None])[0]
+
+            if not file_param:
+                self.send_json({"success": False, "error": "Missing file parameter"}, status=400)
+                return
+
+            target_path = os.path.realpath(file_param) if os.path.isabs(file_param) else os.path.realpath(os.path.join(cwd, file_param))
+
+            if not os.path.exists(target_path):
+                self.send_json({"success": False, "error": f"File not found: {file_param}"}, status=404)
+                return
+
+            if os.path.isdir(target_path):
+                self.send_json({"success": False, "error": f"Target is a directory: {file_param}. Specify a file."}, status=400)
+                return
+
+            try:
+                file_size = os.path.getsize(target_path)
+                filename = os.path.basename(target_path)
+                content_type = mimetypes.guess_type(target_path)[0] or "application/octet-stream"
+
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(file_size))
+                safe_name = urllib.parse.quote(filename)
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"; filename*=UTF-8\'\'{safe_name}')
+                self.end_headers()
+
+                with open(target_path, 'rb') as f:
+                    while True:
+                        chunk = f.read(65536)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+            except Exception as e:
+                pass
             return
 
         elif parsed.path == '/health':
@@ -2045,6 +2472,90 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                         "success": False,
                         "error": f"Invalid password. {attempts_left} attempt(s) remaining."
                     }, status=401)
+            return
+
+        elif parsed.path == '/api/upload':
+            if not self.is_authenticated():
+                self.send_error(401, "Unauthorized")
+                return
+
+            token = self.get_auth_token()
+            session = self.server.terminals.get(token)
+            cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
+
+            query = urllib.parse.parse_qs(parsed.query)
+            filename = query.get('name', [None])[0] or self.headers.get('X-Filename')
+            dest = query.get('dest', [None])[0]
+            content_type = self.headers.get('Content-Type', '')
+            content_len = int(self.headers.get('Content-Length', 0))
+
+            target_dir = cwd
+            if dest:
+                target_dir = os.path.realpath(dest) if os.path.isabs(dest) else os.path.realpath(os.path.join(cwd, dest))
+
+            if not os.path.isdir(target_dir):
+                try:
+                    os.makedirs(target_dir, exist_ok=True)
+                except Exception as e:
+                    self.send_json({"success": False, "error": f"Cannot create target directory: {e}"}, status=400)
+                    return
+
+            # Support multipart/form-data
+            if 'multipart/form-data' in content_type:
+                try:
+                    import email
+                    raw_body = self.rfile.read(content_len)
+                    fake_msg = email.message_from_bytes(f"Content-Type: {content_type}\r\n\r\n".encode() + raw_body)
+                    saved_files = []
+                    for part in fake_msg.get_payload():
+                        p_filename = part.get_filename()
+                        if p_filename:
+                            p_filename = os.path.basename(p_filename).strip()
+                            if p_filename:
+                                p_path = os.path.join(target_dir, p_filename)
+                                p_data = part.get_payload(decode=True)
+                                with open(p_path, 'wb') as pf:
+                                    pf.write(p_data)
+                                saved_files.append({"filename": p_filename, "path": p_path, "bytes": len(p_data)})
+                    self.send_json({"success": True, "files": saved_files, "dest": target_dir})
+                    return
+                except Exception as e:
+                    self.send_json({"success": False, "error": f"Multipart upload failed: {e}"}, status=500)
+                    return
+
+            # Raw binary stream upload
+            if not filename:
+                self.send_json({"success": False, "error": "Missing filename parameter (?name=... or X-Filename)"}, status=400)
+                return
+
+            filename = os.path.basename(filename).strip()
+            if not filename:
+                self.send_json({"success": False, "error": "Invalid filename"}, status=400)
+                return
+
+            target_path = os.path.join(target_dir, filename)
+
+            try:
+                bytes_written = 0
+                rem = content_len
+                with open(target_path, 'wb') as f:
+                    while rem > 0:
+                        chunk_size = min(rem, 65536)
+                        chunk = self.rfile.read(chunk_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        bytes_written += len(chunk)
+                        rem -= len(chunk)
+
+                self.send_json({
+                    "success": True,
+                    "filename": filename,
+                    "path": target_path,
+                    "bytes": bytes_written
+                })
+            except Exception as e:
+                self.send_json({"success": False, "error": f"Failed writing file: {e}"}, status=500)
             return
 
         elif parsed.path == '/api/logout':
