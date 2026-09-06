@@ -664,10 +664,44 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <button id="buffer-toggle-btn" onclick="toggleBufferMode()" title="Toggle Command Bar [Alt+B]" class="hidden md:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-transparent rounded-lg transition font-mono items-center gap-1">
           <span>Command Bar</span>
         </button>
-        <button id="notify-btn" onclick="toggleNotifications()" title="Task Alerts & Notifications (Alerts when long commands or Antigravity finish)" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1">
-          <span id="notify-icon">🔔</span>
-          <span id="notify-badge" class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
-        </button>
+        <div class="relative">
+          <button id="notify-btn" onclick="toggleNotificationPanel()" title="Task Alerts & Notifications (Alerts when long commands or Antigravity finish)" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1.5">
+            <span id="notify-icon">🔔</span>
+            <span id="notify-badge" class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
+          </button>
+          <div id="notify-panel" class="hidden absolute right-0 top-full mt-1.5 w-72 bg-slate-900/95 backdrop-blur-sm border border-slate-700/80 rounded-xl shadow-2xl shadow-black/50 p-3.5 z-50 text-left font-sans">
+            <div class="flex items-center justify-between mb-2.5 pb-2 border-b border-slate-800">
+              <span class="text-[11px] font-semibold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                <span>🔔</span> Task Alerts & Chimes
+              </span>
+              <button onclick="playNotificationChime()" title="Test Audio Chime" class="px-2 py-0.5 text-[10px] bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 rounded transition font-mono flex items-center gap-1">
+                <span>🔊</span> Test
+              </button>
+            </div>
+            
+            <div class="space-y-2.5 text-xs">
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="font-medium text-slate-200">Audio Chime</div>
+                  <div class="text-[10px] text-slate-400">Plays gentle chime on completion</div>
+                </div>
+                <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono">Active</span>
+              </div>
+
+              <div class="pt-2 border-t border-slate-800/80">
+                <div class="flex items-center justify-between mb-1">
+                  <div class="font-medium text-slate-200">Desktop Notification</div>
+                  <span id="notify-perm-status" class="text-[10px] font-mono text-slate-400">Checking...</span>
+                </div>
+                <div id="notify-perm-action" class="mt-1"></div>
+              </div>
+
+              <div class="pt-2 border-t border-slate-800/80 text-[10px] text-slate-400 leading-relaxed">
+                ⚡ Alerts trigger for commands running <span class="text-slate-300 font-mono">≥ 3s</span>, Antigravity AI turns, and terminal bells.
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="relative">
           <button id="network-btn" onclick="toggleLatencyPanel()" title="Network Latency" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition flex items-center gap-1.5">
             <svg id="wifi-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1013,66 +1047,82 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
     });
 
-    function updateNotifyBtnState() {
-      const badge = document.getElementById('notify-badge');
-      if (!badge) return;
-      if ('Notification' in window && Notification.permission === 'granted') {
-        badge.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse';
-      } else if ('Notification' in window && Notification.permission === 'denied') {
-        badge.className = 'w-1.5 h-1.5 rounded-full bg-red-400';
-      } else {
-        badge.className = 'w-1.5 h-1.5 rounded-full bg-slate-500';
+    function toggleNotificationPanel() {
+      const panel = document.getElementById('notify-panel');
+      if (!panel) return;
+      const isHidden = panel.classList.contains('hidden');
+      const latPanel = document.getElementById('latency-panel');
+      if (latPanel) latPanel.classList.add('hidden');
+
+      panel.classList.toggle('hidden');
+      if (isHidden) {
+        updateNotifyPanelUI();
       }
     }
 
-    function toggleNotifications() {
-      playNotificationChime();
+    function updateNotifyPanelUI() {
+      const statusEl = document.getElementById('notify-perm-status');
+      const actionEl = document.getElementById('notify-perm-action');
+      const badge = document.getElementById('notify-badge');
+      if (!statusEl || !actionEl) return;
 
       if (!('Notification' in window)) {
-        showToast('Desktop notifications not supported in this browser. Audio chime is active.');
+        statusEl.innerHTML = '<span class="text-amber-400">Unsupported</span>';
+        actionEl.innerHTML = '<p class="text-[10px] text-slate-400">Browser does not support desktop notifications. Audio chime is active.</p>';
+        if (badge) badge.className = 'w-1.5 h-1.5 rounded-full bg-amber-400';
         return;
       }
 
-      function handlePerm(perm) {
-        updateNotifyBtnState();
+      const perm = Notification.permission;
+      if (perm === 'granted') {
+        statusEl.innerHTML = '<span class="text-emerald-400 font-semibold">● Allowed</span>';
+        actionEl.innerHTML = '<button onclick="playNotificationChime(); showToast(\'Desktop notifications active!\'); try { new Notification(\'Fire SSH\', { body: \'Test notification successful!\' }); } catch(e){}" class="w-full py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition font-mono flex items-center justify-center gap-1"><span>📬</span> Send Test Notification</button>';
+        if (badge) badge.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse';
+      } else if (perm === 'denied') {
+        statusEl.innerHTML = '<span class="text-red-400 font-semibold">● Blocked in Browser</span>';
+        actionEl.innerHTML = '<div class="p-2 bg-red-950/40 border border-red-500/30 rounded-lg text-[11px] text-red-300 leading-tight"><span class="font-semibold">How to enable:</span><br>Click the 🔒 or ⚙️ icon in your browser URL address bar and set <b>Notifications</b> to <b>Allow</b>.</div>';
+        if (badge) badge.className = 'w-1.5 h-1.5 rounded-full bg-red-400';
+      } else {
+        statusEl.innerHTML = '<span class="text-amber-400 font-semibold">● Not Enabled</span>';
+        actionEl.innerHTML = '<button onclick="requestDesktopNotificationPerm()" class="w-full py-1 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg shadow transition flex items-center justify-center gap-1"><span>🔔</span> Enable Desktop Alerts</button>';
+        if (badge) badge.className = 'w-1.5 h-1.5 rounded-full bg-amber-400';
+      }
+    }
+
+    function requestDesktopNotificationPerm() {
+      playNotificationChime();
+      if (!('Notification' in window)) return;
+      function onDone(perm) {
+        updateNotifyPanelUI();
         if (perm === 'granted') {
-          showToast('Notifications enabled (Chime + Desktop alerts)');
+          showToast('Desktop notifications enabled!');
           try {
-            new Notification('Fire SSH', { body: 'Task alerts active! You will be alerted when long tasks finish.' });
+            new Notification('Fire SSH', { body: 'Notifications enabled successfully!' });
           } catch(e) {}
-        } else if (perm === 'denied') {
-          showToast('Notifications blocked in browser. Audio chime will still play.');
-        } else {
-          showToast('Notification permission dismissed. Audio chime is active.');
         }
       }
-
       try {
-        const cur = Notification.permission;
-        if (cur === 'granted') {
-          showToast('Notifications active (Chime + Desktop alert)');
-          try {
-            new Notification('Fire SSH', { body: 'Task alerts are active!' });
-          } catch(e) {}
-          updateNotifyBtnState();
-          return;
-        } else if (cur === 'denied') {
-          showToast('Notifications blocked in browser settings. Audio chime will still play.');
-          updateNotifyBtnState();
-          return;
+        const req = Notification.requestPermission(onDone);
+        if (req && typeof req.then === 'function') {
+          req.then(onDone).catch(() => {});
         }
+      } catch(e) {}
+    }
 
-        try {
-          const res = Notification.requestPermission(handlePerm);
-          if (res && typeof res.then === 'function') {
-            res.then(handlePerm).catch(() => {});
-          }
-        } catch(err) {
-          showToast('Could not request notification permission. Audio chime is active.');
-        }
-      } catch(e) {
-        showToast('Notification alert: Audio chime active');
+    document.addEventListener('click', (e) => {
+      const panel = document.getElementById('notify-panel');
+      const btn = document.getElementById('notify-btn');
+      if (panel && btn && !panel.contains(e.target) && !btn.contains(e.target)) {
+        panel.classList.add('hidden');
       }
+    });
+
+    function updateNotifyBtnState() {
+      updateNotifyPanelUI();
+    }
+
+    function toggleNotifications() {
+      toggleNotificationPanel();
     }
 
     let predictiveEchoEnabled = true;
