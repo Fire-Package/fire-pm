@@ -583,8 +583,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </button>
         <button onclick="sendSuspend()" title="Suspend Foreground Job (Ctrl+Z)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono">^Z</button>
         <button onclick="sendEOF()" title="EOF / Exit (Ctrl+D)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono">^D</button>
+        <button onclick="sendCtrlW()" title="Send Ctrl+W (Where Is in nano / erase word in bash)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono">^W</button>
         <button onclick="clearTerm()" title="Clear Terminal Output" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">Clear</button>
         <button onclick="termFit()" title="Fit Terminal Window" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fit</button>
+        <button onclick="toggleFullscreen()" title="Fullscreen mode (locks Ctrl+W from closing tab)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fullscreen</button>
         <button onclick="copySelectionToClipboard(true)" title="Copy Selected Text (Ctrl+C / Cmd+C)" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
@@ -671,6 +673,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <span>Select All</span>
         </span>
         <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+A</span>
+      </button>
+      <button onclick="sendCtrlW(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <span>Search (Where Is)</span>
+        </span>
+        <span class="text-[10px] text-slate-500 font-mono">Alt+W / ^W</span>
       </button>
       <div class="h-px bg-slate-800 my-1"></div>
       <button onclick="clearTerm(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
@@ -764,6 +773,38 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         socket.send(JSON.stringify({ type: 'input', data: '\x04' }));
       }
       if (term) term.focus();
+    }
+
+    function sendCtrlW() {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'input', data: '\x17' }));
+      }
+      if (term) term.focus();
+    }
+
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().then(() => {
+          if (navigator.keyboard && navigator.keyboard.lock) {
+            navigator.keyboard.lock(['KeyW', 'KeyN', 'KeyT']).catch(() => {});
+          }
+          termFit();
+          if (term) term.focus();
+          showToast('Fullscreen on (Ctrl+W locked to terminal)');
+        }).catch(() => {
+          showToast('Fullscreen not permitted');
+        });
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen().then(() => {
+            if (navigator.keyboard && navigator.keyboard.unlock) {
+              navigator.keyboard.unlock();
+            }
+            termFit();
+            if (term) term.focus();
+          }).catch(() => {});
+        }
+      }
     }
 
     let toastTimer = null;
@@ -1047,6 +1088,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             if (socket && socket.readyState === WebSocket.OPEN) {
               socket.send(JSON.stringify({ type: 'input', data: '\x0c' }));
             }
+            return false;
+          }
+
+          // Ctrl+W: nano search / bash erase word
+          // Safe aliases: Alt+W or Ctrl+Shift+W (never close browser tab)
+          if (((e.ctrlKey && e.shiftKey) || e.altKey) && (e.key === 'w' || e.key === 'W')) {
+            e.preventDefault();
+            sendCtrlW();
+            return false;
+          }
+          // Direct Ctrl+W: intercept in fullscreen / supported environments
+          if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'w' || e.key === 'W')) {
+            e.preventDefault();
+            sendCtrlW();
             return false;
           }
         }
