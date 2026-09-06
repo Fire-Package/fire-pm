@@ -8,6 +8,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 
 ## [Unreleased]
 
+- `[2026-09-06]{21:08:00} Web Terminal: Add local command input buffer (line mode) for 0ms typing lag on high latency / 2000ms ping connections #Issue 31`
 - `[2026-09-06]{20:44:00} Web Terminal: Add Ctrl+W support with keyboard lock, Alt+W safe alias, context menu, and fullscreen mode for editors like nano #Issue 31`
 - `[2026-09-04]{12:44:00} CLI: Fix fire ssh immediately closing in foreground mode and add Ctrl+B detach shortcut #PR 30`
 - `[2026-09-04]{12:22:00} Web Terminal: Extend detached session TTL to 3 days and support session reattachment on re-login #PR 28`

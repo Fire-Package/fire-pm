@@ -601,6 +601,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           </svg>
           <span>Paste</span>
         </button>
+        <button id="buffer-toggle-btn" onclick="toggleBufferMode()" title="Toggle Local Buffer Mode (0ms typing lag for high ping) [Alt+B]" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-transparent rounded-lg transition font-mono flex items-center gap-1">
+          <span class="text-amber-400">⚡</span>
+          <span>Buffer</span>
+        </button>
         <div class="relative">
           <button id="network-btn" onclick="toggleLatencyPanel()" title="Network Latency" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition flex items-center gap-1.5">
             <svg id="wifi-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -646,6 +650,29 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <!-- Xterm mount -->
     <div id="terminal" class="flex-1 w-full bg-[#020617] relative"></div>
 
+    <!-- Local Command Buffer Bar (Low-Latency Line Mode for High Ping Connections) -->
+    <div id="local-buffer-bar" class="hidden bg-slate-900 border-t border-slate-800 p-2 sm:px-3 sm:py-2 flex items-center gap-2 select-none">
+      <div class="flex items-center gap-1 text-amber-400 text-xs font-mono shrink-0 select-none">
+        <span class="animate-pulse">⚡</span>
+        <span class="hidden md:inline text-[11px] text-slate-400">Buffer:</span>
+      </div>
+      <div class="flex-1 relative flex items-center">
+        <input id="local-buffer-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+               placeholder="Type command locally with 0ms lag (Press Enter to send, ↑/↓ for history)..."
+               class="w-full bg-slate-950 text-emerald-400 placeholder:text-slate-600 font-mono text-xs sm:text-sm px-3 py-1.5 rounded-lg border border-slate-700/70 focus:outline-none focus:border-amber-400/80 focus:ring-1 focus:ring-amber-400/50 transition">
+        <span id="buffer-history-tip" class="hidden lg:inline absolute right-2.5 text-[10px] text-slate-600 font-mono pointer-events-none">Enter ↵</span>
+      </div>
+      <button onclick="submitLocalBuffer()" title="Send Command to Remote Server (Enter)" class="px-2.5 py-1.5 text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg transition font-mono font-medium flex items-center gap-1 shrink-0">
+        <span>Send</span>
+        <span class="text-[10px] opacity-70">↵</span>
+      </button>
+      <button onclick="toggleBufferMode()" title="Hide Local Buffer (Alt+B)" class="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition shrink-0">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
     <!-- Toast Notification -->
     <div id="term-toast" class="pointer-events-none fixed bottom-6 right-6 z-50 transition-all duration-200 opacity-0 translate-y-2 bg-slate-800/95 border border-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-lg shadow-xl font-mono flex items-center gap-2">
       <span id="term-toast-msg">Copied to clipboard</span>
@@ -680,6 +707,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <span>Search (Where Is)</span>
         </span>
         <span class="text-[10px] text-slate-500 font-mono">Alt+W / ^W</span>
+      </button>
+      <button onclick="toggleBufferMode(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <span class="text-amber-400">⚡</span>
+          <span>Buffer Mode</span>
+        </span>
+        <span class="text-[10px] text-slate-500 font-mono">Alt+B</span>
       </button>
       <div class="h-px bg-slate-800 my-1"></div>
       <button onclick="clearTerm(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
@@ -805,6 +839,99 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           }).catch(() => {});
         }
       }
+    }
+
+    let bufferHistory = [];
+    let bufferHistoryIdx = -1;
+    let bufferAutoPrompted = false;
+
+    function toggleBufferMode(force) {
+      const bar = document.getElementById('local-buffer-bar');
+      const btn = document.getElementById('buffer-toggle-btn');
+      const input = document.getElementById('local-buffer-input');
+      if (!bar) return;
+
+      const shouldShow = force !== undefined ? force : bar.classList.contains('hidden');
+      if (shouldShow) {
+        bar.classList.remove('hidden');
+        if (btn) {
+          btn.classList.add('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
+          btn.classList.remove('animate-pulse');
+        }
+        if (input) {
+          input.focus();
+          input.select();
+        }
+        showToast('Local Buffer active: 0ms typing lag');
+      } else {
+        bar.classList.add('hidden');
+        if (btn) btn.classList.remove('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
+        if (term) term.focus();
+      }
+      termFit();
+    }
+
+    function submitLocalBuffer() {
+      const input = document.getElementById('local-buffer-input');
+      if (!input) return;
+      const cmd = input.value;
+      if (cmd !== '') {
+        if (bufferHistory.length === 0 || bufferHistory[bufferHistory.length - 1] !== cmd) {
+          bufferHistory.push(cmd);
+          if (bufferHistory.length > 100) bufferHistory.shift();
+        }
+        bufferHistoryIdx = bufferHistory.length;
+
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'input', data: cmd + '\r' }));
+        }
+        input.value = '';
+      } else {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'input', data: '\r' }));
+        }
+      }
+      input.focus();
+    }
+
+    function initLocalBufferListeners() {
+      const input = document.getElementById('local-buffer-input');
+      if (!input) return;
+
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitLocalBuffer();
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          if (bufferHistory.length > 0) {
+            if (bufferHistoryIdx > 0) {
+              bufferHistoryIdx--;
+            }
+            input.value = bufferHistory[bufferHistoryIdx] || '';
+          }
+        } else if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (bufferHistoryIdx < bufferHistory.length - 1) {
+            bufferHistoryIdx++;
+            input.value = bufferHistory[bufferHistoryIdx];
+          } else {
+            bufferHistoryIdx = bufferHistory.length;
+            input.value = '';
+          }
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          if (term) term.focus();
+        } else if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+          if (input.selectionStart === input.selectionEnd) {
+            input.value = '';
+            sendInterrupt();
+          }
+        } else if (e.altKey && (e.key === 'b' || e.key === 'B')) {
+          e.preventDefault();
+          toggleBufferMode(false);
+        }
+      });
     }
 
     let toastTimer = null;
@@ -1104,6 +1231,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             sendCtrlW();
             return false;
           }
+
+          // Alt+B: Toggle Local Buffer Mode (0ms input lag for high ping)
+          if (e.altKey && (e.key === 'b' || e.key === 'B')) {
+            toggleBufferMode();
+            return false;
+          }
         }
         return true;
       });
@@ -1117,6 +1250,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       });
 
       window.addEventListener('resize', () => termFit());
+      initLocalBufferListeners();
     }
 
     function termFit() {
@@ -1254,6 +1388,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       const lat = clientServerLatency >= 0 ? clientServerLatency : 999;
       wifiIcon.style.color = lat < 80 ? '#4ade80' : lat < 200 ? '#fbbf24' : '#f87171';
+
+      if (clientServerLatency >= 400 && !bufferAutoPrompted) {
+        bufferAutoPrompted = true;
+        const btn = document.getElementById('buffer-toggle-btn');
+        if (btn) {
+          btn.classList.add('border-amber-400', 'animate-pulse');
+        }
+        showToast(`High latency detected (${Math.round(clientServerLatency)}ms). Click ⚡ Buffer or press Alt+B for 0ms typing!`);
+      }
     }
 
     function latencyDotColor(ms) {
