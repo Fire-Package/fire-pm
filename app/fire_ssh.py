@@ -37,6 +37,7 @@ LOCKOUT_SECONDS = 300  # 5 minutes
 WINDOW_SECONDS = 300
 SCROLLBACK_BUFFER_SIZE = 128 * 1024  # 128 KB scrollback replay buffer
 DETACHED_SESSION_TTL = 3 * 86400  # Keep detached sessions alive for 3 days (259,200 seconds)
+MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB maximum file upload size
 
 # ==================== PASSWORD & SECURITY ====================
 
@@ -2982,10 +2983,13 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 
 class FireSSHServerHandler(BaseHTTPRequestHandler):
     def get_client_ip(self) -> str:
-        forwarded = self.headers.get('CF-Connecting-IP') or self.headers.get('X-Forwarded-For')
-        if forwarded:
-            return forwarded.split(',')[0].strip()
-        return self.client_address[0]
+        client_ip = self.client_address[0]
+        # Only trust reverse-proxy headers if connection originated from local loopback
+        if client_ip in ('127.0.0.1', '::1', 'localhost') or client_ip.startswith('127.'):
+            forwarded = self.headers.get('CF-Connecting-IP') or self.headers.get('X-Forwarded-For')
+            if forwarded:
+                return forwarded.split(',')[0].strip()
+        return client_ip
 
     def get_cookie_token(self) -> str:
         cookie_header = self.headers.get('Cookie', '')
@@ -3032,8 +3036,8 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_error(400, "Missing file parameter")
                 return
             target_path = os.path.realpath(file_param) if os.path.isabs(file_param) else os.path.realpath(os.path.join(cwd, file_param))
-            if not os.path.exists(target_path) or os.path.isdir(target_path):
-                self.send_error(404, "File not found or is directory")
+            if not os.path.exists(target_path) or not os.path.isfile(target_path):
+                self.send_error(404, "File not found or is not a regular file")
                 return
             try:
                 file_size = os.path.getsize(target_path)
@@ -3064,6 +3068,17 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
 
         # WebSocket Upgrade
         if parsed.path == '/ws':
+            origin = self.headers.get('Origin')
+            if origin:
+                origin_host = urllib.parse.urlparse(origin).netloc.lower().split(':')[0]
+                host_header = self.headers.get('X-Forwarded-Host') or self.headers.get('Host', '')
+                expected_host = host_header.split(':')[0].lower()
+                is_loopback_origin = origin_host in ('localhost', '127.0.0.1')
+                is_loopback_host = expected_host in ('localhost', '127.0.0.1', '')
+                if not (origin_host == expected_host or (is_loopback_origin and is_loopback_host)):
+                    self.send_error(403, "Cross-Origin WebSocket Forbidden")
+                    return
+
             query = urllib.parse.parse_qs(parsed.query)
             token = query.get('token', [None])[0] or self.get_cookie_token()
             tab_id = query.get('tab', [None])[0]
@@ -3158,8 +3173,8 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_json({"success": False, "error": f"File not found: {file_param}"}, status=404)
                 return
 
-            if os.path.isdir(target_path):
-                self.send_json({"success": False, "error": f"Target is a directory: {file_param}. Specify a file."}, status=400)
+            if not os.path.isfile(target_path) or os.path.isdir(target_path):
+                self.send_json({"success": False, "error": f"Target is not a regular file: {file_param}. Only regular files can be downloaded."}, status=400)
                 return
 
             try:
@@ -3259,9 +3274,12 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                             old_sess.session_id = token
                             self.server.terminals.sessions[token] = old_sess
                 
+                proto = self.headers.get('X-Forwarded-Proto', '').lower()
+                is_https = proto == 'https' or 'https' in self.headers.get('CF-Visitor', '')
+                secure_attr = "; Secure" if is_https else ""
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
-                self.send_header("Set-Cookie", f"fire_ssh_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_EXPIRY_SECONDS}")
+                self.send_header("Set-Cookie", f"fire_ssh_session={token}; Path=/; HttpOnly; SameSite=Lax{secure_attr}; Max-Age={SESSION_EXPIRY_SECONDS}")
                 self.end_headers()
                 self.wfile.write(json.dumps({"success": True, "token": token}).encode('utf-8'))
             else:
@@ -3293,6 +3311,10 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             dest = query.get('dest', [None])[0]
             content_type = self.headers.get('Content-Type', '')
             content_len = int(self.headers.get('Content-Length', 0))
+
+            if content_len > MAX_UPLOAD_BYTES:
+                self.send_json({"success": False, "error": f"Upload exceeds maximum allowed size ({MAX_UPLOAD_BYTES // (1024*1024)} MB)"}, status=413)
+                return
 
             target_dir = cwd
             if dest:
@@ -3431,9 +3453,12 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.server.shares.revoke_by_session(token)
                 self.server.sessions.revoke(token)
                 self.server.terminals.remove(token)
+            proto = self.headers.get('X-Forwarded-Proto', '').lower()
+            is_https = proto == 'https' or 'https' in self.headers.get('CF-Visitor', '')
+            secure_attr = "; Secure" if is_https else ""
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Set-Cookie", "fire_ssh_session=; Path=/; HttpOnly; Max-Age=0")
+            self.send_header("Set-Cookie", f"fire_ssh_session=; Path=/; HttpOnly; SameSite=Lax{secure_attr}; Max-Age=0")
             self.end_headers()
             self.wfile.write(b'{"success":true}')
             return

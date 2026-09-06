@@ -454,7 +454,7 @@ format_mem_kb() {
 
 ensure_tunnel_dir() {
   mkdir -p "$TUNNEL_DIR"
-  chmod 777 "$TUNNEL_DIR" 2>/dev/null || chmod 755 "$TUNNEL_DIR" 2>/dev/null || true
+  chmod 755 "$TUNNEL_DIR" 2>/dev/null || true
 }
 
 is_pid_running() {
@@ -535,9 +535,9 @@ LOG_FILE=$log_file
 START_TS=$start_ts
 PROVIDER=$provider
 EOF
-  chmod 666 "$state_file" 2>/dev/null || chmod 644 "$state_file" 2>/dev/null || true
+  chmod 644 "$state_file" 2>/dev/null || true
   if [[ -n "$log_file" && -f "$log_file" ]]; then
-    chmod 666 "$log_file" 2>/dev/null || chmod 644 "$log_file" 2>/dev/null || true
+    chmod 644 "$log_file" 2>/dev/null || true
   fi
 }
 
@@ -1958,12 +1958,15 @@ install_cloudflared() {
     return 0
   fi
 
-  # Fallback to local fire bin directory
-  mkdir -p /tmp/fire-bin
-  if curl -fsSL "$dl_url" -o "/tmp/fire-bin/cloudflared" 2>/dev/null; then
-    chmod +x "/tmp/fire-bin/cloudflared"
-    export PATH="/tmp/fire-bin:$PATH"
-    success "cloudflared installed to /tmp/fire-bin/cloudflared"
+  # Fallback to user local bin directory
+  local user_bin="${HOME}/.local/bin"
+  mkdir -p "$user_bin"
+  if curl -fsSL "$dl_url" -o "$user_bin/cloudflared" 2>/dev/null; then
+    chmod +x "$user_bin/cloudflared"
+    if [[ ":$PATH:" != *":$user_bin:"* ]]; then
+      export PATH="$user_bin:$PATH"
+    fi
+    success "cloudflared installed to $user_bin/cloudflared"
     return 0
   fi
 
@@ -2902,15 +2905,27 @@ action_dashboard() {
 
   # If we have the python TUI and textual is installed, use it
   if [[ -n "$tui_script" && -n "$py_bin" ]] && "$py_bin" -c "import textual" &>/dev/null; then
+    local tui_ipc_dir="${XDG_RUNTIME_DIR:-/tmp}/fire-pm-$UID"
+    mkdir -p "$tui_ipc_dir"
+    chmod 700 "$tui_ipc_dir" 2>/dev/null || true
+    local tui_cmd_file="$tui_ipc_dir/next_cmd"
+    export FIRE_TUI_IPC_FILE="$tui_cmd_file"
+
     # Loop to allow returning from live views or info screens
     while true; do
-        rm -f /tmp/fire_tui_next_cmd
+        rm -f "$tui_cmd_file" /tmp/fire_tui_next_cmd
         "$py_bin" "$tui_script"
         
-        if [[ -f /tmp/fire_tui_next_cmd ]]; then
-            local next_cmd=$(cat /tmp/fire_tui_next_cmd)
+        local next_cmd=""
+        if [[ -f "$tui_cmd_file" ]]; then
+            next_cmd=$(cat "$tui_cmd_file")
+            rm -f "$tui_cmd_file"
+        elif [[ -f /tmp/fire_tui_next_cmd ]]; then
+            next_cmd=$(cat /tmp/fire_tui_next_cmd)
             rm -f /tmp/fire_tui_next_cmd
-            
+        fi
+
+        if [[ -n "$next_cmd" ]]; then
             # Execute the command
             if [[ "$next_cmd" == "fire "* ]]; then
                 local subcmd=$(echo "$next_cmd" | cut -d' ' -f2)
@@ -2918,11 +2933,12 @@ action_dashboard() {
                 
                 case "$subcmd" in
                     live) ARGS=("$target"); action_live ;;
-                    info|show) ARGS=("$target"); action_info; echo -e "\nPress Enter to return..."; read ;;
-                    *) eval "$next_cmd" ;;
+                    info|show) ARGS=("$target"); action_info; echo -e "\nPress Enter to return..."; read -r ;;
+                    *) "$0" "$subcmd" "$target" ;;
                 esac
-            else
-                eval "$next_cmd"
+            elif [[ "$next_cmd" == "nano "* ]]; then
+                local edit_target="${next_cmd#nano }"
+                nano "$edit_target"
             fi
         else
             # User quit the TUI normally

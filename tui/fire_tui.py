@@ -786,7 +786,12 @@ class FireTUI(App):
 
     def action_refresh_data(self) -> None: self.update_data()
     def exit_with_command(self, cmd):
-        with open("/tmp/fire_tui_next_cmd", "w") as f: f.write(cmd)
+        ipc_file = os.environ.get("FIRE_TUI_IPC_FILE", "/tmp/fire_tui_next_cmd")
+        try:
+            with open(ipc_file, "w") as f:
+                f.write(cmd)
+        except Exception:
+            pass
         self.exit()
 
 if __name__ == "__main__": app = FireTUI(); app.run()
