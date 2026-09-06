@@ -846,8 +846,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     let predictiveEchoEnabled = true;
     let localLine = '';
-    let pendingEchoQueue = [];
-    let pendingEchoTimeout = null;
+    let pendingSubmissions = [];
+    let streamBuffer = '';
+    let submissionTimeout = null;
+
+    function resetSubmissionTimeout() {
+      if (submissionTimeout) clearTimeout(submissionTimeout);
+      submissionTimeout = setTimeout(() => {
+        pendingSubmissions = [];
+        streamBuffer = '';
+      }, 5000);
+    }
 
     function togglePredictiveMode(force) {
       predictiveEchoEnabled = force !== undefined ? force : !predictiveEchoEnabled;
@@ -865,7 +874,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
         if (text) text.textContent = '0ms Off';
         localLine = '';
-        pendingEchoQueue = [];
+        pendingSubmissions = [];
+        streamBuffer = '';
         showToast('0ms In-Terminal Typing: OFF (Raw server echo)');
       }
       if (term) term.focus();
@@ -873,18 +883,65 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     function renderServerOutput(raw) {
       const isAlt = term && term.buffer && term.buffer.active && term.buffer.active.type === 'alternate';
-      if (!isAlt && predictiveEchoEnabled && pendingEchoQueue.length > 0) {
-        let str = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
-        const expected = pendingEchoQueue[0];
-        const matchIdx = str.indexOf(expected);
-        if (matchIdx >= 0 && matchIdx <= 16) {
-          str = str.slice(0, matchIdx) + str.slice(matchIdx + expected.length);
-          pendingEchoQueue.shift();
-          if (pendingEchoTimeout) clearTimeout(pendingEchoTimeout);
-        }
-        term.write(str);
-      } else {
+      if (isAlt || !predictiveEchoEnabled) {
+        pendingSubmissions = [];
+        streamBuffer = '';
         term.write(raw);
+        return;
+      }
+
+      if (pendingSubmissions.length === 0) {
+        term.write(raw);
+        return;
+      }
+
+      const chunk = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
+      streamBuffer += chunk;
+
+      while (pendingSubmissions.length > 0) {
+        const expectedCmd = pendingSubmissions[0];
+        if (!expectedCmd) {
+          if (streamBuffer.startsWith('\r\n')) {
+            streamBuffer = streamBuffer.slice(2);
+            pendingSubmissions.shift();
+            continue;
+          } else if (streamBuffer.startsWith('\n') || streamBuffer.startsWith('\r')) {
+            streamBuffer = streamBuffer.slice(1);
+            pendingSubmissions.shift();
+            continue;
+          } else if (streamBuffer.length >= 2) {
+            pendingSubmissions.shift();
+            continue;
+          }
+          break;
+        }
+
+        const escaped = expectedCmd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const fullRegex = new RegExp(`^(\\x1b\\[[0-9;?]*[a-zA-Z]|\\r|\\n)*${escaped}(\\r\\n|\\r|\\n)`);
+        const fullMatch = streamBuffer.match(fullRegex);
+        if (fullMatch) {
+          streamBuffer = streamBuffer.slice(fullMatch[0].length);
+          pendingSubmissions.shift();
+          continue;
+        }
+
+        const partialRegex = new RegExp(`^(\\x1b\\[[0-9;?]*[a-zA-Z]|\\r|\\n)*${escaped}$`);
+        if (streamBuffer.match(partialRegex)) {
+          return;
+        }
+
+        if (streamBuffer.length > expectedCmd.length + 32) {
+          pendingSubmissions.shift();
+          continue;
+        }
+
+        break;
+      }
+
+      if (streamBuffer.length > 0) {
+        const out = streamBuffer;
+        streamBuffer = '';
+        term.write(out);
       }
     }
 
@@ -1299,6 +1356,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       term.onData(data => {
         const isAlternateScreen = term.buffer && term.buffer.active && term.buffer.active.type === 'alternate';
         if (!predictiveEchoEnabled || isAlternateScreen) {
+          pendingSubmissions = [];
+          streamBuffer = '';
           if (socket && socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({ type: 'input', data }));
           }
@@ -1306,16 +1365,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         if (data === '\r') {
+          term.write('\r\n');
+          const cmd = localLine;
+          localLine = '';
+          pendingSubmissions.push(cmd);
+          resetSubmissionTimeout();
           if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: 'input', data: localLine + '\r' }));
-          }
-          if (localLine.length > 0) {
-            pendingEchoQueue.push(localLine);
-            if (pendingEchoTimeout) clearTimeout(pendingEchoTimeout);
-            pendingEchoTimeout = setTimeout(() => {
-              pendingEchoQueue = [];
-            }, 5000);
-            localLine = '';
+            socket.send(JSON.stringify({ type: 'input', data: cmd + '\r' }));
           }
         } else if (data === '\x7f' || data === '\b') {
           if (localLine.length > 0) {
@@ -1324,7 +1380,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           }
         } else if (data === '\x03') {
           localLine = '';
-          pendingEchoQueue = [];
+          pendingSubmissions = [];
+          streamBuffer = '';
           term.write('^C\r\n');
           sendInterrupt();
         } else if (data === '\x15') {
@@ -1337,18 +1394,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           term.write(data);
         } else {
           if (localLine.length > 0) {
-            pendingEchoQueue.push(localLine);
-            if (pendingEchoTimeout) clearTimeout(pendingEchoTimeout);
-            pendingEchoTimeout = setTimeout(() => {
-              pendingEchoQueue = [];
-            }, 5000);
-            if (socket && socket.readyState === WebSocket.OPEN) {
-              socket.send(JSON.stringify({ type: 'input', data: localLine }));
-            }
+            const cmd = localLine;
             localLine = '';
-          }
-          if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: 'input', data }));
+            pendingSubmissions.push(cmd);
+            resetSubmissionTimeout();
+            if (socket && socket.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({ type: 'input', data: cmd + data }));
+            }
+          } else {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({ type: 'input', data }));
+            }
           }
         }
       });
