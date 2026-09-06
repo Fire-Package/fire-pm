@@ -44,6 +44,8 @@ fire-pm/
 
 ### 2. Remote Web Terminal (`app/fire_ssh.py`)
 - **Persistent PTY Engine:** PTY lifecycle is decoupled from WebSocket connections via `TerminalSession` and `TerminalSessionManager`. Disconnecting or refreshing the browser retains the active shell and replays the last 128 KB of scrollback buffer upon reattachment.
+- **In-Terminal Multi-Tab Multiplexing:** Supports independent PTY sessions per tab keyed by `token:tab_id`. Features real-time process-aware title badges (`/proc/{fg_pgid}/comm`), terminal bell and background command alert routing, and keyboard shortcuts (`Alt+T`, `Alt+W`, `Alt+1..9`, `Alt+Left/Right`).
+- **File Transfer & Drag-and-Drop:** Drag-and-drop file upload directly to terminal's active `$PWD`, streaming `/api/upload` and `/api/download` with progress cards and chimes.
 - **Signal Dispatching:** Fast loop / process interrupts (`Ctrl+C`, `Ctrl+Z`, `Ctrl+D`) resolve the active foreground process group via `os.tcgetpgrp` and dispatch direct kernel signals (`os.killpg`) to instantly break infinite stdout loops (e.g. `yes`).
 - **Authentication & Security:** Salted PBKDF2-HMAC-SHA256 password hashing, brute-force IP rate limiting (5 attempts / 5-min lockout), 24-hour cryptographically signed session tokens, and Xterm.js emulation.
 - **Tunnel Routing:** Automatically routes through custom Nginx domain tunnels when configured, or falls back to Cloudflare tunnels.

@@ -256,6 +256,7 @@ class TerminalSession:
         self.active_cmd_pgid = None
         self.active_cmd_start_time = None
         self.active_cmd_name = ""
+        self.last_reported_comm = ""
         self.start()
 
     def start(self):
@@ -287,9 +288,12 @@ class TerminalSession:
             env["LC_ALL"] = env.get("LC_ALL", "C.UTF-8")
             
             try:
-                os.execvpe(shell, [shell, "-l"], env)
+                os.execvpe(shell, [shell, "-l", "-i"], env)
             except Exception:
-                os.execvpe(shell, [shell], env)
+                try:
+                    os.execvpe(shell, [shell, "-l"], env)
+                except Exception:
+                    os.execvpe(shell, [shell], env)
             sys.exit(1)
 
         os.close(slave_fd)
@@ -307,13 +311,14 @@ class TerminalSession:
     def _check_fg_process(self):
         if not self.master_fd or self.closed:
             return
+        fg_pgid = 0
         try:
             fg_pgid = os.tcgetpgrp(self.master_fd)
         except Exception:
-            return
+            pass
 
         comm = ""
-        if fg_pgid > 0:
+        if fg_pgid and fg_pgid > 0:
             try:
                 with open(f"/proc/{fg_pgid}/comm", "r") as f:
                     comm = f.read().strip()
@@ -321,7 +326,28 @@ class TerminalSession:
                 pass
 
         SHELLS = ('bash', 'sh', 'zsh', 'fish', 'dash', 'ash')
+        if (not comm or comm in SHELLS) and self.pid:
+            try:
+                with open(f"/proc/{self.pid}/task/{self.pid}/children", "r") as f:
+                    children = f.read().split()
+                    if children:
+                        with open(f"/proc/{children[-1]}/comm", "r") as cf:
+                            child_comm = cf.read().strip()
+                            if child_comm:
+                                comm = child_comm
+            except Exception:
+                pass
+
         now = time.time()
+        if comm and comm != self.last_reported_comm:
+            self.last_reported_comm = comm
+            with self.sock_lock:
+                if self.sock:
+                    try:
+                        self.sock.sendall(ws_make_frame(json.dumps({"type": "process_name", "name": comm}).encode("utf-8"), opcode=1))
+                    except Exception:
+                        pass
+
         if comm in SHELLS:
             self.shell_pgid = fg_pgid
             if self.active_cmd_name and self.active_cmd_start_time:
@@ -519,38 +545,64 @@ class TerminalSession:
 class TerminalSessionManager:
     def __init__(self):
         self.lock = threading.Lock()
-        self.sessions = {}  # token -> TerminalSession
+        self.sessions = {}  # session_key -> TerminalSession
         self.reaper_thread = threading.Thread(target=self._reaper_loop, daemon=True)
         self.reaper_thread.start()
 
-    def get(self, token: str):
+    def _make_key(self, token: str, tab_id: str = None) -> str:
+        if not token:
+            return ""
+        if tab_id:
+            return f"{token}:{tab_id}"
+        return token
+
+    def get(self, token: str, tab_id: str = None):
+        key = self._make_key(token, tab_id)
         with self.lock:
-            if token and token in self.sessions:
-                sess = self.sessions[token]
+            if key and key in self.sessions:
+                sess = self.sessions[key]
                 if sess.is_alive():
                     return sess
-            if len(self.sessions) == 1:
-                sess = next(iter(self.sessions.values()))
-                if sess.is_alive():
-                    return sess
+            if not tab_id:
+                if token and token in self.sessions:
+                    sess = self.sessions[token]
+                    if sess.is_alive():
+                        return sess
+                if token:
+                    for k, sess in self.sessions.items():
+                        if (k == token or k.startswith(f"{token}:")) and sess.is_alive():
+                            return sess
+                if len(self.sessions) == 1:
+                    sess = next(iter(self.sessions.values()))
+                    if sess.is_alive():
+                        return sess
             return None
 
-    def get_or_create(self, token: str, shell: str = None) -> TerminalSession:
+    def get_or_create(self, token: str, tab_id: str = None, shell: str = None) -> TerminalSession:
+        key = self._make_key(token, tab_id)
         with self.lock:
-            session = self.sessions.get(token)
+            session = self.sessions.get(key)
             if session and session.is_alive():
                 return session
             if session:
                 session.close()
-            session = TerminalSession(token, shell)
-            self.sessions[token] = session
+            session = TerminalSession(key, shell)
+            self.sessions[key] = session
             return session
 
-    def remove(self, token: str):
+    def remove(self, token: str, tab_id: str = None):
         with self.lock:
-            session = self.sessions.pop(token, None)
-            if session:
-                session.close()
+            if tab_id:
+                key = self._make_key(token, tab_id)
+                session = self.sessions.pop(key, None)
+                if session:
+                    session.close()
+            else:
+                keys_to_remove = [k for k in self.sessions if k == token or k.startswith(f"{token}:")]
+                for k in keys_to_remove:
+                    sess = self.sessions.pop(k, None)
+                    if sess:
+                        sess.close()
 
     def _reaper_loop(self):
         while True:
@@ -785,8 +837,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       </div>
     </header>
 
-    <!-- Xterm mount -->
-    <div id="terminal" class="flex-1 w-full bg-[#020617] relative"></div>
+    <!-- Tab Bar -->
+    <div id="tab-bar-container" class="bg-slate-950 border-b border-slate-800/80 px-2 sm:px-3 pt-1 flex items-center justify-between select-none shrink-0 overflow-hidden">
+      <div id="tabs-list" class="flex items-center space-x-1 overflow-x-auto scrollbar-none py-0.5 max-w-[calc(100vw-7rem)] sm:max-w-[calc(100vw-12rem)]"></div>
+      <div class="flex items-center pl-2 shrink-0">
+        <button onclick="createNewTab()" title="New Terminal Tab (Alt+T / Ctrl+Shift+T)" class="px-2 py-1 bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition text-xs flex items-center gap-1 font-mono">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span class="hidden sm:inline text-[11px]">New Tab</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Terminal Mounting Area (holds per-tab terminal mount divs) -->
+    <div id="terminal-container" class="flex-1 w-full bg-[#020617] relative overflow-hidden"></div>
 
     <!-- Drag & Drop Upload Overlay -->
     <div id="drop-overlay" class="hidden absolute inset-0 z-40 bg-slate-950/85 backdrop-blur-sm border-2 border-dashed border-orange-500 rounded-lg flex flex-col items-center justify-center pointer-events-none transition-all duration-150">
@@ -913,6 +976,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </span>
         <span class="text-[10px] text-slate-500 font-mono">Alt+B</span>
       </button>
+      <button onclick="createNewTab(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span>New Tab</span>
+        </span>
+        <span class="text-[10px] text-slate-500 font-mono">Alt+T</span>
+      </button>
+      <button onclick="closeCurrentTab(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          <span>Close Tab</span>
+        </span>
+        <span class="text-[10px] text-slate-500 font-mono">Alt+W</span>
+      </button>
       <div class="h-px bg-slate-800 my-1"></div>
       <button onclick="triggerFileInput(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
         <span class="flex items-center gap-2">
@@ -938,8 +1015,28 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   </div>
 
   <script>
-    let term, fitAddon, socket, sessionToken = '', pingTimer = null, reconnectTimer = null;
+    let sessionToken = '';
     let latencyPingSent = 0, clientServerLatency = -1, serverTerminalLatency = -1, latencyInterval = null;
+    let tabs = {}; // tabId -> tabObj
+    let activeTabId = null;
+    let tabSequence = 0;
+
+    function getActiveTab() {
+      return activeTabId ? tabs[activeTabId] : null;
+    }
+
+    Object.defineProperty(window, 'term', {
+      get() { const t = getActiveTab(); return t ? t.term : null; },
+      configurable: true
+    });
+    Object.defineProperty(window, 'fitAddon', {
+      get() { const t = getActiveTab(); return t ? t.fitAddon : null; },
+      configurable: true
+    });
+    Object.defineProperty(window, 'socket', {
+      get() { const t = getActiveTab(); return t ? t.socket : null; },
+      configurable: true
+    });
 
     function togglePassword() {
       const el = document.getElementById('password');
@@ -1258,7 +1355,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     async function updateCwd() {
       try {
-        const res = await fetch('/api/cwd');
+        const tabParam = activeTabId ? `?tab=${encodeURIComponent(activeTabId)}` : '';
+        const res = await fetch(`/api/cwd${tabParam}`);
         if (res.ok) {
           const data = await res.json();
           if (data && data.cwd) {
@@ -1352,7 +1450,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         try {
           await new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
-            const url = `/api/upload?name=${encodeURIComponent(file.name)}&dest=${encodeURIComponent(currentCwd)}`;
+            const tabParam = activeTabId ? `&tab=${encodeURIComponent(activeTabId)}` : '';
+            const url = `/api/upload?name=${encodeURIComponent(file.name)}&dest=${encodeURIComponent(currentCwd)}${tabParam}`;
             xhr.open('POST', url, true);
 
             xhr.upload.onprogress = (evt) => {
@@ -1432,7 +1531,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (!val) return;
 
       closeDownloadModal();
-      const dlUrl = `/api/download?file=${encodeURIComponent(val)}`;
+      const tabParam = activeTabId ? `&tab=${encodeURIComponent(activeTabId)}` : '';
+      const dlUrl = `/api/download?file=${encodeURIComponent(val)}${tabParam}`;
 
       fetch(dlUrl, { method: 'HEAD' }).then(res => {
         if (res.ok) {
@@ -1771,9 +1871,28 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function initTerminal() {
-      if (term) return;
+      if (Object.keys(tabs).length === 0) {
+        createNewTab('bash');
+      }
+      initGlobalShortcuts();
+      initLocalBufferListeners();
+    }
 
-      term = new Terminal({
+    function createNewTab(initialTitle) {
+      tabSequence++;
+      const tabId = 'tab-' + tabSequence;
+      const tabIndex = Object.keys(tabs).length + 1;
+      const title = initialTitle || 'bash';
+
+      const container = document.getElementById('terminal-container');
+      if (!container) return;
+
+      const mountEl = document.createElement('div');
+      mountEl.id = `term-mount-${tabId}`;
+      mountEl.className = 'w-full h-full';
+      container.appendChild(mountEl);
+
+      const t = new Terminal({
         cursorBlink: true,
         cursorStyle: 'bar',
         fontSize: 14,
@@ -1802,43 +1921,483 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
       });
 
-      fitAddon = new FitAddon.FitAddon();
-      term.loadAddon(fitAddon);
+      const fa = new FitAddon.FitAddon();
+      t.loadAddon(fa);
       if (typeof WebLinksAddon !== 'undefined') {
-        term.loadAddon(new WebLinksAddon.WebLinksAddon());
+        t.loadAddon(new WebLinksAddon.WebLinksAddon());
       }
+      t.open(mountEl);
 
-      const mount = document.getElementById('terminal');
-      term.open(mount);
-      fitAddon.fit();
+      const tabObj = {
+        id: tabId,
+        index: tabIndex,
+        title: title,
+        term: t,
+        fitAddon: fa,
+        socket: null,
+        mountEl: mountEl,
+        reconnectTimer: null,
+        pingTimer: null,
+        localLine: '',
+        pendingSubmissions: [],
+        streamBuffer: '',
+        hasAlert: false,
+        connected: false,
+        cwd: '/root'
+      };
 
-      // Terminal Bell (e.g. from Antigravity, Gemini, or compiler)
-      term.onBell(() => {
-        triggerTaskAlert('Terminal Bell', 'Process requested attention', 'bell');
+      tabs[tabId] = tabObj;
+
+      setupTabEvents(tabObj);
+      connectTabWebSocket(tabObj);
+      switchTab(tabId);
+    }
+
+    function switchTab(tabId) {
+      if (!tabs[tabId]) return;
+      activeTabId = tabId;
+      const activeTab = tabs[tabId];
+      activeTab.hasAlert = false;
+      renderTabsList();
+
+      Object.keys(tabs).forEach(id => {
+        const t = tabs[id];
+        if (t && t.mountEl) {
+          if (id === tabId) {
+            t.mountEl.classList.remove('hidden');
+          } else {
+            t.mountEl.classList.add('hidden');
+          }
+        }
       });
 
-      // OSC 9 & OSC 777 Notifications (Antigravity & agent notification sequences)
-      if (term.parser && term.parser.registerOscHandler) {
-        term.parser.registerOscHandler(9, (data) => {
-          triggerTaskAlert('Antigravity Notification', data, 'osc9');
+      if (activeTab.fitAddon) {
+        setTimeout(() => {
+          activeTab.fitAddon.fit();
+          sendResize(activeTab);
+        }, 30);
+      }
+      if (activeTab.term) {
+        activeTab.term.focus();
+      }
+
+      const connBadge = document.getElementById('conn-badge');
+      if (connBadge) {
+        if (activeTab.connected) {
+          connBadge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Connected';
+          connBadge.className = 'text-[11px] sm:text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono flex items-center gap-1';
+        } else {
+          connBadge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span> Connecting...';
+          connBadge.className = 'text-[11px] sm:text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-mono flex items-center gap-1';
+        }
+      }
+
+      updateCwd();
+    }
+
+    function closeTab(tabId) {
+      const tabKeys = Object.keys(tabs);
+      if (tabKeys.length <= 1) {
+        showToast('Cannot close the last open tab');
+        return;
+      }
+      const tab = tabs[tabId];
+      if (!tab) return;
+
+      if (tab.pingTimer) clearInterval(tab.pingTimer);
+      if (tab.reconnectTimer) clearTimeout(tab.reconnectTimer);
+      if (tab.socket) {
+        try { tab.socket.close(); } catch(e) {}
+      }
+
+      fetch(`/api/tab_close?tab=${encodeURIComponent(tabId)}`, { method: 'POST' }).catch(() => {});
+
+      if (tab.mountEl && tab.mountEl.parentNode) {
+        tab.mountEl.parentNode.removeChild(tab.mountEl);
+      }
+      if (tab.term) {
+        try { tab.term.dispose(); } catch(e) {}
+      }
+
+      delete tabs[tabId];
+
+      if (activeTabId === tabId) {
+        const remaining = Object.keys(tabs);
+        switchTab(remaining[remaining.length - 1]);
+      } else {
+        renderTabsList();
+      }
+    }
+
+    function closeCurrentTab() {
+      if (activeTabId) closeTab(activeTabId);
+    }
+
+    function renderTabsList() {
+      const listEl = document.getElementById('tabs-list');
+      if (!listEl) return;
+      const tabKeys = Object.keys(tabs);
+      if (tabKeys.length === 0) return;
+
+      listEl.innerHTML = tabKeys.map((tabId, idx) => {
+        const tab = tabs[tabId];
+        tab.index = idx + 1;
+        const isActive = tabId === activeTabId;
+        const statusDot = tab.connected ? 'bg-emerald-400' : 'bg-amber-400';
+        const alertBadge = tab.hasAlert ? '<span class="animate-bounce text-xs">🔔</span>' : '';
+        const closeBtn = tabKeys.length > 1 ? `
+          <button onclick="event.stopPropagation(); closeTab('${tabId}')" title="Close Tab (Alt+W)" class="opacity-40 group-hover:opacity-100 hover:text-rose-400 hover:bg-slate-800/80 p-0.5 rounded transition ml-0.5">
+            <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>` : '';
+
+        return `
+          <div onclick="switchTab('${tabId}')" class="group flex items-center gap-1.5 px-3 py-1 rounded-t-lg text-xs font-mono cursor-pointer transition select-none border-t-2 ${
+            isActive
+              ? 'bg-slate-900 text-white border-orange-500 shadow-md font-semibold'
+              : 'bg-slate-950/70 text-slate-400 border-transparent hover:bg-slate-900/60 hover:text-slate-200'
+          }">
+            <span class="w-1.5 h-1.5 rounded-full ${statusDot} shrink-0"></span>
+            ${alertBadge}
+            <span class="truncate max-w-[100px] sm:max-w-[140px]">${tab.index}: ${tab.title || 'bash'}</span>
+            ${closeBtn}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function setupTabEvents(tab) {
+      const t = tab.term;
+
+      // Terminal Bell
+      t.onBell(() => {
+        const isBg = tab.id !== activeTabId;
+        if (isBg) { tab.hasAlert = true; renderTabsList(); }
+        triggerTaskAlert(
+          isBg ? `[Tab ${tab.index}: ${tab.title}] Bell` : 'Terminal Bell',
+          'Process requested attention',
+          'bell'
+        );
+      });
+
+      // OSC 9 & 777
+      if (t.parser && t.parser.registerOscHandler) {
+        t.parser.registerOscHandler(9, (data) => {
+          const isBg = tab.id !== activeTabId;
+          if (isBg) { tab.hasAlert = true; renderTabsList(); }
+          triggerTaskAlert(isBg ? `[Tab ${tab.index}] Notification` : 'Antigravity Notification', data, 'osc9');
           return true;
         });
-        term.parser.registerOscHandler(777, (data) => {
+        t.parser.registerOscHandler(777, (data) => {
+          const isBg = tab.id !== activeTabId;
+          if (isBg) { tab.hasAlert = true; renderTabsList(); }
           const parts = data.split(';');
           if (parts[0] === 'notify') {
             const title = parts[1] || 'Antigravity Notification';
             const msg = parts.slice(2).join(';') || 'Task finished';
-            triggerTaskAlert(title, msg, 'osc777');
+            triggerTaskAlert(isBg ? `[Tab ${tab.index}] ${title}` : title, msg, 'osc777');
           }
           return true;
         });
       }
 
-      updateNotifyBtnState();
+      // Mouse & contextmenu on mountEl
+      tab.mountEl.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showContextMenu(e.clientX, e.clientY);
+      });
+
+      tab.mountEl.addEventListener('auxclick', (e) => {
+        if (e.button === 1) {
+          e.preventDefault();
+          pasteFromClipboard(false, true);
+        }
+      });
+
+      // Custom key event handler
+      t.attachCustomKeyEventHandler((e) => {
+        if (e.type === 'keydown') {
+          const isCtrlOrMeta = e.ctrlKey || e.metaKey;
+
+          // Copy
+          if ((isCtrlOrMeta && (e.key === 'c' || e.key === 'C')) || (isCtrlOrMeta && e.key === 'Insert')) {
+            if (t.hasSelection()) {
+              copySelectionToClipboard(true);
+              return false;
+            }
+            if (e.metaKey && !e.ctrlKey) return false;
+            if (e.shiftKey) return false;
+            sendInterrupt();
+            return false;
+          }
+
+          // Paste
+          if ((isCtrlOrMeta && (e.key === 'v' || e.key === 'V')) || (e.shiftKey && (e.key === 'Insert' || e.key === 'Paste'))) {
+            pasteFromClipboard(true, true);
+            return false;
+          }
+
+          // Select All
+          if (((e.metaKey && !e.ctrlKey) || (e.ctrlKey && e.shiftKey)) && (e.key === 'a' || e.key === 'A')) {
+            selectAllTerm();
+            return false;
+          }
+
+          // Clear
+          if (e.metaKey && !e.ctrlKey && (e.key === 'k' || e.key === 'K')) {
+            clearTerm();
+            return false;
+          }
+
+          // Ctrl+Z (Suspend)
+          if (e.ctrlKey && (e.key === 'z' || e.key === 'Z')) {
+            sendSuspend();
+            return false;
+          }
+
+          // Ctrl+D (EOF)
+          if (e.ctrlKey && (e.key === 'd' || e.key === 'D')) {
+            sendEOF();
+            return false;
+          }
+
+          // Ctrl+L (Clear screen)
+          if (e.ctrlKey && (e.key === 'l' || e.key === 'L')) {
+            if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
+              tab.socket.send(JSON.stringify({ type: 'input', data: '\x0c' }));
+            }
+            return false;
+          }
+
+          // Ctrl+W / Alt+W
+          if (e.altKey && (e.key === 'w' || e.key === 'W')) {
+            const shells = ['bash', 'sh', 'zsh', 'fish', 'dash', 'ash'];
+            if (Object.keys(tabs).length > 1 && shells.includes(tab.title)) {
+              e.preventDefault();
+              closeTab(tab.id);
+              return false;
+            }
+            e.preventDefault();
+            sendCtrlW();
+            return false;
+          }
+          if (e.ctrlKey && (e.key === 'w' || e.key === 'W')) {
+            e.preventDefault();
+            sendCtrlW();
+            return false;
+          }
+
+          // Alt+T: New Tab
+          if (e.altKey && (e.key === 't' || e.key === 'T')) {
+            e.preventDefault();
+            createNewTab();
+            return false;
+          }
+
+          // Alt+1 .. Alt+9: Switch Tab
+          if (e.altKey && e.key >= '1' && e.key <= '9') {
+            e.preventDefault();
+            const targetIdx = parseInt(e.key, 10) - 1;
+            const tabKeys = Object.keys(tabs);
+            if (targetIdx < tabKeys.length) {
+              switchTab(tabKeys[targetIdx]);
+            }
+            return false;
+          }
+
+          // Alt+B / Alt+P
+          if (e.altKey && (e.key === 'b' || e.key === 'B')) {
+            toggleBufferMode();
+            return false;
+          }
+          if (e.altKey && (e.key === 'p' || e.key === 'P')) {
+            togglePredictiveMode();
+            return false;
+          }
+        }
+        return true;
+      });
+
+      // Terminal Data handler (with predictive typing)
+      t.onData(data => {
+        const isAlternateScreen = t.buffer && t.buffer.active && t.buffer.active.type === 'alternate';
+        if (!predictiveEchoEnabled || isAlternateScreen) {
+          tab.pendingSubmissions = [];
+          tab.streamBuffer = '';
+          if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
+            tab.socket.send(JSON.stringify({ type: 'input', data }));
+          }
+          return;
+        }
+
+        if (data === '\r') {
+          t.write('\r\n');
+          const cmd = tab.localLine;
+          tab.localLine = '';
+          tab.pendingSubmissions.push(cmd);
+          if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
+            tab.socket.send(JSON.stringify({ type: 'input', data: cmd + '\r' }));
+          }
+        } else if (data === '\x7f' || data === '\b') {
+          if (tab.localLine.length > 0) {
+            tab.localLine = tab.localLine.slice(0, -1);
+            t.write('\b \b');
+          }
+        } else if (data === '\x03') {
+          tab.localLine = '';
+          tab.pendingSubmissions = [];
+          tab.streamBuffer = '';
+          t.write('^C\r\n');
+          sendInterrupt();
+        } else if (data === '\x15') {
+          if (tab.localLine.length > 0) {
+            t.write('\b \b'.repeat(tab.localLine.length));
+            tab.localLine = '';
+          }
+        } else if (data.length === 1 && data.charCodeAt(0) >= 32 && data.charCodeAt(0) <= 126) {
+          tab.localLine += data;
+          t.write(data);
+        } else {
+          if (tab.localLine.length > 0) {
+            const cmd = tab.localLine;
+            tab.localLine = '';
+            tab.pendingSubmissions.push(cmd);
+            if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
+              tab.socket.send(JSON.stringify({ type: 'input', data: cmd + data }));
+            }
+          } else {
+            if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
+              tab.socket.send(JSON.stringify({ type: 'input', data }));
+            }
+          }
+        }
+      });
+    }
+
+    function connectTabWebSocket(tab) {
+      if (tab.reconnectTimer) clearTimeout(tab.reconnectTimer);
+      if (tab.pingTimer) clearInterval(tab.pingTimer);
+
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${proto}//${window.location.host}/ws?token=${encodeURIComponent(sessionToken)}&tab=${encodeURIComponent(tab.id)}`;
+
+      tab.socket = new WebSocket(wsUrl);
+      tab.socket.binaryType = 'arraybuffer';
+
+      tab.socket.onopen = () => {
+        tab.connected = true;
+        renderTabsList();
+
+        if (tab.id === activeTabId) {
+          const connBadge = document.getElementById('conn-badge');
+          if (connBadge) {
+            connBadge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Connected';
+            connBadge.className = 'text-[11px] sm:text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono flex items-center gap-1';
+          }
+          if (tab.fitAddon) tab.fitAddon.fit();
+          if (tab.term) tab.term.focus();
+          sendResize(tab);
+        }
+
+        tab.pingTimer = setInterval(() => {
+          if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
+            tab.socket.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 15000);
+
+        if (tab.id === activeTabId) {
+          setTimeout(measureLatency, 1000);
+          setTimeout(updateCwd, 500);
+        }
+      };
+
+      tab.socket.onmessage = (event) => {
+        if (typeof event.data === 'string') {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'output') {
+              renderTabOutput(tab, msg.data);
+            } else if (msg.type === 'pong') {
+              // pong
+            } else if (msg.type === 'process_name') {
+              if (msg.name && tab.title !== msg.name) {
+                tab.title = msg.name;
+                renderTabsList();
+              }
+            } else if (msg.type === 'task_alert') {
+              const isBg = tab.id !== activeTabId;
+              if (isBg) {
+                tab.hasAlert = true;
+                renderTabsList();
+              }
+              triggerTaskAlert(
+                isBg ? `[Tab ${tab.index}: ${tab.title}] ${msg.command} finished` : `Fire SSH: ${msg.command} finished`,
+                `Completed in ${msg.duration}s`,
+                'process'
+              );
+            } else if (msg.type === 'latency_pong') {
+              clientServerLatency = performance.now() - msg.timestamp;
+              updateLatencyDisplay();
+            } else if (msg.type === 'latency_terminal_result') {
+              serverTerminalLatency = msg.latency;
+              updateLatencyDisplay();
+            }
+          } catch(e) {
+            renderTabOutput(tab, event.data);
+          }
+        } else {
+          const uint8 = new Uint8Array(event.data);
+          renderTabOutput(tab, uint8);
+        }
+      };
+
+      tab.socket.onclose = () => {
+        tab.connected = false;
+        renderTabsList();
+        if (tab.id === activeTabId) {
+          const connBadge = document.getElementById('conn-badge');
+          if (connBadge) {
+            connBadge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span> Reconnecting...';
+            connBadge.className = 'text-[11px] sm:text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-mono flex items-center gap-1';
+          }
+        }
+        tab.reconnectTimer = setTimeout(() => {
+          if (!document.getElementById('terminal-view').classList.contains('hidden')) {
+            connectTabWebSocket(tab);
+          }
+        }, 1500);
+      };
+
+      tab.socket.onerror = (err) => {
+        console.error('WebSocket Error:', err);
+      };
+    }
+
+    function renderTabOutput(tab, data) {
+      if (!tab || !tab.term) return;
+      tab.term.write(data);
+    }
+
+    function sendResize(tab) {
+      if (tab && tab.socket && tab.socket.readyState === WebSocket.OPEN && tab.term) {
+        tab.socket.send(JSON.stringify({ type: 'resize', cols: tab.term.cols, rows: tab.term.rows }));
+      }
+    }
+
+    function termFit() {
+      const cur = getActiveTab();
+      if (cur && cur.fitAddon && cur.term) {
+        cur.fitAddon.fit();
+        sendResize(cur);
+      }
+    }
+
+    function initGlobalShortcuts() {
+      window.addEventListener('resize', () => termFit());
 
       document.addEventListener('copy', (e) => {
-        if (term && term.hasSelection()) {
-          const text = term.getSelection();
+        const cur = getActiveTab();
+        if (cur && cur.term && cur.term.hasSelection()) {
+          const text = cur.term.getSelection();
           if (text && e.clipboardData) {
             e.clipboardData.setData('text/plain', text);
             e.preventDefault();
@@ -1861,32 +2420,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
       });
 
-      // Mouse and gesture interaction listeners
-      mount.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        showContextMenu(e.clientX, e.clientY);
-      });
-
-      mount.addEventListener('auxclick', (e) => {
-        if (e.button === 1) { // Middle click paste
-          e.preventDefault();
-          pasteFromClipboard(false, true);
-        }
-      });
-
-      mount.addEventListener('dragover', (e) => {
-        e.preventDefault();
-      });
-
-      mount.addEventListener('drop', (e) => {
-        e.preventDefault();
-        const text = e.dataTransfer ? e.dataTransfer.getData('text/plain') : '';
-        if (text) {
-          insertPastedText(text);
-          showToast('Pasted');
-        }
-      });
-
       document.addEventListener('click', (e) => {
         const menu = document.getElementById('term-context-menu');
         if (menu && !menu.contains(e.target)) {
@@ -1898,253 +2431,74 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (e.key === 'Escape') {
           hideContextMenu();
         }
-      });
 
-      // Comprehensive keyboard shortcuts
-      term.attachCustomKeyEventHandler((e) => {
-        if (e.type === 'keydown') {
-          const isCtrlOrMeta = e.ctrlKey || e.metaKey;
-
-          // Copy: Ctrl+C, Cmd+C, Ctrl+Shift+C, or Ctrl+Insert
-          if ((isCtrlOrMeta && (e.key === 'c' || e.key === 'C')) ||
-              (isCtrlOrMeta && e.key === 'Insert')) {
-            if (term.hasSelection()) {
-              copySelectionToClipboard(true);
-              return false;
-            }
-            // Cmd+C on macOS without selection must not trigger SIGINT
-            if (e.metaKey && !e.ctrlKey) {
-              return false;
-            }
-            if (e.shiftKey) {
-              return false;
-            }
-            sendInterrupt();
-            return false;
-          }
-
-          // Paste: Ctrl+V, Cmd+V, Ctrl+Shift+V, or Shift+Insert
-          if ((isCtrlOrMeta && (e.key === 'v' || e.key === 'V')) ||
-              (e.shiftKey && (e.key === 'Insert' || e.key === 'Paste'))) {
-            pasteFromClipboard(true, true);
-            return false;
-          }
-
-          // Select All: Cmd+A (Mac) or Ctrl+Shift+A (Linux/Windows)
-          if (((e.metaKey && !e.ctrlKey) || (e.ctrlKey && e.shiftKey)) && (e.key === 'a' || e.key === 'A')) {
-            selectAllTerm();
-            return false;
-          }
-
-          // Clear Terminal: Cmd+K (Mac standard)
-          if (e.metaKey && !e.ctrlKey && (e.key === 'k' || e.key === 'K')) {
-            clearTerm();
-            return false;
-          }
-
-          // Ctrl+Z (Suspend)
-          if (e.ctrlKey && (e.key === 'z' || e.key === 'Z')) {
-            sendSuspend();
-            return false;
-          }
-
-          // Ctrl+D (EOF)
-          if (e.ctrlKey && (e.key === 'd' || e.key === 'D')) {
-            sendEOF();
-            return false;
-          }
-
-          // Ctrl+L (Clear screen)
-          if (e.ctrlKey && (e.key === 'l' || e.key === 'L')) {
-            if (socket && socket.readyState === WebSocket.OPEN) {
-              socket.send(JSON.stringify({ type: 'input', data: '\x0c' }));
-            }
-            return false;
-          }
-
-          // Ctrl+W: nano search / bash erase word
-          // Safe aliases: Alt+W or Ctrl+Shift+W (never close browser tab)
-          if (((e.ctrlKey && e.shiftKey) || e.altKey) && (e.key === 'w' || e.key === 'W')) {
-            e.preventDefault();
-            sendCtrlW();
-            return false;
-          }
-          // Direct Ctrl+W: intercept in fullscreen / supported environments
-          if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'w' || e.key === 'W')) {
-            e.preventDefault();
-            sendCtrlW();
-            return false;
-          }
-
-          // Alt+B: Toggle Local Buffer Mode (0ms input lag for high ping)
-          if (e.altKey && (e.key === 'b' || e.key === 'B')) {
-            toggleBufferMode();
-            return false;
-          }
-
-          // Alt+P: Toggle 0ms Direct In-Terminal Typing Mode
-          if (e.altKey && (e.key === 'p' || e.key === 'P')) {
-            togglePredictiveMode();
-            return false;
-          }
+        // Alt+T or Ctrl+Shift+T: New Tab
+        if ((e.altKey && (e.key === 't' || e.key === 'T')) ||
+            (e.ctrlKey && e.shiftKey && (e.key === 't' || e.key === 'T'))) {
+          e.preventDefault();
+          createNewTab();
+          return;
         }
-        return true;
-      });
 
-      connectWebSocket();
+        // Alt+W: Close current tab
+        if (e.altKey && (e.key === 'w' || e.key === 'W')) {
+          e.preventDefault();
+          closeCurrentTab();
+          return;
+        }
 
-      term.onData(data => {
-        const isAlternateScreen = term.buffer && term.buffer.active && term.buffer.active.type === 'alternate';
-        if (!predictiveEchoEnabled || isAlternateScreen) {
-          pendingSubmissions = [];
-          streamBuffer = '';
-          if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: 'input', data }));
+        // Alt+1 .. Alt+9: Switch to tab
+        if (e.altKey && e.key >= '1' && e.key <= '9') {
+          e.preventDefault();
+          const targetIdx = parseInt(e.key, 10) - 1;
+          const tabKeys = Object.keys(tabs);
+          if (targetIdx < tabKeys.length) {
+            switchTab(tabKeys[targetIdx]);
           }
           return;
         }
 
-        if (data === '\r') {
-          term.write('\r\n');
-          const cmd = localLine;
-          localLine = '';
-          pendingSubmissions.push(cmd);
-          resetSubmissionTimeout();
-          if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: 'input', data: cmd + '\r' }));
-          }
-        } else if (data === '\x7f' || data === '\b') {
-          if (localLine.length > 0) {
-            localLine = localLine.slice(0, -1);
-            term.write('\b \b');
-          }
-        } else if (data === '\x03') {
-          localLine = '';
-          pendingSubmissions = [];
-          streamBuffer = '';
-          term.write('^C\r\n');
-          sendInterrupt();
-        } else if (data === '\x15') {
-          if (localLine.length > 0) {
-            term.write('\b \b'.repeat(localLine.length));
-            localLine = '';
-          }
-        } else if (data.length === 1 && data.charCodeAt(0) >= 32 && data.charCodeAt(0) <= 126) {
-          localLine += data;
-          term.write(data);
-        } else {
-          if (localLine.length > 0) {
-            const cmd = localLine;
-            localLine = '';
-            pendingSubmissions.push(cmd);
-            resetSubmissionTimeout();
-            if (socket && socket.readyState === WebSocket.OPEN) {
-              socket.send(JSON.stringify({ type: 'input', data: cmd + data }));
-            }
-          } else {
-            if (socket && socket.readyState === WebSocket.OPEN) {
-              socket.send(JSON.stringify({ type: 'input', data }));
+        // Alt+Left / Alt+Right: Cycle tabs
+        if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+          e.preventDefault();
+          const tabKeys = Object.keys(tabs);
+          if (tabKeys.length > 1) {
+            const curIdx = tabKeys.indexOf(activeTabId);
+            if (e.key === 'ArrowLeft') {
+              const prev = (curIdx - 1 + tabKeys.length) % tabKeys.length;
+              switchTab(tabKeys[prev]);
+            } else {
+              const next = (curIdx + 1) % tabKeys.length;
+              switchTab(tabKeys[next]);
             }
           }
+          return;
         }
       });
-
-      window.addEventListener('resize', () => termFit());
-      initLocalBufferListeners();
-    }
-
-    function termFit() {
-      if (fitAddon && term) {
-        fitAddon.fit();
-        if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-        }
-      }
-    }
-
-    function connectWebSocket() {
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (pingTimer) clearInterval(pingTimer);
-
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${proto}//${window.location.host}/ws?token=${encodeURIComponent(sessionToken)}`;
-
-      socket = new WebSocket(wsUrl);
-      socket.binaryType = 'arraybuffer';
-
-      socket.onopen = () => {
-        document.getElementById('conn-badge').innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Connected';
-        document.getElementById('conn-badge').className = 'text-[11px] sm:text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono flex items-center gap-1';
-        termFit();
-        term.focus();
-
-        pingTimer = setInterval(() => {
-          if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: 'ping' }));
-          }
-        }, 15000);
-        setTimeout(measureLatency, 1000);
-        setTimeout(updateCwd, 500);
-      };
-
-      socket.onmessage = (event) => {
-        if (typeof event.data === 'string') {
-          try {
-            const msg = JSON.parse(event.data);
-            if (msg.type === 'output') {
-              renderServerOutput(msg.data);
-            } else if (msg.type === 'pong') {
-              // Heartbeat ack
-            } else if (msg.type === 'latency_pong') {
-              clientServerLatency = performance.now() - msg.timestamp;
-              updateLatencyDisplay();
-            } else if (msg.type === 'latency_terminal_result') {
-              serverTerminalLatency = msg.latency;
-              updateLatencyDisplay();
-            } else if (msg.type === 'task_alert') {
-              triggerTaskAlert(`Fire SSH: ${msg.command} finished`, `Completed in ${msg.duration}s`, 'process');
-            }
-          } catch(e) {
-            renderServerOutput(event.data);
-          }
-        } else {
-          const uint8 = new Uint8Array(event.data);
-          renderServerOutput(uint8);
-        }
-      };
-
-      socket.onclose = () => {
-        if (pingTimer) clearInterval(pingTimer);
-        if (latencyInterval) { clearInterval(latencyInterval); latencyInterval = null; }
-        document.getElementById('conn-badge').innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span> Reconnecting...';
-        document.getElementById('conn-badge').className = 'text-[11px] sm:text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-mono flex items-center gap-1';
-        
-        reconnectTimer = setTimeout(() => {
-          if (!document.getElementById('terminal-view').classList.contains('hidden')) {
-            connectWebSocket();
-          }
-        }, 1500);
-      };
-
-      socket.onerror = (err) => {
-        console.error('WebSocket Error:', err);
-      };
     }
 
     let isLoggingOut = false;
     window.addEventListener('beforeunload', (e) => {
-      if (!isLoggingOut && socket && socket.readyState === WebSocket.OPEN) {
-        e.preventDefault();
-        e.returnValue = '';
+      if (!isLoggingOut) {
+        const cur = getActiveTab();
+        if (cur && cur.socket && cur.socket.readyState === WebSocket.OPEN) {
+          e.preventDefault();
+          e.returnValue = '';
+        }
       }
     });
 
     async function handleLogout() {
       isLoggingOut = true;
-      if (pingTimer) clearInterval(pingTimer);
+      Object.keys(tabs).forEach(id => {
+        const t = tabs[id];
+        if (t.pingTimer) clearInterval(t.pingTimer);
+        if (t.reconnectTimer) clearTimeout(t.reconnectTimer);
+        if (t.socket) {
+          try { t.socket.close(); } catch(e) {}
+        }
+      });
       if (latencyInterval) { clearInterval(latencyInterval); latencyInterval = null; }
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (socket) socket.close();
       await fetch('/api/logout', { method: 'POST' });
       window.location.reload();
     }
@@ -2273,9 +2627,10 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_error(401, "Unauthorized")
                 return
             token = self.get_auth_token()
-            session = self.server.terminals.get(token)
-            cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
             query = urllib.parse.parse_qs(parsed.query)
+            tab_id = query.get('tab', [None])[0]
+            session = self.server.terminals.get(token, tab_id)
+            cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
             file_param = query.get('file', [None])[0] or query.get('path', [None])[0]
             if not file_param:
                 self.send_error(400, "Missing file parameter")
@@ -2315,6 +2670,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
         if parsed.path == '/ws':
             query = urllib.parse.parse_qs(parsed.query)
             token = query.get('token', [None])[0] or self.get_cookie_token()
+            tab_id = query.get('tab', [None])[0]
 
             if not self.server.sessions.is_valid(token, ip):
                 self.send_error(401, "Unauthorized")
@@ -2327,7 +2683,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
 
             self.wfile.write(ws_handshake_response(ws_key))
             self.wfile.flush()
-            self.handle_websocket(token)
+            self.handle_websocket(token, tab_id=tab_id)
             return
 
         elif parsed.path == '/api/status':
@@ -2342,7 +2698,9 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_error(401, "Unauthorized")
                 return
             token = self.get_auth_token()
-            session = self.server.terminals.get(token)
+            query = urllib.parse.parse_qs(parsed.query)
+            tab_id = query.get('tab', [None])[0]
+            session = self.server.terminals.get(token, tab_id)
             cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
             self.send_json({"success": True, "cwd": cwd})
             return
@@ -2353,10 +2711,11 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 return
 
             token = self.get_auth_token()
-            session = self.server.terminals.get(token)
+            query = urllib.parse.parse_qs(parsed.query)
+            tab_id = query.get('tab', [None])[0]
+            session = self.server.terminals.get(token, tab_id)
             cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
 
-            query = urllib.parse.parse_qs(parsed.query)
             file_param = query.get('file', [None])[0] or query.get('path', [None])[0]
 
             if not file_param:
@@ -2480,10 +2839,11 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 return
 
             token = self.get_auth_token()
-            session = self.server.terminals.get(token)
+            query = urllib.parse.parse_qs(parsed.query)
+            tab_id = query.get('tab', [None])[0]
+            session = self.server.terminals.get(token, tab_id)
             cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
 
-            query = urllib.parse.parse_qs(parsed.query)
             filename = query.get('name', [None])[0] or self.headers.get('X-Filename')
             dest = query.get('dest', [None])[0]
             content_type = self.headers.get('Content-Type', '')
@@ -2558,6 +2918,18 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_json({"success": False, "error": f"Failed writing file: {e}"}, status=500)
             return
 
+        elif parsed.path == '/api/tab_close':
+            if not self.is_authenticated():
+                self.send_error(401, "Unauthorized")
+                return
+            token = self.get_auth_token()
+            query = urllib.parse.parse_qs(parsed.query)
+            tab_id = query.get('tab', [None])[0]
+            if tab_id:
+                self.server.terminals.remove(token, tab_id)
+            self.send_json({"success": True})
+            return
+
         elif parsed.path == '/api/logout':
             token = self.get_cookie_token()
             if token:
@@ -2581,12 +2953,13 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def handle_websocket(self, token: str):
+    def handle_websocket(self, token: str, tab_id: str = None):
         """Bridges WebSocket client with a persistent TerminalSession."""
         sock = self.connection
         sock.setblocking(True)
 
-        session = self.server.terminals.get_or_create(token, self.server.target_shell)
+        target_shell = getattr(self.server, 'target_shell', None)
+        session = self.server.terminals.get_or_create(token, tab_id, target_shell)
         session.attach_socket(sock)
 
         last_ping_sent = time.time()
