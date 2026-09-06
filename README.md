@@ -290,6 +290,30 @@ Access your server's interactive terminal directly from any web browser over an 
   <img src="assets/web-terminal.png" alt="Fire PM Remote Web Terminal" width="100%" />
 </p>
 
+<table>
+<tr>
+<td width="50%" align="center">
+<b>🔗 Read-Only Session Sharing</b><br/>
+<img src="assets/web-terminal-share.png" alt="Fire SSH Session Sharing" width="100%" /><br/>
+<sub>Generate secure, time-bound read-only viewing links with instant revocation.</sub>
+</td>
+<td width="50%" align="center">
+<b>🔔 Background Alerts & Audio Chimes</b><br/>
+<img src="assets/web-terminal-alerts.png" alt="Fire SSH Background Alerts" width="100%" /><br/>
+<sub>Receive desktop notifications and audio chimes when long-running jobs finish.</sub>
+</td>
+</tr>
+</table>
+
+### Web Terminal Features
+
+* **📑 Multi-Tab Terminal Sessions**: Open isolated PTY tabs (`1: bash`, `2: bash`) in a single browser window with process-aware badges, title auto-sync, and independent tab kill/switch shortcuts (<kbd>Alt+T</kbd>, <kbd>Alt+W</kbd>, <kbd>Alt+1..9</kbd>).
+* **🔗 Read-Only Live Session Sharing**: Share time-bound live terminal feeds (15m, 1h, 6h, 24h) for safe collaborative debugging or customer support without granting shell input access.
+* **🔔 Task Alerts & Audio Chimes**: Background tabs notify you via sound chimes and native desktop notifications whenever long-running commands or AI coding agent turns complete.
+* **📁 Drag-and-Drop File Transfers**: Drag files directly into the terminal window to upload them to the current working directory (`$PWD`), or download files with one click.
+* **⚡ 0ms Direct Typing Mode**: Optimistic local typing echo with server echo cancellation eliminates latency lag over high-ping connections (2000ms+ or mobile links).
+* **📶 Live Latency Telemetry**: Real-time round-trip WebSocket ping monitor displayed on the toolbar badge.
+
 ### Usage
 
 ```bash
@@ -322,6 +346,23 @@ fire ssh close
 ## 📊 Developer Web Dashboard
 
 A full-stack, responsive dashboard built with **Next.js 15 (App Router)**, **React 19**, and **Tailwind CSS v4**.
+
+<table>
+<tr>
+<td width="50%" align="center">
+<b>⚙️ Fleet Process Registry</b><br/>
+<img src="assets/web-processes.png" alt="Fire PM Process Registry" width="100%" /><br/>
+<sub>Monitor real-time process states, memory telemetry, and CPU utilization.</sub>
+</td>
+<td width="50%" align="center">
+<b>🚀 Advanced Process Launcher</b><br/>
+<img src="assets/web-launch-modal.png" alt="Fire PM Process Launcher Modal" width="100%" /><br/>
+<sub>Deploy daemons with runtime auto-detection, watchdog timers, and cgroups v2 limits.</sub>
+</td>
+</tr>
+</table>
+
+### Live Log Streaming & Journalctl
 
 <p align="center">
   <img src="assets/web-logs.png" alt="Fire PM Live Log Streamer" width="100%" />
@@ -364,6 +405,49 @@ Open `http://localhost:3000` (or your configured port). On first launch, set you
 ---
 
 ## 🏗️ Architecture & Philosophy
+
+```mermaid
+flowchart TD
+    subgraph Interfaces["User Interfaces"]
+        CLI["CLI Engine (`app/fire`)"]
+        TUI["Terminal UI (`tui/fire_tui.py`)"]
+        WEB["Web Dashboard (Next.js 15 / React 19)"]
+        SSH["Web Terminal (`fire_ssh.py` / xterm.js)"]
+    end
+
+    subgraph Core["Linux Kernel & System Services"]
+        SYSTEMD["systemd (Single Source of Truth)"]
+        CGROUPS["cgroups v2 (CPU / Memory Quotas)"]
+        JOURNALD["journald (Structured Logs)"]
+        PTY["Kernel PTY Subsystem"]
+    end
+
+    subgraph Networking["Public Edge & Reverse Proxy"]
+        CF["Cloudflare Quick Tunnels (HTTP/2)"]
+        NGINX["Custom Wildcard Domain (Nginx)"]
+    end
+
+    CLI -->|systemctl / dbus| SYSTEMD
+    CLI -->|cgroups API| CGROUPS
+    CLI -->|journalctl| JOURNALD
+
+    TUI -->|IPC / subprocess| CLI
+    TUI -->|Direct query| SYSTEMD
+
+    WEB -->|systemctl execFile| SYSTEMD
+    WEB -->|SSE log tail| JOURNALD
+    WEB -->|cgroup limits| CGROUPS
+
+    SSH -->|WebSocket / PTY| PTY
+
+    SYSTEMD -->|Manages| CGROUPS
+    SYSTEMD -->|Streams to| JOURNALD
+
+    CF -.->|Encrypted HTTPS| WEB
+    CF -.->|Encrypted HTTPS| SSH
+    NGINX -.->|Encrypted HTTPS| WEB
+    NGINX -.->|Encrypted HTTPS| SSH
+```
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
