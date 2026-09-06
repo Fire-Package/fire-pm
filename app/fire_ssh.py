@@ -601,9 +601,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           </svg>
           <span>Paste</span>
         </button>
-        <button id="buffer-toggle-btn" onclick="toggleBufferMode()" title="Toggle Local Buffer Mode (0ms typing lag for high ping) [Alt+B]" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-transparent rounded-lg transition font-mono flex items-center gap-1">
-          <span class="text-amber-400">⚡</span>
-          <span>Buffer</span>
+        <button id="predictive-btn" onclick="togglePredictiveMode()" title="0ms Direct In-Terminal Typing (Local Echo for bash / antigravity) [Alt+P]" class="px-2 py-1 text-xs bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-lg transition font-mono flex items-center gap-1">
+          <span>⚡</span>
+          <span id="predictive-btn-text">0ms Direct</span>
+        </button>
+        <button id="buffer-toggle-btn" onclick="toggleBufferMode()" title="Toggle Command Bar [Alt+B]" class="hidden md:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-transparent rounded-lg transition font-mono items-center gap-1">
+          <span>Command Bar</span>
         </button>
         <div class="relative">
           <button id="network-btn" onclick="toggleLatencyPanel()" title="Network Latency" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition flex items-center gap-1.5">
@@ -838,6 +841,50 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             if (term) term.focus();
           }).catch(() => {});
         }
+      }
+    }
+
+    let predictiveEchoEnabled = true;
+    let localLine = '';
+    let pendingEchoQueue = [];
+    let pendingEchoTimeout = null;
+
+    function togglePredictiveMode(force) {
+      predictiveEchoEnabled = force !== undefined ? force : !predictiveEchoEnabled;
+      const btn = document.getElementById('predictive-btn');
+      const text = document.getElementById('predictive-btn-text');
+      if (predictiveEchoEnabled) {
+        if (btn) {
+          btn.className = 'px-2 py-1 text-xs bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-lg transition font-mono flex items-center gap-1';
+        }
+        if (text) text.textContent = '0ms Direct';
+        showToast('0ms In-Terminal Typing: ON (Direct typing in bash/antigravity)');
+      } else {
+        if (btn) {
+          btn.className = 'px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-transparent rounded-lg transition font-mono flex items-center gap-1';
+        }
+        if (text) text.textContent = '0ms Off';
+        localLine = '';
+        pendingEchoQueue = [];
+        showToast('0ms In-Terminal Typing: OFF (Raw server echo)');
+      }
+      if (term) term.focus();
+    }
+
+    function renderServerOutput(raw) {
+      const isAlt = term && term.buffer && term.buffer.active && term.buffer.active.type === 'alternate';
+      if (!isAlt && predictiveEchoEnabled && pendingEchoQueue.length > 0) {
+        let str = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
+        const expected = pendingEchoQueue[0];
+        const matchIdx = str.indexOf(expected);
+        if (matchIdx >= 0 && matchIdx <= 16) {
+          str = str.slice(0, matchIdx) + str.slice(matchIdx + expected.length);
+          pendingEchoQueue.shift();
+          if (pendingEchoTimeout) clearTimeout(pendingEchoTimeout);
+        }
+        term.write(str);
+      } else {
+        term.write(raw);
       }
     }
 
@@ -1237,6 +1284,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             toggleBufferMode();
             return false;
           }
+
+          // Alt+P: Toggle 0ms Direct In-Terminal Typing Mode
+          if (e.altKey && (e.key === 'p' || e.key === 'P')) {
+            togglePredictiveMode();
+            return false;
+          }
         }
         return true;
       });
@@ -1244,8 +1297,59 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       connectWebSocket();
 
       term.onData(data => {
-        if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: 'input', data }));
+        const isAlternateScreen = term.buffer && term.buffer.active && term.buffer.active.type === 'alternate';
+        if (!predictiveEchoEnabled || isAlternateScreen) {
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: 'input', data }));
+          }
+          return;
+        }
+
+        if (data === '\r') {
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: 'input', data: localLine + '\r' }));
+          }
+          if (localLine.length > 0) {
+            pendingEchoQueue.push(localLine);
+            if (pendingEchoTimeout) clearTimeout(pendingEchoTimeout);
+            pendingEchoTimeout = setTimeout(() => {
+              pendingEchoQueue = [];
+            }, 5000);
+            localLine = '';
+          }
+        } else if (data === '\x7f' || data === '\b') {
+          if (localLine.length > 0) {
+            localLine = localLine.slice(0, -1);
+            term.write('\b \b');
+          }
+        } else if (data === '\x03') {
+          localLine = '';
+          pendingEchoQueue = [];
+          term.write('^C\r\n');
+          sendInterrupt();
+        } else if (data === '\x15') {
+          if (localLine.length > 0) {
+            term.write('\b \b'.repeat(localLine.length));
+            localLine = '';
+          }
+        } else if (data.length === 1 && data.charCodeAt(0) >= 32 && data.charCodeAt(0) <= 126) {
+          localLine += data;
+          term.write(data);
+        } else {
+          if (localLine.length > 0) {
+            pendingEchoQueue.push(localLine);
+            if (pendingEchoTimeout) clearTimeout(pendingEchoTimeout);
+            pendingEchoTimeout = setTimeout(() => {
+              pendingEchoQueue = [];
+            }, 5000);
+            if (socket && socket.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({ type: 'input', data: localLine }));
+            }
+            localLine = '';
+          }
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: 'input', data }));
+          }
         }
       });
 
@@ -1291,7 +1395,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           try {
             const msg = JSON.parse(event.data);
             if (msg.type === 'output') {
-              term.write(msg.data);
+              renderServerOutput(msg.data);
             } else if (msg.type === 'pong') {
               // Heartbeat ack
             } else if (msg.type === 'latency_pong') {
@@ -1302,11 +1406,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               updateLatencyDisplay();
             }
           } catch(e) {
-            term.write(event.data);
+            renderServerOutput(event.data);
           }
         } else {
           const uint8 = new Uint8Array(event.data);
-          term.write(uint8);
+          renderServerOutput(uint8);
         }
       };
 
