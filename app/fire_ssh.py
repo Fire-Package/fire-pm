@@ -585,7 +585,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <button onclick="sendEOF()" title="EOF / Exit (Ctrl+D)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono">^D</button>
         <button onclick="clearTerm()" title="Clear Terminal Output" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">Clear</button>
         <button onclick="termFit()" title="Fit Terminal Window" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fit</button>
-        <button onclick="pasteFromClipboard()" title="Paste from Clipboard (Ctrl+V)" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1">
+        <button onclick="copySelectionToClipboard(true)" title="Copy Selected Text (Ctrl+C / Cmd+C)" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          <span>Copy</span>
+        </button>
+        <button onclick="pasteFromClipboard(true, true)" title="Paste from Clipboard (Ctrl+V / Cmd+V)" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400">
             <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
             <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
@@ -636,6 +643,44 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     <!-- Xterm mount -->
     <div id="terminal" class="flex-1 w-full bg-[#020617] relative"></div>
+
+    <!-- Toast Notification -->
+    <div id="term-toast" class="pointer-events-none fixed bottom-6 right-6 z-50 transition-all duration-200 opacity-0 translate-y-2 bg-slate-800/95 border border-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-lg shadow-xl font-mono flex items-center gap-2">
+      <span id="term-toast-msg">Copied to clipboard</span>
+    </div>
+
+    <!-- Custom Right-Click Context Menu -->
+    <div id="term-context-menu" class="hidden fixed z-50 bg-slate-900/95 backdrop-blur-sm border border-slate-800 rounded-xl shadow-2xl shadow-black/60 py-1 min-w-[170px] text-xs select-none">
+      <button onclick="copySelectionToClipboard(true); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span>Copy</span>
+        </span>
+        <span class="text-[10px] text-slate-500 font-mono">Ctrl+C</span>
+      </button>
+      <button onclick="pasteFromClipboard(true, true); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+          <span>Paste</span>
+        </span>
+        <span class="text-[10px] text-slate-500 font-mono">Ctrl+V</span>
+      </button>
+      <button onclick="selectAllTerm(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
+          <span>Select All</span>
+        </span>
+        <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+A</span>
+      </button>
+      <div class="h-px bg-slate-800 my-1"></div>
+      <button onclick="clearTerm(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          <span>Clear</span>
+        </span>
+        <span class="text-[10px] text-slate-500 font-mono">Ctrl+L</span>
+      </button>
+    </div>
   </div>
 
   <script>
@@ -721,16 +766,58 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (term) term.focus();
     }
 
-    function copySelectionToClipboard() {
-      if (!term || !term.hasSelection()) return;
+    let toastTimer = null;
+    function showToast(msg) {
+      const toast = document.getElementById('term-toast');
+      const msgEl = document.getElementById('term-toast-msg');
+      if (!toast || !msgEl) return;
+      msgEl.textContent = msg;
+      toast.classList.remove('opacity-0', 'translate-y-2');
+      toast.classList.add('opacity-100', 'translate-y-0');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        toast.classList.remove('opacity-100', 'translate-y-0');
+        toast.classList.add('opacity-0', 'translate-y-2');
+      }, 1800);
+    }
+
+    function showContextMenu(x, y) {
+      const menu = document.getElementById('term-context-menu');
+      if (!menu) return;
+      menu.style.left = `${Math.min(x, window.innerWidth - 180)}px`;
+      menu.style.top = `${Math.min(y, window.innerHeight - 150)}px`;
+      menu.classList.remove('hidden');
+    }
+
+    function hideContextMenu() {
+      const menu = document.getElementById('term-context-menu');
+      if (menu) menu.classList.add('hidden');
+    }
+
+    function selectAllTerm() {
+      if (term) {
+        term.selectAll();
+        showToast('All terminal text selected');
+      }
+    }
+
+    function copySelectionToClipboard(showFeedback = false) {
+      if (!term || !term.hasSelection()) {
+        if (showFeedback) showToast('No text selected');
+        return;
+      }
       const text = term.getSelection();
       if (!text) return;
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).catch(() => {
+        navigator.clipboard.writeText(text).then(() => {
+          if (showFeedback) showToast('Copied to clipboard');
+        }).catch(() => {
           fallbackCopyText(text);
+          if (showFeedback) showToast('Copied to clipboard');
         });
       } else {
         fallbackCopyText(text);
+        if (showFeedback) showToast('Copied to clipboard');
       }
     }
 
@@ -755,15 +842,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (term) {
         term.clear();
         term.focus();
+        showToast('Terminal cleared');
       }
     }
 
-    async function pasteFromClipboard(promptFallback = true) {
+    async function pasteFromClipboard(promptFallback = true, showFeedback = false) {
       try {
         if (navigator.clipboard && navigator.clipboard.readText) {
           const text = await navigator.clipboard.readText();
           if (text) {
             insertPastedText(text);
+            if (showFeedback) showToast('Pasted');
           }
           if (term) term.focus();
           return;
@@ -777,6 +866,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           const manualText = prompt('Paste text here (press Ctrl+V and click OK):');
           if (manualText) {
             insertPastedText(manualText);
+            if (showFeedback) showToast('Pasted');
           }
         } catch (e) {}
       }
@@ -840,6 +930,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           if (text && e.clipboardData) {
             e.clipboardData.setData('text/plain', text);
             e.preventDefault();
+            showToast('Copied to clipboard');
           }
         }
       });
@@ -854,16 +945,63 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (text) {
           e.preventDefault();
           insertPastedText(text);
+          showToast('Pasted');
         }
       });
 
-      // Intercept special keyboard events reliably (Ctrl+C, Ctrl+V, Ctrl+Z, Ctrl+D)
+      // Mouse and gesture interaction listeners
+      mount.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showContextMenu(e.clientX, e.clientY);
+      });
+
+      mount.addEventListener('auxclick', (e) => {
+        if (e.button === 1) { // Middle click paste
+          e.preventDefault();
+          pasteFromClipboard(false, true);
+        }
+      });
+
+      mount.addEventListener('dragover', (e) => {
+        e.preventDefault();
+      });
+
+      mount.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const text = e.dataTransfer ? e.dataTransfer.getData('text/plain') : '';
+        if (text) {
+          insertPastedText(text);
+          showToast('Pasted');
+        }
+      });
+
+      document.addEventListener('click', (e) => {
+        const menu = document.getElementById('term-context-menu');
+        if (menu && !menu.contains(e.target)) {
+          hideContextMenu();
+        }
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          hideContextMenu();
+        }
+      });
+
+      // Comprehensive keyboard shortcuts
       term.attachCustomKeyEventHandler((e) => {
         if (e.type === 'keydown') {
-          // Ctrl+C (or Ctrl+Shift+C)
-          if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+          const isCtrlOrMeta = e.ctrlKey || e.metaKey;
+
+          // Copy: Ctrl+C, Cmd+C, Ctrl+Shift+C, or Ctrl+Insert
+          if ((isCtrlOrMeta && (e.key === 'c' || e.key === 'C')) ||
+              (isCtrlOrMeta && e.key === 'Insert')) {
             if (term.hasSelection()) {
-              copySelectionToClipboard();
+              copySelectionToClipboard(true);
+              return false;
+            }
+            // Cmd+C on macOS without selection must not trigger SIGINT
+            if (e.metaKey && !e.ctrlKey) {
               return false;
             }
             if (e.shiftKey) {
@@ -872,22 +1010,38 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             sendInterrupt();
             return false;
           }
-          // Ctrl+V / Cmd+V (or Shift+Insert) - Paste
-          if (((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) ||
+
+          // Paste: Ctrl+V, Cmd+V, Ctrl+Shift+V, or Shift+Insert
+          if ((isCtrlOrMeta && (e.key === 'v' || e.key === 'V')) ||
               (e.shiftKey && (e.key === 'Insert' || e.key === 'Paste'))) {
-            pasteFromClipboard();
+            pasteFromClipboard(true, true);
             return false;
           }
-          // Ctrl+Z
+
+          // Select All: Cmd+A (Mac) or Ctrl+Shift+A (Linux/Windows)
+          if (((e.metaKey && !e.ctrlKey) || (e.ctrlKey && e.shiftKey)) && (e.key === 'a' || e.key === 'A')) {
+            selectAllTerm();
+            return false;
+          }
+
+          // Clear Terminal: Cmd+K (Mac standard)
+          if (e.metaKey && !e.ctrlKey && (e.key === 'k' || e.key === 'K')) {
+            clearTerm();
+            return false;
+          }
+
+          // Ctrl+Z (Suspend)
           if (e.ctrlKey && (e.key === 'z' || e.key === 'Z')) {
             sendSuspend();
             return false;
           }
-          // Ctrl+D
+
+          // Ctrl+D (EOF)
           if (e.ctrlKey && (e.key === 'd' || e.key === 'D')) {
             sendEOF();
             return false;
           }
+
           // Ctrl+L (Clear screen)
           if (e.ctrlKey && (e.key === 'l' || e.key === 'L')) {
             if (socket && socket.readyState === WebSocket.OPEN) {
@@ -985,7 +1139,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       };
     }
 
+    let isLoggingOut = false;
+    window.addEventListener('beforeunload', (e) => {
+      if (!isLoggingOut && socket && socket.readyState === WebSocket.OPEN) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    });
+
     async function handleLogout() {
+      isLoggingOut = true;
       if (pingTimer) clearInterval(pingTimer);
       if (latencyInterval) { clearInterval(latencyInterval); latencyInterval = null; }
       if (reconnectTimer) clearTimeout(reconnectTimer);
