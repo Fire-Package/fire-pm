@@ -251,6 +251,10 @@ class TerminalSession:
         self.last_seen = time.time()
         self.closed = False
         self.reader_thread = None
+        self.shell_pgid = None
+        self.active_cmd_pgid = None
+        self.active_cmd_start_time = None
+        self.active_cmd_name = ""
         self.start()
 
     def start(self):
@@ -291,9 +295,60 @@ class TerminalSession:
         flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
         fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
         self.pid = pid
+        try:
+            self.shell_pgid = os.getpgid(pid)
+        except Exception:
+            self.shell_pgid = pid
 
         self.reader_thread = threading.Thread(target=self._pty_reader_loop, daemon=True)
         self.reader_thread.start()
+
+    def _check_fg_process(self):
+        if not self.master_fd or self.closed:
+            return
+        try:
+            fg_pgid = os.tcgetpgrp(self.master_fd)
+        except Exception:
+            return
+
+        comm = ""
+        if fg_pgid > 0:
+            try:
+                with open(f"/proc/{fg_pgid}/comm", "r") as f:
+                    comm = f.read().strip()
+            except Exception:
+                pass
+
+        SHELLS = ('bash', 'sh', 'zsh', 'fish', 'dash', 'ash')
+        now = time.time()
+        if comm in SHELLS:
+            self.shell_pgid = fg_pgid
+            if self.active_cmd_name and self.active_cmd_start_time:
+                duration = now - self.active_cmd_start_time
+                finished_cmd = self.active_cmd_name
+                self.active_cmd_name = ""
+                self.active_cmd_start_time = None
+                self.active_cmd_pgid = None
+
+                if duration >= 3.0:
+                    alert_payload = json.dumps({
+                        "type": "task_alert",
+                        "command": finished_cmd,
+                        "duration": round(duration, 1),
+                        "source": "process"
+                    })
+                    with self.sock_lock:
+                        if self.sock:
+                            try:
+                                frame = ws_make_frame(alert_payload.encode("utf-8"), opcode=1)
+                                self.sock.sendall(frame)
+                            except Exception:
+                                pass
+        elif comm != "":
+            if self.active_cmd_name != comm:
+                self.active_cmd_name = comm
+                self.active_cmd_start_time = now
+                self.active_cmd_pgid = fg_pgid
 
     def _pty_reader_loop(self):
         while not self.closed:
@@ -305,6 +360,7 @@ class TerminalSession:
                         break
 
                 rlist, _, _ = select.select([self.master_fd], [], [], 0.5)
+                self._check_fg_process()
                 if not rlist:
                     continue
 
@@ -609,6 +665,44 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <span>Command Bar</span>
         </button>
         <div class="relative">
+          <button id="notify-btn" onclick="toggleNotificationPanel()" title="Task Alerts & Notifications (Alerts when long commands or Antigravity finish)" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1.5">
+            <span id="notify-icon">🔔</span>
+            <span id="notify-badge" class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
+          </button>
+          <div id="notify-panel" class="hidden absolute right-0 top-full mt-1.5 w-72 bg-slate-900/95 backdrop-blur-sm border border-slate-700/80 rounded-xl shadow-2xl shadow-black/50 p-3.5 z-50 text-left font-sans">
+            <div class="flex items-center justify-between mb-2.5 pb-2 border-b border-slate-800">
+              <span class="text-[11px] font-semibold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                <span>🔔</span> Task Alerts & Chimes
+              </span>
+              <button onclick="playNotificationChime()" title="Test Audio Chime" class="px-2 py-0.5 text-[10px] bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 rounded transition font-mono flex items-center gap-1">
+                <span>🔊</span> Test
+              </button>
+            </div>
+            
+            <div class="space-y-2.5 text-xs">
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="font-medium text-slate-200">Audio Chime</div>
+                  <div class="text-[10px] text-slate-400">Plays gentle chime on completion</div>
+                </div>
+                <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono">Active</span>
+              </div>
+
+              <div class="pt-2 border-t border-slate-800/80">
+                <div class="flex items-center justify-between mb-1">
+                  <div class="font-medium text-slate-200">Desktop Notification</div>
+                  <span id="notify-perm-status" class="text-[10px] font-mono text-slate-400">Checking...</span>
+                </div>
+                <div id="notify-perm-action" class="mt-1"></div>
+              </div>
+
+              <div class="pt-2 border-t border-slate-800/80 text-[10px] text-slate-400 leading-relaxed">
+                ⚡ Alerts trigger for commands running <span class="text-slate-300 font-mono">≥ 3s</span>, Antigravity AI turns, and terminal bells.
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="relative">
           <button id="network-btn" onclick="toggleLatencyPanel()" title="Network Latency" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition flex items-center gap-1.5">
             <svg id="wifi-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
@@ -880,6 +974,169 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         return false;
       }
     }, { capture: true });
+
+    let originalDocTitle = document.title || 'Fire SSH';
+    let titleBlinkInterval = null;
+
+    function playNotificationChime() {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        if (ctx.state === 'suspended') ctx.resume();
+        const now = ctx.currentTime;
+
+        const osc1 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(587.33, now); // D5
+        gain1.gain.setValueAtTime(0.12, now);
+        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+        osc1.connect(gain1);
+        gain1.connect(ctx.destination);
+        osc1.start(now);
+        osc1.stop(now + 0.28);
+
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(880, now + 0.12); // A5
+        gain2.gain.setValueAtTime(0.12, now + 0.12);
+        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.42);
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.start(now + 0.12);
+        osc2.stop(now + 0.42);
+      } catch (e) {}
+    }
+
+    function triggerTaskAlert(title, message, source) {
+      playNotificationChime();
+
+      if (document.hidden || !document.hasFocus()) {
+        try {
+          if ('Notification' in window && Notification.permission === 'granted') {
+            const notif = new Notification(title, {
+              body: message,
+              tag: 'fire-task-alert'
+            });
+            notif.onclick = () => {
+              window.focus();
+              notif.close();
+            };
+          }
+        } catch(e) {}
+
+        if (!titleBlinkInterval) {
+          let blink = false;
+          titleBlinkInterval = setInterval(() => {
+            blink = !blink;
+            document.title = blink ? `🔔 ${title}!` : originalDocTitle;
+          }, 1000);
+        }
+      }
+
+      showToast(`🔔 ${title}: ${message}`);
+    }
+
+    window.addEventListener('focus', () => {
+      if (titleBlinkInterval) {
+        clearInterval(titleBlinkInterval);
+        titleBlinkInterval = null;
+        document.title = originalDocTitle;
+      }
+    });
+
+    function toggleNotificationPanel() {
+      const panel = document.getElementById('notify-panel');
+      if (!panel) return;
+      const isHidden = panel.classList.contains('hidden');
+      const latPanel = document.getElementById('latency-panel');
+      if (latPanel) latPanel.classList.add('hidden');
+
+      panel.classList.toggle('hidden');
+      if (isHidden) {
+        updateNotifyPanelUI();
+        if ('Notification' in window && Notification.permission === 'default') {
+          requestDesktopNotificationPerm();
+        }
+      }
+    }
+
+    function updateNotifyPanelUI() {
+      const statusEl = document.getElementById('notify-perm-status');
+      const actionEl = document.getElementById('notify-perm-action');
+      const badge = document.getElementById('notify-badge');
+      if (!statusEl || !actionEl) return;
+
+      if (!('Notification' in window)) {
+        statusEl.innerHTML = '<span class="text-amber-400">Unsupported</span>';
+        actionEl.innerHTML = '<p class="text-[10px] text-slate-400">Browser does not support desktop notifications. Audio chime is active.</p>';
+        if (badge) badge.className = 'w-1.5 h-1.5 rounded-full bg-amber-400';
+        return;
+      }
+
+      const perm = Notification.permission;
+      if (perm === 'granted') {
+        statusEl.innerHTML = '<span class="text-emerald-400 font-semibold">● Allowed</span>';
+        actionEl.innerHTML = '<button onclick="playNotificationChime(); showToast(\'Desktop notifications active!\'); try { new Notification(\'Fire SSH\', { body: \'Test notification successful!\' }); } catch(e){}" class="w-full py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition font-mono flex items-center justify-center gap-1"><span>📬</span> Send Test Notification</button>';
+        if (badge) badge.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse';
+      } else if (perm === 'denied') {
+        statusEl.innerHTML = '<span class="text-red-400 font-semibold">● Blocked in Browser</span>';
+        actionEl.innerHTML = '<div class="p-2 bg-red-950/40 border border-red-500/30 rounded-lg text-[11px] text-red-300 leading-tight"><span class="font-semibold">How to enable:</span><br>Click the 🔒 or ⚙️ icon in your browser URL address bar and set <b>Notifications</b> to <b>Allow</b>.</div>';
+        if (badge) badge.className = 'w-1.5 h-1.5 rounded-full bg-red-400';
+      } else {
+        statusEl.innerHTML = '<span class="text-amber-400 font-semibold">● Not Enabled</span>';
+        actionEl.innerHTML = '<button onclick="requestDesktopNotificationPerm()" class="w-full py-1 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg shadow transition flex items-center justify-center gap-1"><span>🔔</span> Enable Desktop Alerts</button>';
+        if (badge) badge.className = 'w-1.5 h-1.5 rounded-full bg-amber-400';
+      }
+    }
+
+    function requestDesktopNotificationPerm() {
+      if (!('Notification' in window)) {
+        showToast('Desktop notifications not supported in this browser');
+        return;
+      }
+      let handled = false;
+      function onDone(perm) {
+        if (handled) return;
+        handled = true;
+        updateNotifyPanelUI();
+        if (perm === 'granted') {
+          playNotificationChime();
+          showToast('Notifications enabled!');
+          try {
+            new Notification('Fire SSH', { body: 'Notifications enabled successfully!' });
+          } catch(e) {}
+        } else if (perm === 'denied') {
+          showToast('Notifications blocked in browser settings.');
+        }
+      }
+      try {
+        const req = Notification.requestPermission(onDone);
+        if (req && typeof req.then === 'function') {
+          req.then(onDone).catch(() => {});
+        }
+      } catch(e) {
+        console.error(e);
+      }
+    }
+
+    document.addEventListener('click', (e) => {
+      const panel = document.getElementById('notify-panel');
+      const btn = document.getElementById('notify-btn');
+      if (panel && btn && !panel.contains(e.target) && !btn.contains(e.target)) {
+        panel.classList.add('hidden');
+      }
+    });
+
+    function updateNotifyBtnState() {
+      updateNotifyPanelUI();
+    }
+
+    function toggleNotifications() {
+      toggleNotificationPanel();
+    }
 
     let predictiveEchoEnabled = true;
     let localLine = '';
@@ -1233,6 +1490,30 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       term.open(mount);
       fitAddon.fit();
 
+      // Terminal Bell (e.g. from Antigravity, Gemini, or compiler)
+      term.onBell(() => {
+        triggerTaskAlert('Terminal Bell', 'Process requested attention', 'bell');
+      });
+
+      // OSC 9 & OSC 777 Notifications (Antigravity & agent notification sequences)
+      if (term.parser && term.parser.registerOscHandler) {
+        term.parser.registerOscHandler(9, (data) => {
+          triggerTaskAlert('Antigravity Notification', data, 'osc9');
+          return true;
+        });
+        term.parser.registerOscHandler(777, (data) => {
+          const parts = data.split(';');
+          if (parts[0] === 'notify') {
+            const title = parts[1] || 'Antigravity Notification';
+            const msg = parts.slice(2).join(';') || 'Task finished';
+            triggerTaskAlert(title, msg, 'osc777');
+          }
+          return true;
+        });
+      }
+
+      updateNotifyBtnState();
+
       document.addEventListener('copy', (e) => {
         if (term && term.hasSelection()) {
           const text = term.getSelection();
@@ -1497,6 +1778,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             } else if (msg.type === 'latency_terminal_result') {
               serverTerminalLatency = msg.latency;
               updateLatencyDisplay();
+            } else if (msg.type === 'task_alert') {
+              triggerTaskAlert(`Fire SSH: ${msg.command} finished`, `Completed in ${msg.duration}s`, 'process');
             }
           } catch(e) {
             renderServerOutput(event.data);
