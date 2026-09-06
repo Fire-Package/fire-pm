@@ -583,8 +583,31 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </button>
         <button onclick="sendSuspend()" title="Suspend Foreground Job (Ctrl+Z)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono">^Z</button>
         <button onclick="sendEOF()" title="EOF / Exit (Ctrl+D)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono">^D</button>
+        <button onclick="sendCtrlW()" title="Send Ctrl+W (Where Is in nano / erase word in bash)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono">^W</button>
         <button onclick="clearTerm()" title="Clear Terminal Output" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">Clear</button>
         <button onclick="termFit()" title="Fit Terminal Window" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fit</button>
+        <button onclick="toggleFullscreen()" title="Fullscreen mode (locks Ctrl+W from closing tab)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fullscreen</button>
+        <button onclick="copySelectionToClipboard(true)" title="Copy Selected Text (Ctrl+C / Cmd+C)" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          <span>Copy</span>
+        </button>
+        <button onclick="pasteFromClipboard(true, true)" title="Paste from Clipboard (Ctrl+V / Cmd+V)" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400">
+            <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+          </svg>
+          <span>Paste</span>
+        </button>
+        <button id="predictive-btn" onclick="togglePredictiveMode()" title="0ms Direct In-Terminal Typing (Local Echo for bash / antigravity) [Alt+P]" class="px-2 py-1 text-xs bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-lg transition font-mono flex items-center gap-1">
+          <span>⚡</span>
+          <span id="predictive-btn-text">0ms Direct</span>
+        </button>
+        <button id="buffer-toggle-btn" onclick="toggleBufferMode()" title="Toggle Command Bar [Alt+B]" class="hidden md:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-transparent rounded-lg transition font-mono items-center gap-1">
+          <span>Command Bar</span>
+        </button>
         <div class="relative">
           <button id="network-btn" onclick="toggleLatencyPanel()" title="Network Latency" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition flex items-center gap-1.5">
             <svg id="wifi-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -629,6 +652,81 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     <!-- Xterm mount -->
     <div id="terminal" class="flex-1 w-full bg-[#020617] relative"></div>
+
+    <!-- Local Command Buffer Bar (Low-Latency Line Mode for High Ping Connections) -->
+    <div id="local-buffer-bar" class="hidden bg-slate-900 border-t border-slate-800 p-2 sm:px-3 sm:py-2 flex items-center gap-2 select-none">
+      <div class="flex items-center gap-1 text-amber-400 text-xs font-mono shrink-0 select-none">
+        <span class="animate-pulse">⚡</span>
+        <span class="hidden md:inline text-[11px] text-slate-400">Buffer:</span>
+      </div>
+      <div class="flex-1 relative flex items-center">
+        <input id="local-buffer-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+               placeholder="Type command locally with 0ms lag (Press Enter to send, ↑/↓ for history)..."
+               class="w-full bg-slate-950 text-emerald-400 placeholder:text-slate-600 font-mono text-xs sm:text-sm px-3 py-1.5 rounded-lg border border-slate-700/70 focus:outline-none focus:border-amber-400/80 focus:ring-1 focus:ring-amber-400/50 transition">
+        <span id="buffer-history-tip" class="hidden lg:inline absolute right-2.5 text-[10px] text-slate-600 font-mono pointer-events-none">Enter ↵</span>
+      </div>
+      <button onclick="submitLocalBuffer()" title="Send Command to Remote Server (Enter)" class="px-2.5 py-1.5 text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg transition font-mono font-medium flex items-center gap-1 shrink-0">
+        <span>Send</span>
+        <span class="text-[10px] opacity-70">↵</span>
+      </button>
+      <button onclick="toggleBufferMode()" title="Hide Local Buffer (Alt+B)" class="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition shrink-0">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="term-toast" class="pointer-events-none fixed bottom-6 right-6 z-50 transition-all duration-200 opacity-0 translate-y-2 bg-slate-800/95 border border-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-lg shadow-xl font-mono flex items-center gap-2">
+      <span id="term-toast-msg">Copied to clipboard</span>
+    </div>
+
+    <!-- Custom Right-Click Context Menu -->
+    <div id="term-context-menu" class="hidden fixed z-50 bg-slate-900/95 backdrop-blur-sm border border-slate-800 rounded-xl shadow-2xl shadow-black/60 py-1 min-w-[170px] text-xs select-none">
+      <button onclick="copySelectionToClipboard(true); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span>Copy</span>
+        </span>
+        <span class="text-[10px] text-slate-500 font-mono">Ctrl+C</span>
+      </button>
+      <button onclick="pasteFromClipboard(true, true); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+          <span>Paste</span>
+        </span>
+        <span class="text-[10px] text-slate-500 font-mono">Ctrl+V</span>
+      </button>
+      <button onclick="selectAllTerm(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
+          <span>Select All</span>
+        </span>
+        <span class="text-[10px] text-slate-500 font-mono">Ctrl+Shift+A</span>
+      </button>
+      <button onclick="sendCtrlW(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <span>Search (Where Is)</span>
+        </span>
+        <span class="text-[10px] text-slate-500 font-mono">Alt+W / ^W</span>
+      </button>
+      <button onclick="toggleBufferMode(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <span class="text-amber-400">⚡</span>
+          <span>Buffer Mode</span>
+        </span>
+        <span class="text-[10px] text-slate-500 font-mono">Alt+B</span>
+      </button>
+      <div class="h-px bg-slate-800 my-1"></div>
+      <button onclick="clearTerm(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          <span>Clear</span>
+        </span>
+        <span class="text-[10px] text-slate-500 font-mono">Ctrl+L</span>
+      </button>
+    </div>
   </div>
 
   <script>
@@ -714,16 +812,321 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (term) term.focus();
     }
 
-    function copySelectionToClipboard() {
-      if (!term || !term.hasSelection()) return;
+    function sendCtrlW() {
+      if (localLine && localLine.length > 0) {
+        const trimmed = localLine.replace(/\s+$/, '');
+        const lastSpace = trimmed.lastIndexOf(' ');
+        const newLen = lastSpace >= 0 ? lastSpace + 1 : 0;
+        const toErase = localLine.length - newLen;
+        localLine = localLine.slice(0, newLen);
+        if (term && toErase > 0) term.write('\b \b'.repeat(toErase));
+      }
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'input', data: '\x17' }));
+      }
+      if (term) term.focus();
+    }
+
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().then(() => {
+          if (navigator.keyboard && navigator.keyboard.lock) {
+            navigator.keyboard.lock(['KeyW', 'KeyN', 'KeyT']).catch(() => {});
+          }
+          termFit();
+          if (term) term.focus();
+          showToast('Fullscreen on (Ctrl+W locked to terminal)');
+        }).catch(() => {
+          showToast('Fullscreen not permitted');
+        });
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen().then(() => {
+            if (navigator.keyboard && navigator.keyboard.unlock) {
+              navigator.keyboard.unlock();
+            }
+            termFit();
+            if (term) term.focus();
+          }).catch(() => {});
+        }
+      }
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+      if (document.fullscreenElement) {
+        if (navigator.keyboard && navigator.keyboard.lock) {
+          navigator.keyboard.lock(['KeyW', 'KeyN', 'KeyT']).catch(() => {});
+        }
+        showToast('Fullscreen: Ctrl+W locked to terminal');
+      } else {
+        if (navigator.keyboard && navigator.keyboard.unlock) {
+          navigator.keyboard.unlock();
+        }
+      }
+      setTimeout(termFit, 100);
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'w' || e.key === 'W')) {
+        e.preventDefault();
+        e.stopPropagation();
+        sendCtrlW();
+        return false;
+      }
+      if (((e.ctrlKey && e.shiftKey) || e.altKey) && (e.key === 'w' || e.key === 'W')) {
+        e.preventDefault();
+        e.stopPropagation();
+        sendCtrlW();
+        return false;
+      }
+    }, { capture: true });
+
+    let predictiveEchoEnabled = true;
+    let localLine = '';
+    let pendingSubmissions = [];
+    let streamBuffer = '';
+    let submissionTimeout = null;
+
+    function resetSubmissionTimeout() {
+      if (submissionTimeout) clearTimeout(submissionTimeout);
+      submissionTimeout = setTimeout(() => {
+        pendingSubmissions = [];
+        streamBuffer = '';
+      }, 5000);
+    }
+
+    function togglePredictiveMode(force) {
+      predictiveEchoEnabled = force !== undefined ? force : !predictiveEchoEnabled;
+      const btn = document.getElementById('predictive-btn');
+      const text = document.getElementById('predictive-btn-text');
+      if (predictiveEchoEnabled) {
+        if (btn) {
+          btn.className = 'px-2 py-1 text-xs bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-lg transition font-mono flex items-center gap-1';
+        }
+        if (text) text.textContent = '0ms Direct';
+        showToast('0ms In-Terminal Typing: ON (Direct typing in bash/antigravity)');
+      } else {
+        if (btn) {
+          btn.className = 'px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-transparent rounded-lg transition font-mono flex items-center gap-1';
+        }
+        if (text) text.textContent = '0ms Off';
+        localLine = '';
+        pendingSubmissions = [];
+        streamBuffer = '';
+        showToast('0ms In-Terminal Typing: OFF (Raw server echo)');
+      }
+      if (term) term.focus();
+    }
+
+    function renderServerOutput(raw) {
+      const isAlt = term && term.buffer && term.buffer.active && term.buffer.active.type === 'alternate';
+      if (isAlt || !predictiveEchoEnabled) {
+        pendingSubmissions = [];
+        streamBuffer = '';
+        term.write(raw);
+        return;
+      }
+
+      if (pendingSubmissions.length === 0) {
+        term.write(raw);
+        return;
+      }
+
+      const chunk = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
+      streamBuffer += chunk;
+
+      while (pendingSubmissions.length > 0) {
+        const expectedCmd = pendingSubmissions[0];
+        if (!expectedCmd) {
+          if (streamBuffer.startsWith('\r\n')) {
+            streamBuffer = streamBuffer.slice(2);
+            pendingSubmissions.shift();
+            continue;
+          } else if (streamBuffer.startsWith('\n') || streamBuffer.startsWith('\r')) {
+            streamBuffer = streamBuffer.slice(1);
+            pendingSubmissions.shift();
+            continue;
+          } else if (streamBuffer.length >= 2) {
+            pendingSubmissions.shift();
+            continue;
+          }
+          break;
+        }
+
+        const escaped = expectedCmd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const fullRegex = new RegExp(`^(\\x1b\\[[0-9;?]*[a-zA-Z]|\\r|\\n)*${escaped}(\\r\\n|\\r|\\n)`);
+        const fullMatch = streamBuffer.match(fullRegex);
+        if (fullMatch) {
+          streamBuffer = streamBuffer.slice(fullMatch[0].length);
+          pendingSubmissions.shift();
+          continue;
+        }
+
+        const partialRegex = new RegExp(`^(\\x1b\\[[0-9;?]*[a-zA-Z]|\\r|\\n)*${escaped}$`);
+        if (streamBuffer.match(partialRegex)) {
+          return;
+        }
+
+        if (streamBuffer.length > expectedCmd.length + 32) {
+          pendingSubmissions.shift();
+          continue;
+        }
+
+        break;
+      }
+
+      if (streamBuffer.length > 0) {
+        const out = streamBuffer;
+        streamBuffer = '';
+        term.write(out);
+      }
+    }
+
+    let bufferHistory = [];
+    let bufferHistoryIdx = -1;
+    let bufferAutoPrompted = false;
+
+    function toggleBufferMode(force) {
+      const bar = document.getElementById('local-buffer-bar');
+      const btn = document.getElementById('buffer-toggle-btn');
+      const input = document.getElementById('local-buffer-input');
+      if (!bar) return;
+
+      const shouldShow = force !== undefined ? force : bar.classList.contains('hidden');
+      if (shouldShow) {
+        bar.classList.remove('hidden');
+        if (btn) {
+          btn.classList.add('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
+          btn.classList.remove('animate-pulse');
+        }
+        if (input) {
+          input.focus();
+          input.select();
+        }
+        showToast('Local Buffer active: 0ms typing lag');
+      } else {
+        bar.classList.add('hidden');
+        if (btn) btn.classList.remove('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
+        if (term) term.focus();
+      }
+      termFit();
+    }
+
+    function submitLocalBuffer() {
+      const input = document.getElementById('local-buffer-input');
+      if (!input) return;
+      const cmd = input.value;
+      if (cmd !== '') {
+        if (bufferHistory.length === 0 || bufferHistory[bufferHistory.length - 1] !== cmd) {
+          bufferHistory.push(cmd);
+          if (bufferHistory.length > 100) bufferHistory.shift();
+        }
+        bufferHistoryIdx = bufferHistory.length;
+
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'input', data: cmd + '\r' }));
+        }
+        input.value = '';
+      } else {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'input', data: '\r' }));
+        }
+      }
+      input.focus();
+    }
+
+    function initLocalBufferListeners() {
+      const input = document.getElementById('local-buffer-input');
+      if (!input) return;
+
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitLocalBuffer();
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          if (bufferHistory.length > 0) {
+            if (bufferHistoryIdx > 0) {
+              bufferHistoryIdx--;
+            }
+            input.value = bufferHistory[bufferHistoryIdx] || '';
+          }
+        } else if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (bufferHistoryIdx < bufferHistory.length - 1) {
+            bufferHistoryIdx++;
+            input.value = bufferHistory[bufferHistoryIdx];
+          } else {
+            bufferHistoryIdx = bufferHistory.length;
+            input.value = '';
+          }
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          if (term) term.focus();
+        } else if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+          if (input.selectionStart === input.selectionEnd) {
+            input.value = '';
+            sendInterrupt();
+          }
+        } else if (e.altKey && (e.key === 'b' || e.key === 'B')) {
+          e.preventDefault();
+          toggleBufferMode(false);
+        }
+      });
+    }
+
+    let toastTimer = null;
+    function showToast(msg) {
+      const toast = document.getElementById('term-toast');
+      const msgEl = document.getElementById('term-toast-msg');
+      if (!toast || !msgEl) return;
+      msgEl.textContent = msg;
+      toast.classList.remove('opacity-0', 'translate-y-2');
+      toast.classList.add('opacity-100', 'translate-y-0');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        toast.classList.remove('opacity-100', 'translate-y-0');
+        toast.classList.add('opacity-0', 'translate-y-2');
+      }, 1800);
+    }
+
+    function showContextMenu(x, y) {
+      const menu = document.getElementById('term-context-menu');
+      if (!menu) return;
+      menu.style.left = `${Math.min(x, window.innerWidth - 180)}px`;
+      menu.style.top = `${Math.min(y, window.innerHeight - 150)}px`;
+      menu.classList.remove('hidden');
+    }
+
+    function hideContextMenu() {
+      const menu = document.getElementById('term-context-menu');
+      if (menu) menu.classList.add('hidden');
+    }
+
+    function selectAllTerm() {
+      if (term) {
+        term.selectAll();
+        showToast('All terminal text selected');
+      }
+    }
+
+    function copySelectionToClipboard(showFeedback = false) {
+      if (!term || !term.hasSelection()) {
+        if (showFeedback) showToast('No text selected');
+        return;
+      }
       const text = term.getSelection();
       if (!text) return;
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).catch(() => {
+        navigator.clipboard.writeText(text).then(() => {
+          if (showFeedback) showToast('Copied to clipboard');
+        }).catch(() => {
           fallbackCopyText(text);
+          if (showFeedback) showToast('Copied to clipboard');
         });
       } else {
         fallbackCopyText(text);
+        if (showFeedback) showToast('Copied to clipboard');
       }
     }
 
@@ -748,6 +1151,43 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (term) {
         term.clear();
         term.focus();
+        showToast('Terminal cleared');
+      }
+    }
+
+    async function pasteFromClipboard(promptFallback = true, showFeedback = false) {
+      try {
+        if (navigator.clipboard && navigator.clipboard.readText) {
+          const text = await navigator.clipboard.readText();
+          if (text) {
+            insertPastedText(text);
+            if (showFeedback) showToast('Pasted');
+          }
+          if (term) term.focus();
+          return;
+        }
+      } catch (err) {
+        console.warn('Clipboard readText failed or permission denied:', err);
+      }
+
+      if (promptFallback) {
+        try {
+          const manualText = prompt('Paste text here (press Ctrl+V and click OK):');
+          if (manualText) {
+            insertPastedText(manualText);
+            if (showFeedback) showToast('Pasted');
+          }
+        } catch (e) {}
+      }
+      if (term) term.focus();
+    }
+
+    function insertPastedText(text) {
+      if (!text) return;
+      if (term && typeof term.paste === 'function') {
+        term.paste(text);
+      } else if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'input', data: text }));
       }
     }
 
@@ -799,17 +1239,78 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           if (text && e.clipboardData) {
             e.clipboardData.setData('text/plain', text);
             e.preventDefault();
+            showToast('Copied to clipboard');
           }
         }
       });
 
-      // Intercept special keyboard events reliably (Ctrl+C, Ctrl+Z, Ctrl+D)
+      document.addEventListener('paste', (e) => {
+        const active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || (active.tagName === 'TEXTAREA' && !active.classList.contains('xterm-helper-textarea')))) {
+          return;
+        }
+        if (e.defaultPrevented) return;
+        const text = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
+        if (text) {
+          e.preventDefault();
+          insertPastedText(text);
+          showToast('Pasted');
+        }
+      });
+
+      // Mouse and gesture interaction listeners
+      mount.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showContextMenu(e.clientX, e.clientY);
+      });
+
+      mount.addEventListener('auxclick', (e) => {
+        if (e.button === 1) { // Middle click paste
+          e.preventDefault();
+          pasteFromClipboard(false, true);
+        }
+      });
+
+      mount.addEventListener('dragover', (e) => {
+        e.preventDefault();
+      });
+
+      mount.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const text = e.dataTransfer ? e.dataTransfer.getData('text/plain') : '';
+        if (text) {
+          insertPastedText(text);
+          showToast('Pasted');
+        }
+      });
+
+      document.addEventListener('click', (e) => {
+        const menu = document.getElementById('term-context-menu');
+        if (menu && !menu.contains(e.target)) {
+          hideContextMenu();
+        }
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          hideContextMenu();
+        }
+      });
+
+      // Comprehensive keyboard shortcuts
       term.attachCustomKeyEventHandler((e) => {
         if (e.type === 'keydown') {
-          // Ctrl+C (or Ctrl+Shift+C)
-          if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+          const isCtrlOrMeta = e.ctrlKey || e.metaKey;
+
+          // Copy: Ctrl+C, Cmd+C, Ctrl+Shift+C, or Ctrl+Insert
+          if ((isCtrlOrMeta && (e.key === 'c' || e.key === 'C')) ||
+              (isCtrlOrMeta && e.key === 'Insert')) {
             if (term.hasSelection()) {
-              copySelectionToClipboard();
+              copySelectionToClipboard(true);
+              return false;
+            }
+            // Cmd+C on macOS without selection must not trigger SIGINT
+            if (e.metaKey && !e.ctrlKey) {
               return false;
             }
             if (e.shiftKey) {
@@ -818,21 +1319,69 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             sendInterrupt();
             return false;
           }
-          // Ctrl+Z
+
+          // Paste: Ctrl+V, Cmd+V, Ctrl+Shift+V, or Shift+Insert
+          if ((isCtrlOrMeta && (e.key === 'v' || e.key === 'V')) ||
+              (e.shiftKey && (e.key === 'Insert' || e.key === 'Paste'))) {
+            pasteFromClipboard(true, true);
+            return false;
+          }
+
+          // Select All: Cmd+A (Mac) or Ctrl+Shift+A (Linux/Windows)
+          if (((e.metaKey && !e.ctrlKey) || (e.ctrlKey && e.shiftKey)) && (e.key === 'a' || e.key === 'A')) {
+            selectAllTerm();
+            return false;
+          }
+
+          // Clear Terminal: Cmd+K (Mac standard)
+          if (e.metaKey && !e.ctrlKey && (e.key === 'k' || e.key === 'K')) {
+            clearTerm();
+            return false;
+          }
+
+          // Ctrl+Z (Suspend)
           if (e.ctrlKey && (e.key === 'z' || e.key === 'Z')) {
             sendSuspend();
             return false;
           }
-          // Ctrl+D
+
+          // Ctrl+D (EOF)
           if (e.ctrlKey && (e.key === 'd' || e.key === 'D')) {
             sendEOF();
             return false;
           }
+
           // Ctrl+L (Clear screen)
           if (e.ctrlKey && (e.key === 'l' || e.key === 'L')) {
             if (socket && socket.readyState === WebSocket.OPEN) {
               socket.send(JSON.stringify({ type: 'input', data: '\x0c' }));
             }
+            return false;
+          }
+
+          // Ctrl+W: nano search / bash erase word
+          // Safe aliases: Alt+W or Ctrl+Shift+W (never close browser tab)
+          if (((e.ctrlKey && e.shiftKey) || e.altKey) && (e.key === 'w' || e.key === 'W')) {
+            e.preventDefault();
+            sendCtrlW();
+            return false;
+          }
+          // Direct Ctrl+W: intercept in fullscreen / supported environments
+          if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'w' || e.key === 'W')) {
+            e.preventDefault();
+            sendCtrlW();
+            return false;
+          }
+
+          // Alt+B: Toggle Local Buffer Mode (0ms input lag for high ping)
+          if (e.altKey && (e.key === 'b' || e.key === 'B')) {
+            toggleBufferMode();
+            return false;
+          }
+
+          // Alt+P: Toggle 0ms Direct In-Terminal Typing Mode
+          if (e.altKey && (e.key === 'p' || e.key === 'P')) {
+            togglePredictiveMode();
             return false;
           }
         }
@@ -842,12 +1391,63 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       connectWebSocket();
 
       term.onData(data => {
-        if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: 'input', data }));
+        const isAlternateScreen = term.buffer && term.buffer.active && term.buffer.active.type === 'alternate';
+        if (!predictiveEchoEnabled || isAlternateScreen) {
+          pendingSubmissions = [];
+          streamBuffer = '';
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: 'input', data }));
+          }
+          return;
+        }
+
+        if (data === '\r') {
+          term.write('\r\n');
+          const cmd = localLine;
+          localLine = '';
+          pendingSubmissions.push(cmd);
+          resetSubmissionTimeout();
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: 'input', data: cmd + '\r' }));
+          }
+        } else if (data === '\x7f' || data === '\b') {
+          if (localLine.length > 0) {
+            localLine = localLine.slice(0, -1);
+            term.write('\b \b');
+          }
+        } else if (data === '\x03') {
+          localLine = '';
+          pendingSubmissions = [];
+          streamBuffer = '';
+          term.write('^C\r\n');
+          sendInterrupt();
+        } else if (data === '\x15') {
+          if (localLine.length > 0) {
+            term.write('\b \b'.repeat(localLine.length));
+            localLine = '';
+          }
+        } else if (data.length === 1 && data.charCodeAt(0) >= 32 && data.charCodeAt(0) <= 126) {
+          localLine += data;
+          term.write(data);
+        } else {
+          if (localLine.length > 0) {
+            const cmd = localLine;
+            localLine = '';
+            pendingSubmissions.push(cmd);
+            resetSubmissionTimeout();
+            if (socket && socket.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({ type: 'input', data: cmd + data }));
+            }
+          } else {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({ type: 'input', data }));
+            }
+          }
         }
       });
 
       window.addEventListener('resize', () => termFit());
+      initLocalBufferListeners();
     }
 
     function termFit() {
@@ -888,7 +1488,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           try {
             const msg = JSON.parse(event.data);
             if (msg.type === 'output') {
-              term.write(msg.data);
+              renderServerOutput(msg.data);
             } else if (msg.type === 'pong') {
               // Heartbeat ack
             } else if (msg.type === 'latency_pong') {
@@ -899,11 +1499,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               updateLatencyDisplay();
             }
           } catch(e) {
-            term.write(event.data);
+            renderServerOutput(event.data);
           }
         } else {
           const uint8 = new Uint8Array(event.data);
-          term.write(uint8);
+          renderServerOutput(uint8);
         }
       };
 
@@ -925,7 +1525,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       };
     }
 
+    let isLoggingOut = false;
+    window.addEventListener('beforeunload', (e) => {
+      if (!isLoggingOut && socket && socket.readyState === WebSocket.OPEN) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    });
+
     async function handleLogout() {
+      isLoggingOut = true;
       if (pingTimer) clearInterval(pingTimer);
       if (latencyInterval) { clearInterval(latencyInterval); latencyInterval = null; }
       if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -976,6 +1585,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       const lat = clientServerLatency >= 0 ? clientServerLatency : 999;
       wifiIcon.style.color = lat < 80 ? '#4ade80' : lat < 200 ? '#fbbf24' : '#f87171';
+
+      if (clientServerLatency >= 400 && !bufferAutoPrompted) {
+        bufferAutoPrompted = true;
+        const btn = document.getElementById('buffer-toggle-btn');
+        if (btn) {
+          btn.classList.add('border-amber-400', 'animate-pulse');
+        }
+        showToast(`High latency detected (${Math.round(clientServerLatency)}ms). Click ⚡ Buffer or press Alt+B for 0ms typing!`);
+      }
     }
 
     function latencyDotColor(ms) {
