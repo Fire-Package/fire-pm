@@ -166,6 +166,100 @@ class SessionManager:
             self.sessions.pop(token, None)
 
 
+class ShareTokenManager:
+    """Manages secure, temporary read-only sharing tokens for web terminal sessions."""
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.shares = {}  # share_token -> {"session_token": str, "created_at": float, "expires_at": float | None, "label": str, "active_socks": set()}
+
+    def create_share(self, session_token: str, expires_in_seconds: float = None, label: str = "") -> str:
+        share_token = secrets.token_urlsafe(32)
+        now = time.time()
+        expires_at = (now + expires_in_seconds) if expires_in_seconds and expires_in_seconds > 0 else None
+        with self.lock:
+            self.shares[share_token] = {
+                "session_token": session_token,
+                "created_at": now,
+                "expires_at": expires_at,
+                "label": label or "Shared Session",
+                "active_socks": set()
+            }
+        return share_token
+
+    def validate(self, share_token: str) -> dict:
+        if not share_token:
+            return None
+        now = time.time()
+        with self.lock:
+            info = self.shares.get(share_token)
+            if not info:
+                return None
+            if info["expires_at"] and now > info["expires_at"]:
+                self._close_socks_unlocked(info)
+                del self.shares[share_token]
+                return None
+            return dict(info)
+
+    def register_socket(self, share_token: str, sock):
+        with self.lock:
+            info = self.shares.get(share_token)
+            if info:
+                info["active_socks"].add(sock)
+
+    def unregister_socket(self, share_token: str, sock):
+        with self.lock:
+            info = self.shares.get(share_token)
+            if info:
+                info["active_socks"].discard(sock)
+
+    def _close_socks_unlocked(self, info: dict):
+        for s in list(info.get("active_socks", [])):
+            try:
+                s.close()
+            except Exception:
+                pass
+        info["active_socks"].clear()
+
+    def revoke(self, share_token: str) -> bool:
+        with self.lock:
+            info = self.shares.pop(share_token, None)
+            if info:
+                self._close_socks_unlocked(info)
+                return True
+            return False
+
+    def revoke_by_session(self, session_token: str):
+        with self.lock:
+            to_remove = [k for k, v in self.shares.items() if v["session_token"] == session_token]
+            for k in to_remove:
+                info = self.shares.pop(k, None)
+                if info:
+                    self._close_socks_unlocked(info)
+
+    def list_shares(self, session_token: str) -> list:
+        now = time.time()
+        result = []
+        with self.lock:
+            expired = []
+            for k, v in self.shares.items():
+                if v["expires_at"] and now > v["expires_at"]:
+                    expired.append(k)
+                    continue
+                if v["session_token"] == session_token:
+                    result.append({
+                        "token": k,
+                        "label": v["label"],
+                        "created_at": v["created_at"],
+                        "expires_at": v["expires_at"],
+                        "active_viewers": len(v.get("active_socks", []))
+                    })
+            for k in expired:
+                info = self.shares.pop(k, None)
+                if info:
+                    self._close_socks_unlocked(info)
+        return result
+
+
 # ==================== RFC 6455 WEBSOCKET PROTOCOL ====================
 
 def ws_handshake_response(key: str) -> bytes:
@@ -243,6 +337,7 @@ class TerminalSession:
         self.master_fd = None
         self.pid = None
         self.sock = None
+        self.readonly_socks = set()
         self.sock_lock = threading.Lock()
         self.output_buffer = bytearray()
         self.buffer_lock = threading.Lock()
@@ -308,6 +403,21 @@ class TerminalSession:
         self.reader_thread = threading.Thread(target=self._pty_reader_loop, daemon=True)
         self.reader_thread.start()
 
+    def _broadcast_frame_unlocked(self, frame: bytes):
+        if self.sock:
+            try:
+                self.sock.sendall(frame)
+            except Exception:
+                self.sock = None
+        dead_ro = []
+        for ro in list(self.readonly_socks):
+            try:
+                ro.sendall(frame)
+            except Exception:
+                dead_ro.append(ro)
+        for ro in dead_ro:
+            self.readonly_socks.discard(ro)
+
     def _check_fg_process(self):
         if not self.master_fd or self.closed:
             return
@@ -342,11 +452,8 @@ class TerminalSession:
         if comm and comm != self.last_reported_comm:
             self.last_reported_comm = comm
             with self.sock_lock:
-                if self.sock:
-                    try:
-                        self.sock.sendall(ws_make_frame(json.dumps({"type": "process_name", "name": comm}).encode("utf-8"), opcode=1))
-                    except Exception:
-                        pass
+                frame = ws_make_frame(json.dumps({"type": "process_name", "name": comm}).encode("utf-8"), opcode=1)
+                self._broadcast_frame_unlocked(frame)
 
         if comm in SHELLS:
             self.shell_pgid = fg_pgid
@@ -365,12 +472,8 @@ class TerminalSession:
                         "source": "process"
                     })
                     with self.sock_lock:
-                        if self.sock:
-                            try:
-                                frame = ws_make_frame(alert_payload.encode("utf-8"), opcode=1)
-                                self.sock.sendall(frame)
-                            except Exception:
-                                pass
+                        frame = ws_make_frame(alert_payload.encode("utf-8"), opcode=1)
+                        self._broadcast_frame_unlocked(frame)
         elif comm != "":
             if self.active_cmd_name != comm:
                 self.active_cmd_name = comm
@@ -402,12 +505,8 @@ class TerminalSession:
                         self.output_buffer = self.output_buffer[-SCROLLBACK_BUFFER_SIZE:]
 
                 with self.sock_lock:
-                    if self.sock:
-                        try:
-                            frame = ws_make_frame(data, opcode=2)
-                            self.sock.sendall(frame)
-                        except Exception:
-                            self.sock = None
+                    frame = ws_make_frame(data, opcode=2)
+                    self._broadcast_frame_unlocked(frame)
             except (BlockingIOError, InterruptedError):
                 continue
             except Exception:
@@ -426,6 +525,21 @@ class TerminalSession:
                         sock.sendall(frame)
                     except Exception:
                         self.sock = None
+
+    def attach_readonly_socket(self, sock):
+        with self.sock_lock:
+            self.readonly_socks.add(sock)
+            with self.buffer_lock:
+                if self.output_buffer:
+                    try:
+                        frame = ws_make_frame(bytes(self.output_buffer), opcode=2)
+                        sock.sendall(frame)
+                    except Exception:
+                        self.readonly_socks.discard(sock)
+
+    def detach_readonly_socket(self, sock):
+        with self.sock_lock:
+            self.readonly_socks.discard(sock)
 
     def detach_socket(self, sock=None):
         with self.sock_lock:
@@ -520,6 +634,13 @@ class TerminalSession:
                 except Exception:
                     pass
                 self.sock = None
+            for ro in list(self.readonly_socks):
+                try:
+                    ro.sendall(ws_make_frame(b"", opcode=8))
+                    ro.close()
+                except Exception:
+                    pass
+            self.readonly_socks.clear()
 
         if self.master_fd:
             try:
@@ -816,6 +937,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <div class="mt-3 pt-2.5 border-t border-slate-800/80 text-[10px] text-slate-500 text-center">Auto-refreshing every 3s</div>
           </div>
         </div>
+        <div id="readonly-badge" class="hidden px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono text-[11px] sm:text-xs flex items-center gap-1.5 font-medium">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+          <span>Read-Only Live View</span>
+        </div>
+        <button id="share-btn" onclick="openShareModal()" title="Share Live Terminal (Read-Only)" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1.5">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400">
+            <circle cx="18" cy="5" r="3"></circle>
+            <circle cx="6" cy="12" r="3"></circle>
+            <circle cx="18" cy="19" r="3"></circle>
+            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+          </svg>
+          <span class="hidden md:inline">Share</span>
+        </button>
         <button id="upload-btn" onclick="triggerFileInput()" title="Upload File to Terminal Directory" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1.5">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -833,7 +968,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           </svg>
           <span class="hidden md:inline">Download</span>
         </button>
-        <button onclick="handleLogout()" class="px-2.5 py-1 text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-lg transition">Disconnect</button>
+        <button id="logout-btn" onclick="handleLogout()" class="px-2.5 py-1 text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-lg transition">Disconnect</button>
       </div>
     </header>
 
@@ -841,7 +976,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div id="tab-bar-container" class="bg-slate-950 border-b border-slate-800/80 px-2 sm:px-3 pt-1 flex items-center justify-between select-none shrink-0 overflow-hidden">
       <div id="tabs-list" class="flex items-center space-x-1 overflow-x-auto scrollbar-none py-0.5 max-w-[calc(100vw-7rem)] sm:max-w-[calc(100vw-12rem)]"></div>
       <div class="flex items-center pl-2 shrink-0">
-        <button onclick="createNewTab()" title="New Terminal Tab (Alt+T / Ctrl+Shift+T)" class="px-2 py-1 bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition text-xs flex items-center gap-1 font-mono">
+        <button id="new-tab-btn" onclick="createNewTab()" title="New Terminal Tab (Alt+T / Ctrl+Shift+T)" class="px-2 py-1 bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition text-xs flex items-center gap-1 font-mono">
           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           <span class="hidden sm:inline text-[11px]">New Tab</span>
         </button>
@@ -939,6 +1074,81 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       </div>
     </div>
 
+    <!-- Session Share Modal Dialog -->
+    <div id="share-modal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-5 w-full max-w-lg text-left font-sans max-h-[90vh] flex flex-col">
+        <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-800 shrink-0">
+          <div class="flex items-center gap-2">
+            <span class="text-base">👥</span>
+            <div>
+              <span class="font-semibold text-sm text-white block">Share Live Terminal Session</span>
+              <span class="text-[11px] text-slate-400">Generate a secure read-only live viewing link.</span>
+            </div>
+          </div>
+          <button type="button" onclick="closeShareModal()" class="text-slate-400 hover:text-slate-200 text-sm p-1">✕</button>
+        </div>
+
+        <div class="overflow-y-auto pr-1 space-y-4 flex-1 scrollbar-thin scrollbar-thumb-slate-700">
+          <!-- Generate Link Form -->
+          <form onsubmit="handleCreateShare(event)" class="bg-slate-950/60 border border-slate-800/80 rounded-xl p-3.5 space-y-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-medium text-slate-300 mb-1">Session Label (Optional)</label>
+                <input type="text" id="share-label-input" placeholder="e.g. Code Review" maxlength="30"
+                       class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-orange-500">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-300 mb-1">Link Expiration</label>
+                <select id="share-expiry-select" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-orange-500">
+                  <option value="3600" selected>1 Hour</option>
+                  <option value="21600">6 Hours</option>
+                  <option value="86400">24 Hours</option>
+                  <option value="0">Until Session Ends</option>
+                </select>
+              </div>
+            </div>
+            <div class="flex justify-end pt-1">
+              <button type="submit" id="create-share-btn" class="px-3.5 py-1.5 text-xs bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg transition flex items-center gap-1.5 shadow-md shadow-orange-500/20">
+                <span>Generate Read-Only Link</span>
+                <span class="text-xs">🔗</span>
+              </button>
+            </div>
+          </form>
+
+          <!-- Newly Created Share Link Alert -->
+          <div id="new-share-result" class="hidden bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3 space-y-2">
+            <div class="flex items-center justify-between text-xs text-emerald-400 font-medium">
+              <span>✓ Read-Only Share Link Ready</span>
+              <span class="text-[11px] text-emerald-400/80">Viewers cannot type or run commands</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <input type="text" id="new-share-url" readonly
+                     class="flex-1 bg-slate-950 border border-emerald-500/30 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 font-mono select-all">
+              <button type="button" onclick="copyShareUrl()" id="copy-share-btn"
+                      class="px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition font-mono shrink-0">
+                Copy Link
+              </button>
+            </div>
+          </div>
+
+          <!-- Active Shares List -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-semibold text-slate-300">Active Share Links</span>
+              <button type="button" onclick="loadShareLinks()" class="text-[11px] text-orange-400 hover:underline">Refresh</button>
+            </div>
+            <div id="active-shares-container" class="space-y-2 text-xs">
+              <div class="text-slate-500 text-center py-3">Loading active links...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end pt-3 border-t border-slate-800 shrink-0 mt-3">
+          <button type="button" onclick="closeShareModal()" class="px-3.5 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition">Done</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Custom Right-Click Context Menu -->
     <div id="term-context-menu" class="hidden fixed z-50 bg-slate-900/95 backdrop-blur-sm border border-slate-800 rounded-xl shadow-2xl shadow-black/60 py-1 min-w-[170px] text-xs select-none">
       <button onclick="copySelectionToClipboard(true); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
@@ -976,14 +1186,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </span>
         <span class="text-[10px] text-slate-500 font-mono">Alt+B</span>
       </button>
-      <button onclick="createNewTab(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+      <button id="ctx-new-tab" onclick="createNewTab(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
         <span class="flex items-center gap-2">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           <span>New Tab</span>
         </span>
         <span class="text-[10px] text-slate-500 font-mono">Alt+T</span>
       </button>
-      <button onclick="closeCurrentTab(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+      <button id="ctx-close-tab" onclick="closeCurrentTab(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
         <span class="flex items-center gap-2">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           <span>Close Tab</span>
@@ -1079,6 +1289,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     async function checkAuth() {
+      if (window.IS_READONLY) {
+        showTerminal();
+        return;
+      }
       try {
         const res = await fetch('/api/status');
         const data = await res.json();
@@ -1091,6 +1305,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     function showTerminal() {
       document.getElementById('login-view').classList.add('hidden');
       document.getElementById('terminal-view').classList.remove('hidden');
+      if (window.IS_READONLY) {
+        applyReadonlyUI();
+      }
       initTerminal();
     }
 
@@ -1379,6 +1596,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     window.addEventListener('dragenter', (e) => {
+      if (window.IS_READONLY) return;
       e.preventDefault();
       dragCounter++;
       if (dragCounter === 1) {
@@ -1393,6 +1611,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     });
 
     window.addEventListener('dragleave', (e) => {
+      if (window.IS_READONLY) return;
       e.preventDefault();
       dragCounter--;
       if (dragCounter <= 0) {
@@ -1403,6 +1622,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     });
 
     window.addEventListener('drop', (e) => {
+      if (window.IS_READONLY) return;
       e.preventDefault();
       dragCounter = 0;
       const overlay = document.getElementById('drop-overlay');
@@ -1558,6 +1778,158 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         a.click();
         document.body.removeChild(a);
       });
+    }
+
+    // ==================== READ-ONLY LIVE SESSION SHARING ====================
+    function openShareModal() {
+      const modal = document.getElementById('share-modal');
+      if (modal) {
+        modal.classList.remove('hidden');
+        loadShareLinks();
+      }
+    }
+
+    function closeShareModal() {
+      const modal = document.getElementById('share-modal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    async function loadShareLinks() {
+      const container = document.getElementById('active-shares-container');
+      if (!container) return;
+      try {
+        const res = await fetch('/api/share/list');
+        if (!res.ok) {
+          container.innerHTML = '<div class="text-slate-500 text-center py-2">Failed to load share links</div>';
+          return;
+        }
+        const data = await res.json();
+        const shares = data.shares || [];
+        if (shares.length === 0) {
+          container.innerHTML = '<div class="text-slate-500 text-center py-3">No active share links. Generate one above!</div>';
+          return;
+        }
+
+        const now = Date.now() / 1000;
+        container.innerHTML = shares.map(s => {
+          let expText = 'Until session ends';
+          if (s.expires_at) {
+            const rem = Math.max(0, Math.round(s.expires_at - now));
+            if (rem <= 0) expText = 'Expired';
+            else if (rem < 3600) expText = `${Math.round(rem / 60)}m remaining`;
+            else expText = `${(rem / 3600).toFixed(1)}h remaining`;
+          }
+          const fullUrl = `${window.location.origin}/?share=${encodeURIComponent(s.token)}`;
+          return `
+            <div class="flex items-center justify-between p-2.5 rounded-lg bg-slate-950/60 border border-slate-800 gap-2 font-mono">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                  <span class="font-semibold text-slate-200 truncate">${s.label || 'Shared Session'}</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">${expText}</span>
+                  ${s.active_viewers > 0 ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-sans">${s.active_viewers} live viewer(s)</span>` : ''}
+                </div>
+                <div class="text-[11px] text-slate-500 truncate mt-0.5 select-all">${fullUrl}</div>
+              </div>
+              <div class="flex items-center gap-1.5 shrink-0">
+                <button type="button" onclick="navigator.clipboard.writeText('${fullUrl}'); showToast('Share link copied!');" class="p-1 px-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] transition">Copy</button>
+                <button type="button" onclick="handleRevokeShare('${s.token}')" class="p-1 px-2 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 text-[11px] transition">Revoke</button>
+              </div>
+            </div>
+          `;
+        }).join('');
+      } catch(e) {
+        container.innerHTML = '<div class="text-slate-500 text-center py-2">Error loading share links</div>';
+      }
+    }
+
+    async function handleCreateShare(e) {
+      e.preventDefault();
+      const labelInput = document.getElementById('share-label-input');
+      const expirySelect = document.getElementById('share-expiry-select');
+      const label = labelInput ? labelInput.value.trim() : '';
+      const exp = expirySelect ? parseInt(expirySelect.value, 10) : 3600;
+
+      const btn = document.getElementById('create-share-btn');
+      if (btn) btn.disabled = true;
+
+      try {
+        const res = await fetch('/api/share/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label, expires_in: exp })
+        });
+        const data = await res.json();
+        if (data.success && data.share_token) {
+          const fullUrl = `${window.location.origin}/?share=${encodeURIComponent(data.share_token)}`;
+          const resBox = document.getElementById('new-share-result');
+          const urlInput = document.getElementById('new-share-url');
+          if (resBox && urlInput) {
+            urlInput.value = fullUrl;
+            resBox.classList.remove('hidden');
+          }
+          if (labelInput) labelInput.value = '';
+          loadShareLinks();
+          showToast('Share link generated!');
+          navigator.clipboard.writeText(fullUrl).catch(() => {});
+        } else {
+          showToast(`Failed: ${data.error || 'Could not create link'}`);
+        }
+      } catch(err) {
+        showToast('Network error creating share link');
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    function copyShareUrl() {
+      const urlInput = document.getElementById('new-share-url');
+      if (!urlInput) return;
+      navigator.clipboard.writeText(urlInput.value).then(() => {
+        showToast('Share link copied to clipboard!');
+      }).catch(() => {
+        urlInput.select();
+        document.execCommand('copy');
+        showToast('Share link copied!');
+      });
+    }
+
+    async function handleRevokeShare(token) {
+      if (!confirm('Revoke this share link? Connected viewers will be disconnected immediately.')) return;
+      try {
+        const res = await fetch('/api/share/revoke', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ share_token: token })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('Share link revoked');
+          loadShareLinks();
+        } else {
+          showToast(`Error: ${data.error || 'Failed to revoke'}`);
+        }
+      } catch(e) {
+        showToast('Network error revoking share link');
+      }
+    }
+
+    function applyReadonlyUI() {
+      const roBadge = document.getElementById('readonly-badge');
+      if (roBadge) roBadge.classList.remove('hidden');
+
+      const toHide = [
+        'share-btn', 'upload-btn', 'download-btn', 'logout-btn',
+        'settings-btn', 'buffer-toggle-btn', 'new-tab-btn'
+      ];
+      toHide.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+      });
+
+      const ctxNewTab = document.getElementById('ctx-new-tab');
+      const ctxCloseTab = document.getElementById('ctx-close-tab');
+      if (ctxNewTab) ctxNewTab.classList.add('hidden');
+      if (ctxCloseTab) ctxCloseTab.classList.add('hidden');
     }
 
     let predictiveEchoEnabled = true;
@@ -1892,9 +2264,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       mountEl.className = 'w-full h-full';
       container.appendChild(mountEl);
 
+      const isReadOnly = !!window.IS_READONLY;
       const t = new Terminal({
-        cursorBlink: true,
-        cursorStyle: 'bar',
+        cursorBlink: !isReadOnly,
+        disableStdin: isReadOnly,
+        cursorStyle: isReadOnly ? 'underline' : 'bar',
         fontSize: 14,
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
         theme: {
@@ -2218,59 +2592,61 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       });
 
       // Terminal Data handler (with predictive typing)
-      t.onData(data => {
-        const isAlternateScreen = t.buffer && t.buffer.active && t.buffer.active.type === 'alternate';
-        if (!predictiveEchoEnabled || isAlternateScreen) {
-          tab.pendingSubmissions = [];
-          tab.streamBuffer = '';
-          if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
-            tab.socket.send(JSON.stringify({ type: 'input', data }));
+      if (!window.IS_READONLY) {
+        t.onData(data => {
+          const isAlternateScreen = t.buffer && t.buffer.active && t.buffer.active.type === 'alternate';
+          if (!predictiveEchoEnabled || isAlternateScreen) {
+            tab.pendingSubmissions = [];
+            tab.streamBuffer = '';
+            if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
+              tab.socket.send(JSON.stringify({ type: 'input', data }));
+            }
+            return;
           }
-          return;
-        }
 
-        if (data === '\r') {
-          t.write('\r\n');
-          const cmd = tab.localLine;
-          tab.localLine = '';
-          tab.pendingSubmissions.push(cmd);
-          if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
-            tab.socket.send(JSON.stringify({ type: 'input', data: cmd + '\r' }));
-          }
-        } else if (data === '\x7f' || data === '\b') {
-          if (tab.localLine.length > 0) {
-            tab.localLine = tab.localLine.slice(0, -1);
-            t.write('\b \b');
-          }
-        } else if (data === '\x03') {
-          tab.localLine = '';
-          tab.pendingSubmissions = [];
-          tab.streamBuffer = '';
-          t.write('^C\r\n');
-          sendInterrupt();
-        } else if (data === '\x15') {
-          if (tab.localLine.length > 0) {
-            t.write('\b \b'.repeat(tab.localLine.length));
-            tab.localLine = '';
-          }
-        } else if (data.length === 1 && data.charCodeAt(0) >= 32 && data.charCodeAt(0) <= 126) {
-          tab.localLine += data;
-          t.write(data);
-        } else {
-          if (tab.localLine.length > 0) {
+          if (data === '\r') {
+            t.write('\r\n');
             const cmd = tab.localLine;
             tab.localLine = '';
             tab.pendingSubmissions.push(cmd);
             if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
-              tab.socket.send(JSON.stringify({ type: 'input', data: cmd + data }));
+              tab.socket.send(JSON.stringify({ type: 'input', data: cmd + '\r' }));
             }
+          } else if (data === '\x7f' || data === '\b') {
+            if (tab.localLine.length > 0) {
+              tab.localLine = tab.localLine.slice(0, -1);
+              t.write('\b \b');
+            }
+          } else if (data === '\x03') {
+            tab.localLine = '';
+            tab.pendingSubmissions = [];
+            tab.streamBuffer = '';
+            t.write('^C\r\n');
+            sendInterrupt();
+          } else if (data === '\x15') {
+            if (tab.localLine.length > 0) {
+              t.write('\b \b'.repeat(tab.localLine.length));
+              tab.localLine = '';
+            }
+          } else if (data.length === 1 && data.charCodeAt(0) >= 32 && data.charCodeAt(0) <= 126) {
+            tab.localLine += data;
+            t.write(data);
           } else {
-            if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
-              tab.socket.send(JSON.stringify({ type: 'input', data }));
+            if (tab.localLine.length > 0) {
+              const cmd = tab.localLine;
+              tab.localLine = '';
+              tab.pendingSubmissions.push(cmd);
+              if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
+                tab.socket.send(JSON.stringify({ type: 'input', data: cmd + data }));
+              }
+            } else {
+              if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
+                tab.socket.send(JSON.stringify({ type: 'input', data }));
+              }
             }
           }
-        }
-      });
+        });
+      }
     }
 
     function connectTabWebSocket(tab) {
@@ -2278,7 +2654,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (tab.pingTimer) clearInterval(tab.pingTimer);
 
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${proto}//${window.location.host}/ws?token=${encodeURIComponent(sessionToken)}&tab=${encodeURIComponent(tab.id)}`;
+      const wsUrl = window.IS_READONLY
+        ? `${proto}//${window.location.host}/ws?share=${encodeURIComponent(window.SHARE_TOKEN || '')}&tab=${encodeURIComponent(tab.id)}`
+        : `${proto}//${window.location.host}/ws?token=${encodeURIComponent(sessionToken)}&tab=${encodeURIComponent(tab.id)}`;
 
       tab.socket = new WebSocket(wsUrl);
       tab.socket.binaryType = 'arraybuffer';
@@ -2295,7 +2673,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           }
           if (tab.fitAddon) tab.fitAddon.fit();
           if (tab.term) tab.term.focus();
-          sendResize(tab);
+          if (!window.IS_READONLY) {
+            sendResize(tab);
+          }
         }
 
         tab.pingTimer = setInterval(() => {
@@ -2306,7 +2686,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         if (tab.id === activeTabId) {
           setTimeout(measureLatency, 1000);
-          setTimeout(updateCwd, 500);
+          if (!window.IS_READONLY) {
+            setTimeout(updateCwd, 500);
+          }
         }
       };
 
@@ -2407,6 +2789,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       });
 
       document.addEventListener('paste', (e) => {
+        if (window.IS_READONLY) return;
         const active = document.activeElement;
         if (active && (active.tagName === 'INPUT' || (active.tagName === 'TEXTAREA' && !active.classList.contains('xterm-helper-textarea')))) {
           return;
@@ -2435,6 +2818,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         // Alt+T or Ctrl+Shift+T: New Tab
         if ((e.altKey && (e.key === 't' || e.key === 'T')) ||
             (e.ctrlKey && e.shiftKey && (e.key === 't' || e.key === 'T'))) {
+          if (window.IS_READONLY) return;
           e.preventDefault();
           createNewTab();
           return;
@@ -2442,6 +2826,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         // Alt+W: Close current tab
         if (e.altKey && (e.key === 'w' || e.key === 'W')) {
+          if (window.IS_READONLY) return;
           e.preventDefault();
           closeCurrentTab();
           return;
@@ -2583,6 +2968,17 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.plain_password = None
+        self.salt_hex = None
+        self.hash_hex = None
+        self.target_shell = '/bin/bash'
+        self.rate_limiter = RateLimiter()
+        self.sessions = SessionManager()
+        self.terminals = TerminalSessionManager()
+        self.shares = ShareTokenManager()
+
 
 class FireSSHServerHandler(BaseHTTPRequestHandler):
     def get_client_ip(self) -> str:
@@ -2671,10 +3067,22 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             query = urllib.parse.parse_qs(parsed.query)
             token = query.get('token', [None])[0] or self.get_cookie_token()
             tab_id = query.get('tab', [None])[0]
+            share_token = query.get('share', [None])[0]
 
-            if not self.server.sessions.is_valid(token, ip):
-                self.send_error(401, "Unauthorized")
-                return
+            is_readonly = False
+            target_token = token
+
+            if share_token:
+                share_info = self.server.shares.validate(share_token)
+                if not share_info:
+                    self.send_error(403, "Invalid or Expired Share Token")
+                    return
+                is_readonly = True
+                target_token = share_info["session_token"]
+            else:
+                if not self.server.sessions.is_valid(token, ip):
+                    self.send_error(401, "Unauthorized")
+                    return
 
             ws_key = self.headers.get('Sec-WebSocket-Key')
             if not ws_key:
@@ -2683,14 +3091,36 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
 
             self.wfile.write(ws_handshake_response(ws_key))
             self.wfile.flush()
-            self.handle_websocket(token, tab_id=tab_id)
+            if is_readonly:
+                self.handle_readonly_websocket(target_token, share_token=share_token, tab_id=tab_id)
+            else:
+                self.handle_websocket(target_token, tab_id=tab_id)
             return
 
         elif parsed.path == '/api/status':
+            query = urllib.parse.parse_qs(parsed.query)
+            share_token = query.get('share', [None])[0]
+            if share_token:
+                share_info = self.server.shares.validate(share_token)
+                if share_info:
+                    self.send_json({"authenticated": True, "readonly": True, "label": share_info.get("label", "Shared Session")})
+                    return
+                else:
+                    self.send_json({"authenticated": False, "readonly": True, "error": "Expired or invalid share link"}, status=403)
+                    return
             auth = self.is_authenticated()
             locked, rem = self.server.rate_limiter.is_locked(ip)
             data = {"authenticated": auth, "locked": locked, "lockout_remaining": rem}
             self.send_json(data)
+            return
+
+        elif parsed.path == '/api/share/list':
+            if not self.is_authenticated():
+                self.send_error(401, "Unauthorized")
+                return
+            token = self.get_auth_token()
+            shares = self.server.shares.list_shares(token)
+            self.send_json({"success": True, "shares": shares})
             return
 
         elif parsed.path == '/api/cwd':
@@ -2759,11 +3189,26 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             return
 
         elif parsed.path == '/' or parsed.path == '/index.html':
+            query = urllib.parse.parse_qs(parsed.query)
+            share_token = query.get('share', [None])[0]
+            rendered_html = HTML_TEMPLATE
+            if share_token:
+                share_info = self.server.shares.validate(share_token)
+                if not share_info:
+                    self.send_response(403)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.end_headers()
+                    expired_html = """<!DOCTYPE html><html><head><title>Fire PM - Share Expired</title><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-slate-950 text-slate-100 flex items-center justify-center min-h-screen"><div class="bg-slate-900 border border-red-500/40 rounded-2xl p-8 max-w-md text-center shadow-2xl"><div class="text-4xl mb-4">🔒</div><h1 class="text-xl font-bold text-red-400 mb-2">Share Link Expired or Invalid</h1><p class="text-sm text-slate-400 mb-6">This read-only session sharing link has expired or was revoked by the host.</p><a href="/" class="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-sm font-semibold transition">Back to Terminal</a></div></body></html>"""
+                    self.wfile.write(expired_html.encode('utf-8'))
+                    return
+                inject_script = f"<script>window.IS_READONLY = true; window.SHARE_TOKEN = {json.dumps(share_token)}; window.SHARE_LABEL = {json.dumps(share_info.get('label', 'Shared Session'))};</script>"
+                rendered_html = rendered_html.replace('</head>', f'{inject_script}\n</head>', 1)
+
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.end_headers()
-            self.wfile.write(HTML_TEMPLATE.encode('utf-8'))
+            self.wfile.write(rendered_html.encode('utf-8'))
             return
 
         else:
@@ -2930,9 +3375,60 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             self.send_json({"success": True})
             return
 
+        elif parsed.path == '/api/share/create':
+            if not self.is_authenticated():
+                self.send_error(401, "Unauthorized")
+                return
+            token = self.get_auth_token()
+            content_len = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_len).decode('utf-8', errors='ignore') if content_len > 0 else '{}'
+            data = {}
+            try:
+                data = json.loads(body)
+            except Exception:
+                pass
+            raw_exp = data.get('expires_in', 3600)
+            try:
+                expires_in = float(raw_exp) if raw_exp is not None and float(raw_exp) > 0 else None
+            except Exception:
+                expires_in = 3600.0
+            label = str(data.get('label', '')).strip() or "Shared Session"
+            share_token = self.server.shares.create_share(token, expires_in_seconds=expires_in, label=label)
+            self.send_json({
+                "success": True,
+                "share_token": share_token,
+                "share_url": f"/?share={share_token}"
+            })
+            return
+
+        elif parsed.path == '/api/share/revoke':
+            if not self.is_authenticated():
+                self.send_error(401, "Unauthorized")
+                return
+            token = self.get_auth_token()
+            content_len = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_len).decode('utf-8', errors='ignore') if content_len > 0 else '{}'
+            data = {}
+            try:
+                data = json.loads(body)
+            except Exception:
+                pass
+            share_token = data.get('share_token')
+            if not share_token:
+                self.send_json({"success": False, "error": "Missing share_token"}, status=400)
+                return
+            info = self.server.shares.validate(share_token)
+            if info and info["session_token"] == token:
+                self.server.shares.revoke(share_token)
+                self.send_json({"success": True})
+            else:
+                self.send_json({"success": False, "error": "Invalid share token or unauthorized"}, status=403)
+            return
+
         elif parsed.path == '/api/logout':
-            token = self.get_cookie_token()
+            token = self.get_auth_token() or self.get_cookie_token()
             if token:
+                self.server.shares.revoke_by_session(token)
                 self.server.sessions.revoke(token)
                 self.server.terminals.remove(token)
             self.send_response(200)
@@ -3022,6 +3518,72 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
         finally:
             session.detach_socket(sock)
 
+    def handle_readonly_websocket(self, token: str, share_token: str, tab_id: str = None):
+        """Bridges a read-only viewer WebSocket with a TerminalSession."""
+        sock = self.connection
+        sock.setblocking(True)
+
+        session = self.server.terminals.get(token, tab_id)
+        if not session:
+            session = self.server.terminals.get(token, None)
+        if not session:
+            try:
+                sock.close()
+            except Exception:
+                pass
+            return
+
+        self.server.shares.register_socket(share_token, sock)
+        session.attach_readonly_socket(sock)
+
+        last_ping_sent = time.time()
+
+        try:
+            while session.is_alive() and self.server.shares.validate(share_token):
+                rlist, _, _ = select.select([sock], [], [], 5.0)
+
+                now = time.time()
+                if now - last_ping_sent > 20:
+                    try:
+                        sock.sendall(ws_make_frame(b"", opcode=9))
+                        last_ping_sent = now
+                    except Exception:
+                        break
+
+                if not rlist:
+                    continue
+
+                opcode, payload = ws_read_frame(sock)
+                if opcode is None or opcode == 8:
+                    break
+                elif opcode == 9:
+                    sock.sendall(ws_make_frame(payload, opcode=10))
+                elif opcode == 10:
+                    pass
+                elif opcode == 1:
+                    try:
+                        msg = json.loads(payload.decode('utf-8', errors='ignore'))
+                        mtype = msg.get('type')
+                        if mtype == 'ping':
+                            sock.sendall(ws_make_frame(json.dumps({"type": "pong"}), opcode=1))
+                        elif mtype == 'latency_ping':
+                            ts = msg.get('timestamp', 0)
+                            sock.sendall(ws_make_frame(json.dumps({"type": "latency_pong", "timestamp": ts}), opcode=1))
+                        # Note: resize, input, signals are strictly ignored for read-only viewers
+                    except Exception:
+                        pass
+                elif opcode == 2:
+                    # STRICTLY IGNORED: Binary terminal input rejected for read-only viewers
+                    pass
+
+        finally:
+            self.server.shares.unregister_socket(share_token, sock)
+            session.detach_readonly_socket(sock)
+            try:
+                sock.close()
+            except Exception:
+                pass
+
     def log_message(self, format, *args):
         pass
 
@@ -3038,6 +3600,7 @@ def run_server(port: int, plain_password: str = None, salt_hex: str = None, hash
     server.rate_limiter = RateLimiter()
     server.sessions = SessionManager()
     server.terminals = TerminalSessionManager()
+    server.shares = ShareTokenManager()
 
     print(json.dumps({
         "status": "ready",
