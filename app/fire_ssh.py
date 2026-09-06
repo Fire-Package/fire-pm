@@ -585,6 +585,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <button onclick="sendEOF()" title="EOF / Exit (Ctrl+D)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono">^D</button>
         <button onclick="clearTerm()" title="Clear Terminal Output" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">Clear</button>
         <button onclick="termFit()" title="Fit Terminal Window" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fit</button>
+        <button onclick="pasteFromClipboard()" title="Paste from Clipboard (Ctrl+V)" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400">
+            <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+          </svg>
+          <span>Paste</span>
+        </button>
         <div class="relative">
           <button id="network-btn" onclick="toggleLatencyPanel()" title="Network Latency" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition flex items-center gap-1.5">
             <svg id="wifi-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -751,6 +758,40 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
     }
 
+    async function pasteFromClipboard(promptFallback = true) {
+      try {
+        if (navigator.clipboard && navigator.clipboard.readText) {
+          const text = await navigator.clipboard.readText();
+          if (text) {
+            insertPastedText(text);
+          }
+          if (term) term.focus();
+          return;
+        }
+      } catch (err) {
+        console.warn('Clipboard readText failed or permission denied:', err);
+      }
+
+      if (promptFallback) {
+        try {
+          const manualText = prompt('Paste text here (press Ctrl+V and click OK):');
+          if (manualText) {
+            insertPastedText(manualText);
+          }
+        } catch (e) {}
+      }
+      if (term) term.focus();
+    }
+
+    function insertPastedText(text) {
+      if (!text) return;
+      if (term && typeof term.paste === 'function') {
+        term.paste(text);
+      } else if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'input', data: text }));
+      }
+    }
+
     function initTerminal() {
       if (term) return;
 
@@ -803,7 +844,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
       });
 
-      // Intercept special keyboard events reliably (Ctrl+C, Ctrl+Z, Ctrl+D)
+      document.addEventListener('paste', (e) => {
+        const active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || (active.tagName === 'TEXTAREA' && !active.classList.contains('xterm-helper-textarea')))) {
+          return;
+        }
+        if (e.defaultPrevented) return;
+        const text = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
+        if (text) {
+          e.preventDefault();
+          insertPastedText(text);
+        }
+      });
+
+      // Intercept special keyboard events reliably (Ctrl+C, Ctrl+V, Ctrl+Z, Ctrl+D)
       term.attachCustomKeyEventHandler((e) => {
         if (e.type === 'keydown') {
           // Ctrl+C (or Ctrl+Shift+C)
@@ -816,6 +870,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               return false;
             }
             sendInterrupt();
+            return false;
+          }
+          // Ctrl+V / Cmd+V (or Shift+Insert) - Paste
+          if (((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) ||
+              (e.shiftKey && (e.key === 'Insert' || e.key === 'Paste'))) {
+            pasteFromClipboard();
             return false;
           }
           // Ctrl+Z
