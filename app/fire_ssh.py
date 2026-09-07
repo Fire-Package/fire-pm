@@ -855,13 +855,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           </svg>
           <span>Paste</span>
         </button>
-        <button id="predictive-btn" onclick="togglePredictiveMode()" title="0ms Direct In-Terminal Typing (Local Echo for bash / antigravity) [Alt+P]" class="px-2 py-1 text-xs bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-lg transition font-mono flex items-center gap-1">
-          <span>⚡</span>
-          <span id="predictive-btn-text">0ms Direct</span>
-        </button>
-        <button id="buffer-toggle-btn" onclick="toggleBufferMode()" title="Toggle Command Bar [Alt+B]" class="hidden md:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-transparent rounded-lg transition font-mono items-center gap-1">
-          <span>Command Bar</span>
-        </button>
         <div class="relative">
           <button id="notify-btn" onclick="toggleNotificationPanel()" title="Task Alerts & Notifications (Alerts when long commands or Antigravity finish)" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1.5">
             <span id="notify-icon">🔔</span>
@@ -1001,28 +994,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       </div>
     </div>
 
-    <!-- Local Command Buffer Bar (Low-Latency Line Mode for High Ping Connections) -->
-    <div id="local-buffer-bar" class="hidden bg-slate-900 border-t border-slate-800 p-2 sm:px-3 sm:py-2 flex items-center gap-2 select-none">
-      <div class="flex items-center gap-1 text-amber-400 text-xs font-mono shrink-0 select-none">
-        <span class="animate-pulse">⚡</span>
-        <span class="hidden md:inline text-[11px] text-slate-400">Buffer:</span>
-      </div>
-      <div class="flex-1 relative flex items-center">
-        <input id="local-buffer-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-               placeholder="Type command locally with 0ms lag (Press Enter to send, ↑/↓ for history)..."
-               class="w-full bg-slate-950 text-emerald-400 placeholder:text-slate-600 font-mono text-xs sm:text-sm px-3 py-1.5 rounded-lg border border-slate-700/70 focus:outline-none focus:border-amber-400/80 focus:ring-1 focus:ring-amber-400/50 transition">
-        <span id="buffer-history-tip" class="hidden lg:inline absolute right-2.5 text-[10px] text-slate-600 font-mono pointer-events-none">Enter ↵</span>
-      </div>
-      <button onclick="submitLocalBuffer()" title="Send Command to Remote Server (Enter)" class="px-2.5 py-1.5 text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg transition font-mono font-medium flex items-center gap-1 shrink-0">
-        <span>Send</span>
-        <span class="text-[10px] opacity-70">↵</span>
-      </button>
-      <button onclick="toggleBufferMode()" title="Hide Local Buffer (Alt+B)" class="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition shrink-0">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-        </svg>
-      </button>
-    </div>
 
     <!-- Toast Notification -->
     <div id="term-toast" class="pointer-events-none fixed bottom-6 right-6 z-50 transition-all duration-200 opacity-0 translate-y-2 bg-slate-800/95 border border-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-lg shadow-xl font-mono flex items-center gap-2">
@@ -1180,13 +1151,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </span>
         <span class="text-[10px] text-slate-500 font-mono">Alt+W / ^W</span>
       </button>
-      <button onclick="toggleBufferMode(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
-        <span class="flex items-center gap-2">
-          <span class="text-amber-400">⚡</span>
-          <span>Buffer Mode</span>
-        </span>
-        <span class="text-[10px] text-slate-500 font-mono">Alt+B</span>
-      </button>
       <button id="ctx-new-tab" onclick="createNewTab(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
         <span class="flex items-center gap-2">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -1313,39 +1277,39 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function sendInterrupt() {
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: 'signal', signal: 'SIGINT' }));
-        socket.send(JSON.stringify({ type: 'input', data: '\x03' }));
+      const cur = getActiveTab();
+      const s = cur && cur.socket ? cur.socket : socket;
+      if (s && s.readyState === WebSocket.OPEN) {
+        s.send(JSON.stringify({ type: 'signal', signal: 'SIGINT' }));
+        s.send(JSON.stringify({ type: 'input', data: '\x03' }));
       }
       if (term) term.focus();
     }
 
     function sendSuspend() {
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: 'signal', signal: 'SIGTSTP' }));
-        socket.send(JSON.stringify({ type: 'input', data: '\x1a' }));
+      const cur = getActiveTab();
+      const s = cur && cur.socket ? cur.socket : socket;
+      if (s && s.readyState === WebSocket.OPEN) {
+        s.send(JSON.stringify({ type: 'signal', signal: 'SIGTSTP' }));
+        s.send(JSON.stringify({ type: 'input', data: '\x1a' }));
       }
       if (term) term.focus();
     }
 
     function sendEOF() {
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: 'input', data: '\x04' }));
+      const cur = getActiveTab();
+      const s = cur && cur.socket ? cur.socket : socket;
+      if (s && s.readyState === WebSocket.OPEN) {
+        s.send(JSON.stringify({ type: 'input', data: '\x04' }));
       }
       if (term) term.focus();
     }
 
     function sendCtrlW() {
-      if (localLine && localLine.length > 0) {
-        const trimmed = localLine.replace(/\s+$/, '');
-        const lastSpace = trimmed.lastIndexOf(' ');
-        const newLen = lastSpace >= 0 ? lastSpace + 1 : 0;
-        const toErase = localLine.length - newLen;
-        localLine = localLine.slice(0, newLen);
-        if (term && toErase > 0) term.write('\b \b'.repeat(toErase));
-      }
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: 'input', data: '\x17' }));
+      const cur = getActiveTab();
+      const s = cur && cur.socket ? cur.socket : socket;
+      if (s && s.readyState === WebSocket.OPEN) {
+        s.send(JSON.stringify({ type: 'input', data: '\x17' }));
       }
       if (term) term.focus();
     }
@@ -1920,7 +1884,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       const toHide = [
         'share-btn', 'upload-btn', 'download-btn', 'logout-btn',
-        'settings-btn', 'buffer-toggle-btn', 'new-tab-btn'
+        'settings-btn', 'new-tab-btn'
       ];
       toHide.forEach(id => {
         const el = document.getElementById(id);
@@ -1933,198 +1897,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (ctxCloseTab) ctxCloseTab.classList.add('hidden');
     }
 
-    let predictiveEchoEnabled = true;
-    let localLine = '';
-    let pendingSubmissions = [];
-    let streamBuffer = '';
-    let submissionTimeout = null;
-
-    function resetSubmissionTimeout() {
-      if (submissionTimeout) clearTimeout(submissionTimeout);
-      submissionTimeout = setTimeout(() => {
-        pendingSubmissions = [];
-        streamBuffer = '';
-      }, 5000);
-    }
-
-    function togglePredictiveMode(force) {
-      predictiveEchoEnabled = force !== undefined ? force : !predictiveEchoEnabled;
-      const btn = document.getElementById('predictive-btn');
-      const text = document.getElementById('predictive-btn-text');
-      if (predictiveEchoEnabled) {
-        if (btn) {
-          btn.className = 'px-2 py-1 text-xs bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-lg transition font-mono flex items-center gap-1';
-        }
-        if (text) text.textContent = '0ms Direct';
-        showToast('0ms In-Terminal Typing: ON (Direct typing in bash/antigravity)');
-      } else {
-        if (btn) {
-          btn.className = 'px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-transparent rounded-lg transition font-mono flex items-center gap-1';
-        }
-        if (text) text.textContent = '0ms Off';
-        localLine = '';
-        pendingSubmissions = [];
-        streamBuffer = '';
-        showToast('0ms In-Terminal Typing: OFF (Raw server echo)');
-      }
-      if (term) term.focus();
-    }
-
     function renderServerOutput(raw) {
-      const isAlt = term && term.buffer && term.buffer.active && term.buffer.active.type === 'alternate';
-      if (isAlt || !predictiveEchoEnabled) {
-        pendingSubmissions = [];
-        streamBuffer = '';
+      const cur = getActiveTab();
+      if (cur) {
+        renderTabOutput(cur, raw);
+      } else if (term) {
         term.write(raw);
-        return;
       }
-
-      if (pendingSubmissions.length === 0) {
-        term.write(raw);
-        return;
-      }
-
-      const chunk = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
-      streamBuffer += chunk;
-
-      while (pendingSubmissions.length > 0) {
-        const expectedCmd = pendingSubmissions[0];
-        if (!expectedCmd) {
-          if (streamBuffer.startsWith('\r\n')) {
-            streamBuffer = streamBuffer.slice(2);
-            pendingSubmissions.shift();
-            continue;
-          } else if (streamBuffer.startsWith('\n') || streamBuffer.startsWith('\r')) {
-            streamBuffer = streamBuffer.slice(1);
-            pendingSubmissions.shift();
-            continue;
-          } else if (streamBuffer.length >= 2) {
-            pendingSubmissions.shift();
-            continue;
-          }
-          break;
-        }
-
-        const escaped = expectedCmd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const fullRegex = new RegExp(`^(\\x1b\\[[0-9;?]*[a-zA-Z]|\\r|\\n)*${escaped}(\\r\\n|\\r|\\n)`);
-        const fullMatch = streamBuffer.match(fullRegex);
-        if (fullMatch) {
-          streamBuffer = streamBuffer.slice(fullMatch[0].length);
-          pendingSubmissions.shift();
-          continue;
-        }
-
-        const partialRegex = new RegExp(`^(\\x1b\\[[0-9;?]*[a-zA-Z]|\\r|\\n)*${escaped}$`);
-        if (streamBuffer.match(partialRegex)) {
-          return;
-        }
-
-        if (streamBuffer.length > expectedCmd.length + 32) {
-          pendingSubmissions.shift();
-          continue;
-        }
-
-        break;
-      }
-
-      if (streamBuffer.length > 0) {
-        const out = streamBuffer;
-        streamBuffer = '';
-        term.write(out);
-      }
-    }
-
-    let bufferHistory = [];
-    let bufferHistoryIdx = -1;
-    let bufferAutoPrompted = false;
-
-    function toggleBufferMode(force) {
-      const bar = document.getElementById('local-buffer-bar');
-      const btn = document.getElementById('buffer-toggle-btn');
-      const input = document.getElementById('local-buffer-input');
-      if (!bar) return;
-
-      const shouldShow = force !== undefined ? force : bar.classList.contains('hidden');
-      if (shouldShow) {
-        bar.classList.remove('hidden');
-        if (btn) {
-          btn.classList.add('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
-          btn.classList.remove('animate-pulse');
-        }
-        if (input) {
-          input.focus();
-          input.select();
-        }
-        showToast('Local Buffer active: 0ms typing lag');
-      } else {
-        bar.classList.add('hidden');
-        if (btn) btn.classList.remove('bg-amber-500/20', 'text-amber-300', 'border-amber-500/40');
-        if (term) term.focus();
-      }
-      termFit();
-    }
-
-    function submitLocalBuffer() {
-      const input = document.getElementById('local-buffer-input');
-      if (!input) return;
-      const cmd = input.value;
-      if (cmd !== '') {
-        if (bufferHistory.length === 0 || bufferHistory[bufferHistory.length - 1] !== cmd) {
-          bufferHistory.push(cmd);
-          if (bufferHistory.length > 100) bufferHistory.shift();
-        }
-        bufferHistoryIdx = bufferHistory.length;
-
-        if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: 'input', data: cmd + '\r' }));
-        }
-        input.value = '';
-      } else {
-        if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: 'input', data: '\r' }));
-        }
-      }
-      input.focus();
-    }
-
-    function initLocalBufferListeners() {
-      const input = document.getElementById('local-buffer-input');
-      if (!input) return;
-
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          submitLocalBuffer();
-        } else if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          if (bufferHistory.length > 0) {
-            if (bufferHistoryIdx > 0) {
-              bufferHistoryIdx--;
-            }
-            input.value = bufferHistory[bufferHistoryIdx] || '';
-          }
-        } else if (e.key === 'ArrowDown') {
-          e.preventDefault();
-          if (bufferHistoryIdx < bufferHistory.length - 1) {
-            bufferHistoryIdx++;
-            input.value = bufferHistory[bufferHistoryIdx];
-          } else {
-            bufferHistoryIdx = bufferHistory.length;
-            input.value = '';
-          }
-        } else if (e.key === 'Escape') {
-          e.preventDefault();
-          if (term) term.focus();
-        } else if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
-          if (input.selectionStart === input.selectionEnd) {
-            input.value = '';
-            sendInterrupt();
-          }
-        } else if (e.altKey && (e.key === 'b' || e.key === 'B')) {
-          e.preventDefault();
-          toggleBufferMode(false);
-        }
-      });
     }
 
     let toastTimer = null;
@@ -2236,8 +2015,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     function insertPastedText(text) {
       if (!text) return;
-      if (term && typeof term.paste === 'function') {
-        term.paste(text);
+      const cur = getActiveTab();
+      if (cur) {
+        if (cur.socket && cur.socket.readyState === WebSocket.OPEN) {
+          cur.socket.send(JSON.stringify({ type: 'input', data: text }));
+        } else if (cur.term && typeof cur.term.paste === 'function') {
+          cur.term.paste(text);
+        }
       } else if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: 'input', data: text }));
       }
@@ -2248,7 +2032,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         createNewTab('bash');
       }
       initGlobalShortcuts();
-      initLocalBufferListeners();
     }
 
     function createNewTab(initialTitle) {
@@ -2313,9 +2096,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         mountEl: mountEl,
         reconnectTimer: null,
         pingTimer: null,
-        localLine: '',
-        pendingSubmissions: [],
-        streamBuffer: '',
         hasAlert: false,
         connected: false,
         cwd: '/root'
@@ -2505,8 +2285,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             return false;
           }
 
-          // Paste
-          if ((isCtrlOrMeta && (e.key === 'v' || e.key === 'V')) || (e.shiftKey && (e.key === 'Insert' || e.key === 'Paste'))) {
+          // Paste (handled by native document paste listener for Ctrl+V / Cmd+V; handle Shift+Insert / Paste key)
+          if (e.shiftKey && (e.key === 'Insert' || e.key === 'Paste')) {
             pasteFromClipboard(true, true);
             return false;
           }
@@ -2579,72 +2359,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             return false;
           }
 
-          // Alt+B / Alt+P
-          if (e.altKey && (e.key === 'b' || e.key === 'B')) {
-            toggleBufferMode();
-            return false;
-          }
-          if (e.altKey && (e.key === 'p' || e.key === 'P')) {
-            togglePredictiveMode();
-            return false;
-          }
         }
         return true;
       });
 
-      // Terminal Data handler (with predictive typing)
+      // Terminal Data handler
       if (!window.IS_READONLY) {
         t.onData(data => {
-          const isAlternateScreen = t.buffer && t.buffer.active && t.buffer.active.type === 'alternate';
-          if (!predictiveEchoEnabled || isAlternateScreen) {
-            tab.pendingSubmissions = [];
-            tab.streamBuffer = '';
-            if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
-              tab.socket.send(JSON.stringify({ type: 'input', data }));
-            }
-            return;
-          }
-
-          if (data === '\r') {
-            t.write('\r\n');
-            const cmd = tab.localLine;
-            tab.localLine = '';
-            tab.pendingSubmissions.push(cmd);
-            if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
-              tab.socket.send(JSON.stringify({ type: 'input', data: cmd + '\r' }));
-            }
-          } else if (data === '\x7f' || data === '\b') {
-            if (tab.localLine.length > 0) {
-              tab.localLine = tab.localLine.slice(0, -1);
-              t.write('\b \b');
-            }
-          } else if (data === '\x03') {
-            tab.localLine = '';
-            tab.pendingSubmissions = [];
-            tab.streamBuffer = '';
-            t.write('^C\r\n');
-            sendInterrupt();
-          } else if (data === '\x15') {
-            if (tab.localLine.length > 0) {
-              t.write('\b \b'.repeat(tab.localLine.length));
-              tab.localLine = '';
-            }
-          } else if (data.length === 1 && data.charCodeAt(0) >= 32 && data.charCodeAt(0) <= 126) {
-            tab.localLine += data;
-            t.write(data);
-          } else {
-            if (tab.localLine.length > 0) {
-              const cmd = tab.localLine;
-              tab.localLine = '';
-              tab.pendingSubmissions.push(cmd);
-              if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
-                tab.socket.send(JSON.stringify({ type: 'input', data: cmd + data }));
-              }
-            } else {
-              if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
-                tab.socket.send(JSON.stringify({ type: 'input', data }));
-              }
-            }
+          if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
+            tab.socket.send(JSON.stringify({ type: 'input', data }));
           }
         });
       }
@@ -2756,8 +2479,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function renderTabOutput(tab, data) {
-      if (!tab || !tab.term) return;
-      tab.term.write(data);
+      if (tab && tab.term) {
+        tab.term.write(data);
+      }
     }
 
     function sendResize(tab) {
@@ -2931,15 +2655,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       const lat = clientServerLatency >= 0 ? clientServerLatency : 999;
       wifiIcon.style.color = lat < 80 ? '#4ade80' : lat < 200 ? '#fbbf24' : '#f87171';
-
-      if (clientServerLatency >= 400 && !bufferAutoPrompted) {
-        bufferAutoPrompted = true;
-        const btn = document.getElementById('buffer-toggle-btn');
-        if (btn) {
-          btn.classList.add('border-amber-400', 'animate-pulse');
-        }
-        showToast(`High latency detected (${Math.round(clientServerLatency)}ms). Click ⚡ Buffer or press Alt+B for 0ms typing!`);
-      }
     }
 
     function latencyDotColor(ms) {

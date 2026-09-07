@@ -8,6 +8,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 
 ## [Unreleased]
 
+- `[2026-09-07]{14:07:31} Web Terminal: Remove predictive echo mode and command bar for standard, deterministic PTY stream I/O #Issue 44`
 - `[2026-09-07]{01:28:45} Documentation: Overhaul README.md with sanitized high-resolution screenshots, multi-tab terminal showcase, session sharing & alerts documentation, and Mermaid system architecture diagram`
 - `[2026-09-07]{00:28:30} Security Hardening: Add WebSocket Origin validation, restrict forwarded IP trust to loopback, verify regular files on download, cap uploads at 500MB, add dynamic Secure cookies, relocate cloudflared binary, secure tunnel directory permissions (755/644), and isolate TUI IPC #Issue 41`
 - `[2026-09-06]{23:59:00} Web Terminal: Add read-only live session sharing links with configurable expiration and instant revocation #Issue 39`

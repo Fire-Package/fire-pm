@@ -311,7 +311,6 @@ Access your server's interactive terminal directly from any web browser over an 
 * **🔗 Read-Only Live Session Sharing**: Share time-bound live terminal feeds (15m, 1h, 6h, 24h) for safe collaborative debugging or customer support without granting shell input access.
 * **🔔 Task Alerts & Audio Chimes**: Background tabs notify you via sound chimes and native desktop notifications whenever long-running commands or AI coding agent turns complete.
 * **📁 Drag-and-Drop File Transfers**: Drag files directly into the terminal window to upload them to the current working directory (`$PWD`), or download files with one click.
-* **⚡ 0ms Direct Typing Mode**: Optimistic local typing echo with server echo cancellation eliminates latency lag over high-ping connections (2000ms+ or mobile links).
 * **📶 Live Latency Telemetry**: Real-time round-trip WebSocket ping monitor displayed on the toolbar badge.
 
 ### Usage
