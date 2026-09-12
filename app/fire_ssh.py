@@ -485,8 +485,12 @@ class TerminalSession:
         while not self.closed:
             try:
                 if self.pid:
-                    pid_res, _ = os.waitpid(self.pid, os.WNOHANG)
-                    if pid_res != 0:
+                    try:
+                        pid_res, _ = os.waitpid(self.pid, os.WNOHANG)
+                        if pid_res != 0:
+                            self.closed = True
+                            break
+                    except (ChildProcessError, ProcessLookupError):
                         self.closed = True
                         break
 
@@ -612,6 +616,8 @@ class TerminalSession:
         try:
             pid_res, _ = os.waitpid(self.pid, os.WNOHANG)
             return pid_res == 0
+        except (ChildProcessError, ProcessLookupError):
+            return False
         except Exception:
             return False
 
@@ -774,7 +780,15 @@ class TerminalSessionManager:
 
     def _reaper_loop(self):
         while True:
-            time.sleep(30)
+            time.sleep(5)
+            while True:
+                try:
+                    rpid, _ = os.waitpid(-1, os.WNOHANG)
+                    if rpid <= 0:
+                        break
+                except (ChildProcessError, OSError):
+                    break
+
             now = time.time()
             with self.lock:
                 to_delete = []
@@ -3494,6 +3508,20 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
 
 
 def run_server(port: int, plain_password: str = None, salt_hex: str = None, hash_hex: str = None, shell: str = None):
+    def _sigchld_handler(signum, frame):
+        while True:
+            try:
+                rpid, _ = os.waitpid(-1, os.WNOHANG)
+                if rpid <= 0:
+                    break
+            except (ChildProcessError, OSError):
+                break
+
+    try:
+        signal.signal(signal.SIGCHLD, _sigchld_handler)
+    except Exception:
+        pass
+
     if not plain_password and not hash_hex:
         salt_hex, hash_hex = PasswordManager.load_stored_credentials()
 
