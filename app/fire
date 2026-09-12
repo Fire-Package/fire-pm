@@ -2871,6 +2871,12 @@ action_ssh() {
       ARGS=("${ARGS[@]:1}")
       action_ssh_close
       ;;
+    restart)
+      ARGS=("${ARGS[@]:1}")
+      action_ssh_close
+      sleep 1
+      action_ssh_start
+      ;;
     password|set-password)
       action_ssh_password
       ;;
@@ -2882,7 +2888,7 @@ action_ssh() {
         action_ssh_start
       else
         error "Unknown ssh command: $subcmd"
-        echo "Usage: fire ssh [start|list|close|password] [options]"
+        echo "Usage: fire ssh [start|list|close|restart|password] [options]"
         exit 1
       fi
       ;;
@@ -3395,7 +3401,7 @@ _fire_completions() {
 
   local commands="start create list ls status stop restart delete del rm info show live doctor logs log flush clean-logs limit monit migrate update upgrade startup enable-boot unstartup disable-boot save dump restore resurrect tunnel completion ssh help"
   local tunnel_subcmds="open start close stop list setup config"
-  local ssh_subcmds="start list close stop password"
+  local ssh_subcmds="start list close restart stop password"
   local start_flags="--name --env --env-file --no-startup --no-boot --interpreter --user --json"
 
   _fire_services() {
@@ -3562,7 +3568,7 @@ _fire() {
           ;;
         ssh)
           local -a ssh_subcmds
-          ssh_subcmds=('start:Start remote web terminal' 'list:List active terminal sessions' 'close:Close terminal session' 'password:Set default access password')
+          ssh_subcmds=('start:Start remote web terminal' 'list:List active terminal sessions' 'close:Close terminal session' 'restart:Restart terminal session' 'password:Set default access password')
           _describe -t ssh_subcmds 'ssh command' ssh_subcmds
           ;;
         completion)
@@ -3709,7 +3715,7 @@ show_help() {
   echo "  tunnel list         List active tunnels"
   echo "  tunnel close <port> Close a tunnel"
   echo "  tunnel setup        Configure custom domain tunnels"
-  echo "  ssh [start|list|close|password] Remote web terminal via secure tunnel (password protected)"
+  echo "  ssh [start|list|close|restart|password] Remote web terminal via secure tunnel (password protected)"
   echo ""
   echo "Examples:"
   echo "  fire start server.py --name api"

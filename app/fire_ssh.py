@@ -485,8 +485,12 @@ class TerminalSession:
         while not self.closed:
             try:
                 if self.pid:
-                    pid_res, _ = os.waitpid(self.pid, os.WNOHANG)
-                    if pid_res != 0:
+                    try:
+                        pid_res, _ = os.waitpid(self.pid, os.WNOHANG)
+                        if pid_res != 0:
+                            self.closed = True
+                            break
+                    except (ChildProcessError, ProcessLookupError):
                         self.closed = True
                         break
 
@@ -612,6 +616,8 @@ class TerminalSession:
         try:
             pid_res, _ = os.waitpid(self.pid, os.WNOHANG)
             return pid_res == 0
+        except (ChildProcessError, ProcessLookupError):
+            return False
         except Exception:
             return False
 
@@ -726,9 +732,63 @@ class TerminalSessionManager:
                     if sess:
                         sess.close()
 
+    def list_tabs(self, token: str) -> list:
+        if not token:
+            return []
+        with self.lock:
+            results = []
+            prefix = f"{token}:"
+            for k, sess in self.sessions.items():
+                if not sess.is_alive():
+                    continue
+                tab_id = None
+                if k == token:
+                    tab_id = "tab-1"
+                elif k.startswith(prefix):
+                    tab_id = k[len(prefix):]
+                if tab_id:
+                    results.append({
+                        "id": tab_id,
+                        "title": sess.active_cmd_name or sess.last_reported_comm or "bash",
+                        "cwd": sess.get_cwd()
+                    })
+
+            def tab_sort_key(item):
+                tid = item.get("id", "")
+                if tid.startswith("tab-"):
+                    try:
+                        return (0, int(tid[4:]))
+                    except ValueError:
+                        pass
+                return (1, tid)
+
+            results.sort(key=tab_sort_key)
+            return results
+
+    def migrate_token(self, old_token: str, new_token: str):
+        if not old_token or not new_token or old_token == new_token:
+            return
+        with self.lock:
+            keys_to_migrate = [k for k in self.sessions if k == old_token or k.startswith(f"{old_token}:")]
+            for k in keys_to_migrate:
+                sess = self.sessions.pop(k, None)
+                if sess and sess.is_alive():
+                    suffix = k[len(old_token):]
+                    new_key = f"{new_token}{suffix}"
+                    sess.session_id = new_key
+                    self.sessions[new_key] = sess
+
     def _reaper_loop(self):
         while True:
-            time.sleep(30)
+            time.sleep(5)
+            while True:
+                try:
+                    rpid, _ = os.waitpid(-1, os.WNOHANG)
+                    if rpid <= 0:
+                        break
+                except (ChildProcessError, OSError):
+                    break
+
             now = time.time()
             with self.lock:
                 to_delete = []
@@ -1239,7 +1299,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         if (res.ok && data.success) {
           sessionToken = data.token;
-          showTerminal();
+          showTerminal(data.tabs);
         } else {
           errBox.classList.remove('hidden');
           errMsg.innerText = data.error || 'Authentication failed';
@@ -1262,18 +1322,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const res = await fetch('/api/status');
         const data = await res.json();
         if (data.authenticated) {
-          showTerminal();
+          showTerminal(data.tabs);
         }
       } catch (e) {}
     }
 
-    function showTerminal() {
+    function showTerminal(knownTabs) {
       document.getElementById('login-view').classList.add('hidden');
       document.getElementById('terminal-view').classList.remove('hidden');
       if (window.IS_READONLY) {
         applyReadonlyUI();
       }
-      initTerminal();
+      initTerminal(knownTabs);
     }
 
     function sendInterrupt() {
@@ -2027,16 +2087,113 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
     }
 
-    function initTerminal() {
-      if (Object.keys(tabs).length === 0) {
-        createNewTab('bash');
-      }
-      initGlobalShortcuts();
+    function saveTabsState() {
+      if (window.IS_READONLY) return;
+      try {
+        const tabList = Object.keys(tabs).map(id => ({
+          id: id,
+          title: tabs[id].title || 'bash'
+        }));
+        localStorage.setItem('fire_ssh_open_tabs', JSON.stringify(tabList));
+        if (activeTabId) {
+          localStorage.setItem('fire_ssh_active_tab', activeTabId);
+        }
+      } catch (e) {}
     }
 
-    function createNewTab(initialTitle) {
-      tabSequence++;
-      const tabId = 'tab-' + tabSequence;
+    async function initTerminal(knownServerTabs) {
+      if (Object.keys(tabs).length > 0) {
+        initGlobalShortcuts();
+        return;
+      }
+
+      let tabsToRestore = [];
+      let savedActiveTab = null;
+
+      // 1. Server-reported tabs (passed from checkAuth/handleLogin or fetched via /api/tabs)
+      if (Array.isArray(knownServerTabs) && knownServerTabs.length > 0) {
+        tabsToRestore = knownServerTabs.map(t => ({ id: t.id, title: t.title || 'bash' }));
+      } else if (!window.IS_READONLY) {
+        try {
+          const res = await fetch('/api/tabs');
+          if (res.ok) {
+            const data = await res.json();
+            if (data && Array.isArray(data.tabs) && data.tabs.length > 0) {
+              tabsToRestore = data.tabs.map(t => ({ id: t.id, title: t.title || 'bash' }));
+            }
+          }
+        } catch (e) {}
+      }
+
+      // 2. Cross-reference with localStorage for persistence across daemon restarts / reloads
+      if (!window.IS_READONLY) {
+        try {
+          savedActiveTab = localStorage.getItem('fire_ssh_active_tab');
+          const stored = localStorage.getItem('fire_ssh_open_tabs');
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              if (tabsToRestore.length === 0) {
+                tabsToRestore = parsed;
+              } else {
+                const existingIds = new Set(tabsToRestore.map(t => t.id));
+                parsed.forEach(t => {
+                  if (t && t.id && !existingIds.has(t.id)) {
+                    tabsToRestore.push(t);
+                    existingIds.add(t.id);
+                  }
+                });
+              }
+            }
+          }
+        } catch (e) {}
+      }
+
+      // 3. Fallback: single tab if nothing to restore
+      if (tabsToRestore.length === 0) {
+        createNewTab('bash');
+      } else {
+        tabsToRestore.sort((a, b) => {
+          const numA = parseInt((a.id || '').replace(/\D/g, ''), 10) || 0;
+          const numB = parseInt((b.id || '').replace(/\D/g, ''), 10) || 0;
+          return numA - numB;
+        });
+
+        // Determine target active tab
+        let targetActiveId = savedActiveTab;
+        if (!targetActiveId || !tabsToRestore.some(t => t.id === targetActiveId)) {
+          targetActiveId = tabsToRestore[0].id;
+        }
+
+        tabsToRestore.forEach(tabInfo => {
+          if (!tabs[tabInfo.id]) {
+            const isTarget = tabInfo.id === targetActiveId;
+            createNewTab(tabInfo.title || 'bash', tabInfo.id, isTarget);
+          }
+        });
+
+        if (targetActiveId && tabs[targetActiveId]) {
+          switchTab(targetActiveId);
+        }
+      }
+
+      initGlobalShortcuts();
+      saveTabsState();
+    }
+
+    function createNewTab(initialTitle, explicitTabId, shouldSwitch = true) {
+      let tabId;
+      if (explicitTabId) {
+        tabId = explicitTabId;
+        const match = tabId.match(/^tab-(\d+)$/);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num > tabSequence) tabSequence = num;
+        }
+      } else {
+        tabSequence++;
+        tabId = 'tab-' + tabSequence;
+      }
       const tabIndex = Object.keys(tabs).length + 1;
       const title = initialTitle || 'bash';
 
@@ -2045,7 +2202,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       const mountEl = document.createElement('div');
       mountEl.id = `term-mount-${tabId}`;
-      mountEl.className = 'w-full h-full';
+      mountEl.className = 'w-full h-full' + (shouldSwitch ? '' : ' hidden');
       container.appendChild(mountEl);
 
       const isReadOnly = !!window.IS_READONLY;
@@ -2105,7 +2262,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       setupTabEvents(tabObj);
       connectTabWebSocket(tabObj);
-      switchTab(tabId);
+      if (shouldSwitch) {
+        switchTab(tabId);
+      } else {
+        renderTabsList();
+      }
+      saveTabsState();
+      return tabObj;
     }
 
     function switchTab(tabId) {
@@ -2114,6 +2277,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const activeTab = tabs[tabId];
       activeTab.hasAlert = false;
       renderTabsList();
+      saveTabsState();
 
       Object.keys(tabs).forEach(id => {
         const t = tabs[id];
@@ -2175,6 +2339,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
 
       delete tabs[tabId];
+      saveTabsState();
 
       if (activeTabId === tabId) {
         const remaining = Object.keys(tabs);
@@ -2428,6 +2593,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               if (msg.name && tab.title !== msg.name) {
                 tab.title = msg.name;
                 renderTabsList();
+                saveTabsState();
               }
             } else if (msg.type === 'task_alert') {
               const isBg = tab.id !== activeTabId;
@@ -2600,6 +2766,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     async function handleLogout() {
       isLoggingOut = true;
+      try {
+        localStorage.removeItem('fire_ssh_open_tabs');
+        localStorage.removeItem('fire_ssh_active_tab');
+      } catch (e) {}
       Object.keys(tabs).forEach(id => {
         const t = tabs[id];
         if (t.pingTimer) clearInterval(t.pingTimer);
@@ -2841,7 +3011,19 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             auth = self.is_authenticated()
             locked, rem = self.server.rate_limiter.is_locked(ip)
             data = {"authenticated": auth, "locked": locked, "lockout_remaining": rem}
+            if auth:
+                token = self.get_auth_token()
+                data["tabs"] = self.server.terminals.list_tabs(token)
             self.send_json(data)
+            return
+
+        elif parsed.path == '/api/tabs':
+            if not self.is_authenticated():
+                self.send_error(401, "Unauthorized")
+                return
+            token = self.get_auth_token()
+            tabs = self.server.terminals.list_tabs(token)
+            self.send_json({"success": True, "tabs": tabs})
             return
 
         elif parsed.path == '/api/share/list':
@@ -2982,13 +3164,10 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.server.rate_limiter.record_success(ip)
                 old_token = self.get_cookie_token()
                 token = self.server.sessions.create_session(ip)
-                if old_token and old_token in self.server.terminals.sessions:
-                    with self.server.terminals.lock:
-                        old_sess = self.server.terminals.sessions.pop(old_token, None)
-                        if old_sess and old_sess.is_alive():
-                            old_sess.session_id = token
-                            self.server.terminals.sessions[token] = old_sess
+                if old_token:
+                    self.server.terminals.migrate_token(old_token, token)
                 
+                tabs = self.server.terminals.list_tabs(token)
                 proto = self.headers.get('X-Forwarded-Proto', '').lower()
                 is_https = proto == 'https' or 'https' in self.headers.get('CF-Visitor', '')
                 secure_attr = "; Secure" if is_https else ""
@@ -2996,7 +3175,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Set-Cookie", f"fire_ssh_session={token}; Path=/; HttpOnly; SameSite=Lax{secure_attr}; Max-Age={SESSION_EXPIRY_SECONDS}")
                 self.end_headers()
-                self.wfile.write(json.dumps({"success": True, "token": token}).encode('utf-8'))
+                self.wfile.write(json.dumps({"success": True, "token": token, "tabs": tabs}).encode('utf-8'))
             else:
                 is_now_locked, lock_sec, attempts_left = self.server.rate_limiter.record_failure(ip)
                 if is_now_locked:
@@ -3329,6 +3508,20 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
 
 
 def run_server(port: int, plain_password: str = None, salt_hex: str = None, hash_hex: str = None, shell: str = None):
+    def _sigchld_handler(signum, frame):
+        while True:
+            try:
+                rpid, _ = os.waitpid(-1, os.WNOHANG)
+                if rpid <= 0:
+                    break
+            except (ChildProcessError, OSError):
+                break
+
+    try:
+        signal.signal(signal.SIGCHLD, _sigchld_handler)
+    except Exception:
+        pass
+
     if not plain_password and not hash_hex:
         salt_hex, hash_hex = PasswordManager.load_stored_credentials()
 
