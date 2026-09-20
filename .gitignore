@@ -27,3 +27,4 @@ dump.json
 # OS
 .DS_Store
 .playwright-mcp/
+.playwright-cli/

@@ -818,11 +818,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
   <style>
     .xterm { height: 100%; padding: 4px; }
-    .xterm-viewport { background-color: #020617 !important; }
+    .xterm-viewport { background-color: #020617 !important; -webkit-overflow-scrolling: touch; }
+    .xterm-screen { touch-action: pan-y; }
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #020617; }
     ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    .scrollbar-none::-webkit-scrollbar { display: none; }
+    .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+    .mobile-key {
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+      touch-action: manipulation;
+    }
   </style>
 </head>
 <body class="h-full flex flex-col font-sans antialiased overflow-hidden select-none bg-[#020617]">
@@ -879,36 +888,36 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <!-- TERMINAL CONTAINER -->
   <div id="terminal-view" class="hidden flex-1 flex flex-col h-full relative">
     <!-- Header bar with Quick Action Signal Buttons -->
-    <header class="h-12 bg-slate-900 border-b border-slate-800 px-3 sm:px-4 flex items-center justify-between select-none">
-      <div class="flex items-center space-x-2 sm:space-x-3">
-        <span class="text-lg">🔥</span>
-        <span class="text-xs sm:text-sm font-semibold text-white">Fire PM Terminal</span>
-        <span id="conn-badge" class="text-[11px] sm:text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono flex items-center gap-1">
+    <header class="h-12 bg-slate-900 border-b border-slate-800 px-2 sm:px-4 flex items-center justify-between select-none">
+      <div class="flex items-center space-x-1.5 sm:space-x-3 min-w-0">
+        <span class="text-lg shrink-0">🔥</span>
+        <span class="text-xs sm:text-sm font-semibold text-white truncate max-w-[80px] xs:max-w-none">Fire PM</span>
+        <span id="conn-badge" class="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono flex items-center gap-1 shrink-0">
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
           Connected
         </span>
       </div>
 
       <!-- Quick Control Action Toolbar -->
-      <div class="flex items-center space-x-1.5 sm:space-x-2">
-        <button onclick="sendInterrupt()" title="Break / Interrupt (Ctrl+C)" class="px-2.5 py-1 text-xs bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 rounded-lg transition font-mono font-bold flex items-center gap-1">
+      <div class="flex items-center space-x-1 sm:space-x-2 shrink-0">
+        <button onclick="sendInterrupt()" title="Break / Interrupt (Ctrl+C)" class="px-2 sm:px-2.5 py-1 text-xs bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 rounded-lg transition font-mono font-bold flex items-center gap-1">
           <span>⎋</span>
           <span>Ctrl+C</span>
         </button>
         <button onclick="sendSuspend()" title="Suspend Foreground Job (Ctrl+Z)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono">^Z</button>
         <button onclick="sendEOF()" title="EOF / Exit (Ctrl+D)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono">^D</button>
         <button onclick="sendCtrlW()" title="Send Ctrl+W (Where Is in nano / erase word in bash)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono">^W</button>
-        <button onclick="clearTerm()" title="Clear Terminal Output" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">Clear</button>
-        <button onclick="termFit()" title="Fit Terminal Window" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fit</button>
+        <button onclick="clearTerm()" title="Clear Terminal Output" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">Clear</button>
+        <button onclick="termFit()" title="Fit Terminal Window" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fit</button>
         <button onclick="toggleFullscreen()" title="Fullscreen mode (locks Ctrl+W from closing tab)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fullscreen</button>
-        <button onclick="copySelectionToClipboard(true)" title="Copy Selected Text (Ctrl+C / Cmd+C)" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1">
+        <button onclick="copySelectionToClipboard(true)" title="Copy Selected Text (Ctrl+C / Cmd+C)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
           </svg>
           <span>Copy</span>
         </button>
-        <button onclick="pasteFromClipboard(true, true)" title="Paste from Clipboard (Ctrl+V / Cmd+V)" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1">
+        <button onclick="pasteFromClipboard(true, true)" title="Paste from Clipboard (Ctrl+V / Cmd+V)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400">
             <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
             <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
@@ -995,7 +1004,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
           <span>Read-Only Live View</span>
         </div>
-        <button id="share-btn" onclick="openShareModal()" title="Share Live Terminal (Read-Only)" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1.5">
+        <button id="share-btn" onclick="openShareModal()" title="Share Live Terminal (Read-Only)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1.5">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400">
             <circle cx="18" cy="5" r="3"></circle>
             <circle cx="6" cy="12" r="3"></circle>
@@ -1005,7 +1014,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           </svg>
           <span class="hidden md:inline">Share</span>
         </button>
-        <button id="upload-btn" onclick="triggerFileInput()" title="Upload File to Terminal Directory" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1.5">
+        <button id="upload-btn" onclick="triggerFileInput()" title="Upload File to Terminal Directory" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1.5">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
             <polyline points="17 8 12 3 7 8"/>
@@ -1014,7 +1023,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <span class="hidden md:inline">Upload</span>
         </button>
         <input id="file-upload-input" type="file" multiple class="hidden" onchange="handleFileSelect(event)">
-        <button id="download-btn" onclick="openDownloadModal()" title="Download File from Remote Server" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1.5">
+        <button id="download-btn" onclick="openDownloadModal()" title="Download File from Remote Server" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1.5">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
             <polyline points="7 10 12 15 17 10"/>
@@ -1022,7 +1031,65 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           </svg>
           <span class="hidden md:inline">Download</span>
         </button>
-        <button id="logout-btn" onclick="handleLogout()" class="px-2.5 py-1 text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-lg transition">Disconnect</button>
+        <button id="logout-btn" onclick="handleLogout()" class="hidden sm:inline-flex px-2.5 py-1 text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-lg transition">Disconnect</button>
+
+        <!-- Mobile Actions Menu Button -->
+        <div class="relative sm:hidden">
+          <button id="mobile-actions-btn" onclick="toggleMobileActionsMenu()" title="Actions Menu" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 border border-slate-700 rounded-lg transition font-mono flex items-center gap-1">
+            <span>⚙️</span>
+            <span>Menu</span>
+          </button>
+          <div id="mobile-actions-menu" class="hidden absolute right-0 top-full mt-1.5 w-56 bg-slate-900/98 backdrop-blur-md border border-slate-700/90 rounded-xl shadow-2xl shadow-black/80 p-2 z-50 text-xs font-sans space-y-1">
+            <div class="px-2 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-800 flex items-center justify-between">
+              <span>Terminal Actions</span>
+              <span class="text-slate-500 font-mono">Mobile</span>
+            </div>
+            
+            <button onclick="copySelectionToClipboard(true); closeMobileActionsMenu()" class="w-full px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 rounded-lg flex items-center gap-2 transition">
+              <span>📋</span> <span>Copy Selection</span>
+            </button>
+            <button onclick="pasteFromClipboard(true, true); closeMobileActionsMenu()" class="w-full px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 rounded-lg flex items-center gap-2 transition">
+              <span>📥</span> <span>Paste Clipboard</span>
+            </button>
+            <button onclick="clearTerm(); closeMobileActionsMenu()" class="w-full px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 rounded-lg flex items-center gap-2 transition">
+              <span>🧹</span> <span>Clear Terminal</span>
+            </button>
+            <button onclick="termFit(); closeMobileActionsMenu()" class="w-full px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 rounded-lg flex items-center gap-2 transition">
+              <span>⛶</span> <span>Fit Window</span>
+            </button>
+
+            <div class="flex items-center justify-between px-2.5 py-1.5 text-slate-300 border-t border-slate-800">
+              <span class="flex items-center gap-1.5"><span>🔤</span> Font Size</span>
+              <div class="flex items-center space-x-1">
+                <button onclick="adjustFontSize(-1)" class="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 font-mono font-bold">A-</button>
+                <button onclick="adjustFontSize(1)" class="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 font-mono font-bold">A+</button>
+              </div>
+            </div>
+
+            <button onclick="toggleMobileBarVisibility(); closeMobileActionsMenu()" class="w-full px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 rounded-lg flex items-center justify-between transition border-t border-slate-800">
+              <span class="flex items-center gap-2"><span>⌨️</span> Keypad Bar</span>
+              <span id="mobile-bar-status-text" class="text-[10px] font-mono text-emerald-400">Active</span>
+            </button>
+
+            <div class="border-t border-slate-800 pt-1">
+              <button onclick="openShareModal(); closeMobileActionsMenu()" class="w-full px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 rounded-lg flex items-center gap-2 transition">
+                <span>🔗</span> <span>Share Session</span>
+              </button>
+              <button onclick="triggerFileInput(); closeMobileActionsMenu()" class="w-full px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 rounded-lg flex items-center gap-2 transition">
+                <span>⬆️</span> <span>Upload File</span>
+              </button>
+              <button onclick="openDownloadModal(); closeMobileActionsMenu()" class="w-full px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 rounded-lg flex items-center gap-2 transition">
+                <span>⬇️</span> <span>Download File</span>
+              </button>
+            </div>
+
+            <div class="border-t border-slate-800 pt-1">
+              <button onclick="handleLogout()" class="w-full px-2.5 py-1.5 text-left text-rose-400 hover:bg-rose-500/10 rounded-lg flex items-center gap-2 transition">
+                <span>🚪</span> <span>Disconnect</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -1039,6 +1106,50 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     <!-- Terminal Mounting Area (holds per-tab terminal mount divs) -->
     <div id="terminal-container" class="flex-1 w-full bg-[#020617] relative overflow-hidden"></div>
+
+    <!-- MOBILE ACCESSORY KEYPAD BAR -->
+    <div id="mobile-accessory-bar" class="w-full bg-slate-900 border-t border-slate-800 select-none z-30 shrink-0 transition-all duration-150">
+      <div class="flex items-center justify-between px-1.5 py-1 bg-slate-950/80 border-b border-slate-800/80">
+        <div id="mobile-keys-list" class="flex items-center space-x-1 overflow-x-auto scrollbar-none py-0.5 touch-pan-x flex-1">
+          <!-- Essential terminal keys -->
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'esc')" onclick="handleMobileKeyClick('esc')" class="mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">ESC</button>
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'tab')" onclick="handleMobileKeyClick('tab')" class="mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">TAB</button>
+          <button type="button" id="mobile-key-ctrl" ontouchstart="handleMobileKeyTouch(event, 'ctrl')" onclick="handleMobileKeyClick('ctrl')" class="mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-slate-800 text-slate-200 rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">CTRL</button>
+          <button type="button" id="mobile-key-alt" ontouchstart="handleMobileKeyTouch(event, 'alt')" onclick="handleMobileKeyClick('alt')" class="mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-slate-800 text-slate-200 rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">ALT</button>
+          
+          <div class="h-4 w-[1px] bg-slate-700/80 shrink-0 mx-0.5"></div>
+
+          <!-- Arrows -->
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'up')" onclick="handleMobileKeyClick('up')" title="Up Arrow (Previous Command)" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">▲</button>
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'down')" onclick="handleMobileKeyClick('down')" title="Down Arrow (Next Command)" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">▼</button>
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'left')" onclick="handleMobileKeyClick('left')" title="Left Arrow" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">◀</button>
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'right')" onclick="handleMobileKeyClick('right')" title="Right Arrow" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">▶</button>
+
+          <div class="h-4 w-[1px] bg-slate-700/80 shrink-0 mx-0.5"></div>
+
+          <!-- Shell Symbols -->
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'char', '|')" onclick="handleMobileKeyClick('char', '|')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">|</button>
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'char', '~')" onclick="handleMobileKeyClick('char', '~')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">~</button>
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'char', '/')" onclick="handleMobileKeyClick('char', '/')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">/</button>
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'char', '-')" onclick="handleMobileKeyClick('char', '-')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">-</button>
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'char', '_')" onclick="handleMobileKeyClick('char', '_')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">_</button>
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'char', '$')" onclick="handleMobileKeyClick('char', '$')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">$</button>
+
+          <div class="h-4 w-[1px] bg-slate-700/80 shrink-0 mx-0.5"></div>
+
+          <!-- Fast Signals -->
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'sigint')" onclick="handleMobileKeyClick('sigint')" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-rose-500/20 active:bg-rose-600 text-rose-300 active:text-white rounded-md border border-rose-500/30 shadow-sm shrink-0 select-none">^C</button>
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'eof')" onclick="handleMobileKeyClick('eof')" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">^D</button>
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'clear')" onclick="handleMobileKeyClick('clear')" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">^L</button>
+        </div>
+
+        <!-- Utility toggles -->
+        <div class="flex items-center space-x-1 pl-1 shrink-0">
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'toggle-kbd')" onclick="handleMobileKeyClick('toggle-kbd')" title="Toggle Keyboard" class="px-2 py-1 text-xs bg-slate-800 active:bg-slate-700 text-slate-300 hover:text-white rounded-md border border-slate-700 shrink-0 select-none">⌨️</button>
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'collapse-bar')" onclick="handleMobileKeyClick('collapse-bar')" id="mobile-collapse-btn" title="Collapse / Expand Key Bar" class="px-1.5 py-1 text-xs bg-slate-800 active:bg-slate-700 text-slate-400 hover:text-white rounded-md border border-slate-700 shrink-0 select-none font-bold">⌄</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Drag & Drop Upload Overlay -->
     <div id="drop-overlay" class="hidden absolute inset-0 z-40 bg-slate-950/85 backdrop-blur-sm border-2 border-dashed border-orange-500 rounded-lg flex flex-col items-center justify-center pointer-events-none transition-all duration-150">
@@ -1427,6 +1538,266 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         return false;
       }
     }, { capture: true });
+
+    // ==================== MOBILE TERMINAL COMPATIBILITY ====================
+    let isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0) || (window.innerWidth < 768);
+    let mobileBarVisible = isTouchDevice;
+    let mobileBarCollapsed = false;
+    let ctrlSticky = false;
+    let altSticky = false;
+    let currentFontSize = window.innerWidth < 480 ? 12 : (window.innerWidth < 768 ? 13 : 14);
+    let lastMobileTouchTime = 0;
+
+    function sendTerminalData(data) {
+      if (window.IS_READONLY) return;
+      const cur = getActiveTab();
+      const s = cur && cur.socket ? cur.socket : socket;
+      if (s && s.readyState === WebSocket.OPEN) {
+        s.send(JSON.stringify({ type: 'input', data }));
+      }
+    }
+
+    function handleMobileKeyTouch(e, keyType, val) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      lastMobileTouchTime = Date.now();
+      executeMobileKey(keyType, val);
+    }
+
+    function handleMobileKeyClick(keyType, val) {
+      if (Date.now() - lastMobileTouchTime < 450) return;
+      executeMobileKey(keyType, val);
+    }
+
+    function executeMobileKey(keyType, val) {
+      if (window.IS_READONLY) {
+        showToast('Read-only mode: terminal input disabled');
+        return;
+      }
+      const cur = getActiveTab();
+
+      switch (keyType) {
+        case 'esc':
+          sendTerminalData('\x1b');
+          break;
+        case 'tab':
+          sendTerminalData('\t');
+          break;
+        case 'ctrl':
+          toggleCtrlSticky();
+          break;
+        case 'alt':
+          toggleAltSticky();
+          break;
+        case 'up':
+          sendTerminalData('\x1b[A');
+          break;
+        case 'down':
+          sendTerminalData('\x1b[B');
+          break;
+        case 'left':
+          sendTerminalData('\x1b[D');
+          break;
+        case 'right':
+          sendTerminalData('\x1b[C');
+          break;
+        case 'char':
+          if (val) {
+            if (ctrlSticky) {
+              sendCtrlChar(val);
+            } else if (altSticky) {
+              sendTerminalData('\x1b' + val);
+              altSticky = false;
+              updateModifierUI();
+            } else {
+              sendTerminalData(val);
+            }
+          }
+          break;
+        case 'sigint':
+          sendInterrupt();
+          break;
+        case 'eof':
+          sendEOF();
+          break;
+        case 'clear':
+          sendTerminalData('\x0c');
+          break;
+        case 'toggle-kbd':
+          toggleMobileKeyboard();
+          break;
+        case 'collapse-bar':
+          toggleMobileBarCollapse();
+          break;
+        default:
+          break;
+      }
+
+      // Re-focus terminal textarea if needed
+      if (cur && cur.term && keyType !== 'toggle-kbd' && keyType !== 'collapse-bar') {
+        if (cur.term.textarea && document.activeElement !== cur.term.textarea) {
+          cur.term.focus();
+        }
+      }
+    }
+
+    function toggleCtrlSticky() {
+      ctrlSticky = !ctrlSticky;
+      if (ctrlSticky) altSticky = false;
+      updateModifierUI();
+    }
+
+    function toggleAltSticky() {
+      altSticky = !altSticky;
+      if (altSticky) ctrlSticky = false;
+      updateModifierUI();
+    }
+
+    function updateModifierUI() {
+      const ctrlBtn = document.getElementById('mobile-key-ctrl');
+      if (ctrlBtn) {
+        if (ctrlSticky) {
+          ctrlBtn.className = 'mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-orange-500 text-white rounded-md border border-orange-400 shadow-sm shrink-0 transition select-none ring-2 ring-orange-500/50';
+        } else {
+          ctrlBtn.className = 'mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-slate-800 text-slate-200 rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none';
+        }
+      }
+
+      const altBtn = document.getElementById('mobile-key-alt');
+      if (altBtn) {
+        if (altSticky) {
+          altBtn.className = 'mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-orange-500 text-white rounded-md border border-orange-400 shadow-sm shrink-0 transition select-none ring-2 ring-orange-500/50';
+        } else {
+          altBtn.className = 'mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-slate-800 text-slate-200 rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none';
+        }
+      }
+    }
+
+    function sendCtrlChar(char) {
+      let code = char.charCodeAt(0);
+      let ctrlCode;
+      if (code >= 97 && code <= 122) { // a-z
+        ctrlCode = String.fromCharCode(code - 96);
+      } else if (code >= 65 && code <= 90) { // A-Z
+        ctrlCode = String.fromCharCode(code - 64);
+      } else if (char === '@' || char === ' ') {
+        ctrlCode = '\x00';
+      } else if (char === '[') {
+        ctrlCode = '\x1b';
+      } else if (char === '\\') {
+        ctrlCode = '\x1c';
+      } else if (char === ']') {
+        ctrlCode = '\x1d';
+      } else if (char === '^') {
+        ctrlCode = '\x1e';
+      } else if (char === '_') {
+        ctrlCode = '\x1f';
+      } else {
+        ctrlCode = char;
+      }
+      sendTerminalData(ctrlCode);
+      ctrlSticky = false;
+      updateModifierUI();
+    }
+
+    function toggleMobileKeyboard() {
+      const cur = getActiveTab();
+      if (!cur || !cur.term) return;
+      const textarea = cur.term.textarea;
+      if (!textarea) return;
+
+      if (document.activeElement === textarea) {
+        textarea.blur();
+        showToast('Keyboard hidden');
+      } else {
+        textarea.focus();
+        cur.term.focus();
+        showToast('Keyboard focused');
+      }
+    }
+
+    function toggleMobileBarCollapse() {
+      const keysList = document.getElementById('mobile-keys-list');
+      const collapseBtn = document.getElementById('mobile-collapse-btn');
+      if (!keysList || !collapseBtn) return;
+
+      mobileBarCollapsed = !mobileBarCollapsed;
+      if (mobileBarCollapsed) {
+        keysList.classList.add('hidden');
+        collapseBtn.textContent = '⌃';
+        collapseBtn.title = 'Expand Key Bar';
+      } else {
+        keysList.classList.remove('hidden');
+        collapseBtn.textContent = '⌄';
+        collapseBtn.title = 'Collapse Key Bar';
+      }
+      termFit();
+    }
+
+    function toggleMobileBarVisibility() {
+      mobileBarVisible = !mobileBarVisible;
+      const bar = document.getElementById('mobile-accessory-bar');
+      const statusText = document.getElementById('mobile-bar-status-text');
+      if (bar) {
+        if (mobileBarVisible) {
+          bar.classList.remove('hidden');
+          if (statusText) {
+            statusText.textContent = 'Active';
+            statusText.className = 'text-[10px] font-mono text-emerald-400';
+          }
+        } else {
+          bar.classList.add('hidden');
+          if (statusText) {
+            statusText.textContent = 'Hidden';
+            statusText.className = 'text-[10px] font-mono text-slate-500';
+          }
+        }
+      }
+      termFit();
+    }
+
+    function toggleMobileActionsMenu() {
+      const m = document.getElementById('mobile-actions-menu');
+      if (!m) return;
+      m.classList.toggle('hidden');
+    }
+
+    function closeMobileActionsMenu() {
+      const m = document.getElementById('mobile-actions-menu');
+      if (m) m.classList.add('hidden');
+    }
+
+    function adjustFontSize(delta) {
+      const newSize = Math.max(9, Math.min(24, currentFontSize + delta));
+      if (newSize === currentFontSize) return;
+      currentFontSize = newSize;
+      Object.values(tabs).forEach(tab => {
+        if (tab && tab.term) {
+          tab.term.options.fontSize = currentFontSize;
+          if (tab.fitAddon) tab.fitAddon.fit();
+          sendResize(tab);
+        }
+      });
+      showToast(`Font Size: ${currentFontSize}px`);
+    }
+
+    function updateViewportLayout() {
+      const termView = document.getElementById('terminal-view');
+      if (!termView) return;
+
+      if (window.visualViewport) {
+        const vv = window.visualViewport;
+        if (window.innerWidth <= 768 || ('ontouchstart' in window) || navigator.maxTouchPoints > 0) {
+          termView.style.height = `${vv.height}px`;
+          window.scrollTo(0, 0);
+        } else {
+          termView.style.height = '';
+        }
+      }
+      termFit();
+    }
 
     let originalDocTitle = document.title || 'Fire SSH';
     let titleBlinkInterval = null;
@@ -1944,7 +2315,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       const toHide = [
         'share-btn', 'upload-btn', 'download-btn', 'logout-btn',
-        'settings-btn', 'new-tab-btn'
+        'settings-btn', 'new-tab-btn', 'mobile-accessory-bar'
       ];
       toHide.forEach(id => {
         const el = document.getElementById(id);
@@ -2210,7 +2581,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         cursorBlink: !isReadOnly,
         disableStdin: isReadOnly,
         cursorStyle: isReadOnly ? 'underline' : 'bar',
-        fontSize: 14,
+        fontSize: currentFontSize,
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
         theme: {
           background: '#020617',
@@ -2242,6 +2613,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         t.loadAddon(new WebLinksAddon.WebLinksAddon());
       }
       t.open(mountEl);
+
+      mountEl.addEventListener('touchend', () => {
+        if (!window.IS_READONLY && t.textarea) {
+          if (document.activeElement !== t.textarea) {
+            t.focus();
+          }
+        }
+      });
 
       const tabObj = {
         id: tabId,
@@ -2531,6 +2910,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       // Terminal Data handler
       if (!window.IS_READONLY) {
         t.onData(data => {
+          if (ctrlSticky && data.length > 0) {
+            sendCtrlChar(data[0]);
+            if (data.length > 1) {
+              sendTerminalData(data.slice(1));
+            }
+            return;
+          }
+          if (altSticky && data.length > 0) {
+            sendTerminalData('\x1b' + data);
+            altSticky = false;
+            updateModifierUI();
+            return;
+          }
           if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
             tab.socket.send(JSON.stringify({ type: 'input', data }));
           }
@@ -2665,7 +3057,25 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function initGlobalShortcuts() {
-      window.addEventListener('resize', () => termFit());
+      window.addEventListener('resize', () => updateViewportLayout());
+
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', () => updateViewportLayout());
+        window.visualViewport.addEventListener('scroll', () => updateViewportLayout());
+      }
+
+      window.addEventListener('orientationchange', () => {
+        setTimeout(() => updateViewportLayout(), 200);
+      });
+
+      // Dismiss mobile actions menu when tapping outside
+      document.addEventListener('click', (e) => {
+        const m = document.getElementById('mobile-actions-menu');
+        const btn = document.getElementById('mobile-actions-btn');
+        if (m && !m.classList.contains('hidden') && btn && !btn.contains(e.target) && !m.contains(e.target)) {
+          m.classList.add('hidden');
+        }
+      });
 
       document.addEventListener('copy', (e) => {
         const cur = getActiveTab();
@@ -2817,6 +3227,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         csDot.className = 'w-1.5 h-1.5 rounded-full shrink-0 ' + latencyDotColor(clientServerLatency);
         badge.textContent = ms + 'ms';
         badge.classList.remove('hidden');
+        const mobLat = document.getElementById('mobile-latency-val');
+        if (mobLat) mobLat.textContent = ms + 'ms';
       }
       if (serverTerminalLatency >= 0) {
         stEl.textContent = serverTerminalLatency < 1 ? '<1 ms' : Math.round(serverTerminalLatency) + ' ms';
