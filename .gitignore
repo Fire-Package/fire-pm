@@ -28,3 +28,6 @@ dump.json
 .DS_Store
 .playwright-mcp/
 .playwright-cli/
+
+# Agent shared history
+AGENT_HISTORY.md
