@@ -33,15 +33,29 @@ export class ConfigService {
     }
 
     // Prohibit forbidden directives that could allow arbitrary execution escapes
-    const forbidden = ["ExecStartPre=", "ExecStopPost=", "ExecReload="];
-    for (const f of forbidden) {
-      if (content.includes(f)) {
-        throw new Error(`Directive '${f}' is not allowed for security reasons.`);
+    const forbiddenDirectives = new Set([
+      "execstartpre",
+      "execstoppost",
+      "execstartpost",
+      "execreload",
+      "execstop",
+    ]);
+
+    const lines = content.split(/\r?\n/);
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#") || line.startsWith(";")) continue;
+      const key = line.split(/[=\s!:]/)[0].toLowerCase();
+      if (forbiddenDirectives.has(key)) {
+        throw new Error(`Directive '${key}' is not allowed for security reasons.`);
       }
     }
 
     const unitPath = this.getUnitPath(name);
-    fs.writeFileSync(unitPath, content, "utf-8");
+    fs.writeFileSync(unitPath, content, { encoding: "utf-8", mode: 0o600 });
+    try {
+      fs.chmodSync(unitPath, 0o600);
+    } catch {}
     await safeExec("systemctl", ["daemon-reload"]);
     return { success: true };
   }

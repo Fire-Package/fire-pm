@@ -5,8 +5,13 @@ import { errorResponse } from "@/lib/api-helper";
 
 export async function POST(req: NextRequest) {
   try {
-    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "127.0.0.1";
-    const allowed = checkRateLimit(`login:${ip}`, 5, 60000);
+    const xff = req.headers.get("x-forwarded-for");
+    let ip = "127.0.0.1";
+    if (xff) {
+      const parts = xff.split(",").map((p) => p.trim()).filter(Boolean);
+      ip = parts[parts.length - 1] || "127.0.0.1";
+    }
+    const allowed = checkRateLimit(`login:${ip}`, 5, 60000) && checkRateLimit("login:global", 50, 60000);
     if (!allowed) {
       return errorResponse("Too many login attempts. Please wait 1 minute before trying again.", 429, "RATE_LIMITED");
     }

@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { safeExec } from "../shell";
 import { loadConfig } from "../config";
-import { validateServiceName, validateMemoryLimit, validateCpuLimit } from "../validation";
+import { validateServiceName, validateMemoryLimit, validateCpuLimit, validateInterpreter, validateEnvVar } from "../validation";
 import { ProcessItem, ProcessListResponse, ProcessDetail } from "../types";
 
 export class ProcessService {
@@ -286,7 +286,8 @@ export class ProcessService {
       args.push("--name", params.name);
     }
     if (params.interpreter) {
-      args.push("--interpreter", params.interpreter);
+      if (!validateInterpreter(params.interpreter)) throw new Error("Invalid interpreter specified");
+      args.push("--interpreter", params.interpreter.trim());
     }
     if (params.watch) {
       args.push("--watch");
@@ -304,7 +305,8 @@ export class ProcessService {
     }
     if (params.env && Array.isArray(params.env)) {
       for (const e of params.env) {
-        if (typeof e === "string" && e.includes("=")) {
+        if (typeof e === "string") {
+          if (!validateEnvVar(e)) throw new Error("Invalid environment variable format");
           args.push("--env", e);
         }
       }

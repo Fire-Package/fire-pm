@@ -453,8 +453,18 @@ format_mem_kb() {
 }
 
 ensure_tunnel_dir() {
-  mkdir -p "$TUNNEL_DIR"
-  chmod 755 "$TUNNEL_DIR" 2>/dev/null || true
+  if [[ ! -d "$TUNNEL_DIR" ]]; then
+    mkdir -p "$TUNNEL_DIR"
+    chmod 700 "$TUNNEL_DIR" 2>/dev/null || true
+  else
+    local owner
+    owner=$(stat -c '%u' "$TUNNEL_DIR" 2>/dev/null || stat -f '%u' "$TUNNEL_DIR" 2>/dev/null || echo "")
+    if [[ -n "$owner" && "$owner" != "$EUID" && "$EUID" -eq 0 ]]; then
+      rm -rf "$TUNNEL_DIR"
+      mkdir -p "$TUNNEL_DIR"
+      chmod 700 "$TUNNEL_DIR" 2>/dev/null || true
+    fi
+  fi
 }
 
 is_pid_running() {
@@ -527,6 +537,8 @@ write_tunnel_state() {
   ensure_tunnel_dir
   state_file=$(tunnel_state_file "$port")
 
+  # Prevent symlink attacks
+  rm -f "$state_file"
   cat > "$state_file" <<EOF
 PORT=$port
 PID=$pid
@@ -535,9 +547,9 @@ LOG_FILE=$log_file
 START_TS=$start_ts
 PROVIDER=$provider
 EOF
-  chmod 644 "$state_file" 2>/dev/null || true
-  if [[ -n "$log_file" && -f "$log_file" ]]; then
-    chmod 644 "$log_file" 2>/dev/null || true
+  chmod 600 "$state_file" 2>/dev/null || true
+  if [[ -n "$log_file" && -f "$log_file" && ! -L "$log_file" ]]; then
+    chmod 600 "$log_file" 2>/dev/null || true
   fi
 }
 
@@ -554,7 +566,16 @@ remove_tunnel_state() {
 
   rm -f "$state_file"
   if [[ "$remove_log" -eq 1 ]]; then
-    rm -f "$known_log" "$(tunnel_log_file "$port")"
+    if [[ -n "$known_log" && -f "$known_log" && ! -L "$known_log" ]]; then
+      local real_log
+      real_log=$(realpath "$known_log" 2>/dev/null || echo "$known_log")
+      local real_tunnel_dir
+      real_tunnel_dir=$(realpath "$TUNNEL_DIR" 2>/dev/null || echo "$TUNNEL_DIR")
+      if [[ "$real_log" == "$real_tunnel_dir"/* ]]; then
+        rm -f "$known_log"
+      fi
+    fi
+    rm -f "$(tunnel_log_file "$port")"
   fi
   reset_tunnel_state
 }
@@ -972,6 +993,10 @@ action_start() {
   local ext="${file##*.}"
 
   if [[ -n "$INTERPRETER_OPT" ]]; then
+    if [[ "$INTERPRETER_OPT" =~ [[:space:]] || "$INTERPRETER_OPT" =~ [\r\n\;\&\|\$\`\<\>\(\)\{\}\[\]\*\?\!\^\~] ]]; then
+      error "Invalid interpreter: must be a single executable name or absolute path without spaces or shell characters."
+      exit 1
+    fi
     exec_cmd="$INTERPRETER_OPT"
   elif [[ "$ext" == "py" ]]; then
     local py_bin
@@ -1007,6 +1032,10 @@ action_start() {
 
   # Append Passthrough Args
   for a in "${PASSTHROUGH_ARGS[@]}"; do
+    if [[ "$a" =~ [\r\n] ]]; then
+      error "Arguments cannot contain newlines"
+      exit 1
+    fi
     full_exec+=" \"$a\""
   done
 
@@ -1030,6 +1059,10 @@ action_start() {
 
   # Explicit --env flags (override env-file values for same keys)
   for e in "${ENV_VARS[@]}"; do
+    if [[ "$e" =~ [\r\n] ]]; then
+      error "Environment variables cannot contain newlines"
+      exit 1
+    fi
     env_section+="Environment=\"$e\""$'\n'
   done
   
@@ -1047,6 +1080,14 @@ action_start() {
     warn "Updating existing service: $safe_name"
     systemctl stop "$service_name"
   fi
+
+  # Sanitize fields against newlines to prevent directive smuggling
+  raw_name="${raw_name//$'\r'/}"
+  raw_name="${raw_name//$'\n'/}"
+  RUN_USER="${RUN_USER//$'\r'/}"
+  RUN_USER="${RUN_USER//$'\n'/}"
+  WORKDIR="${WORKDIR//$'\r'/}"
+  WORKDIR="${WORKDIR//$'\n'/}"
 
   # Write Service File
   cat <<EOF > "$service_file"
@@ -1073,6 +1114,7 @@ SyslogIdentifier=${PREFIX}-${safe_name}
 [Install]
 WantedBy=multi-user.target
 EOF
+  chmod 600 "$service_file" 2>/dev/null || true
 
   systemctl daemon-reload
   if [[ "$NO_STARTUP_OPT" -eq 1 ]]; then
@@ -2164,30 +2206,38 @@ action_tunnel_setup() {
 
   read -r -p "Enter your base domain (e.g. mydomain.com or tunnel.mydomain.com): " input_domain
   [[ -z "$input_domain" ]] && error "Domain cannot be empty." && exit 1
+  if [[ ! "$input_domain" =~ ^[a-zA-Z0-9.-]+$ ]]; then
+    error "Invalid domain name format."
+    exit 1
+  fi
 
   read -r -p "Enter SSL Certificate path (fullchain.pem) [leave blank for automatic certificate]: " input_cert
   read -r -p "Enter SSL Private Key path (privkey.pem) [leave blank for automatic certificate]: " input_key
 
   mkdir -p /etc/fire-pm /etc/nginx
+  chmod 0700 /etc/fire-pm 2>/dev/null || true
   local config_file="/etc/fire-pm/config.json"
 
-  python3 -c "
-import json, os
-path = '$config_file'
+  python3 - "$config_file" "$input_domain" "$input_cert" "$input_key" << 'PYEOF' 2>/dev/null || true
+import sys, json, os
+path, domain, cert, key = sys.argv[1:5]
 data = {}
 if os.path.exists(path):
-  try:
-    with open(path, 'r') as f: data = json.load(f)
-  except: pass
+    try:
+        with open(path, 'r') as f: data = json.load(f)
+    except: pass
 data['tunnel'] = {
-  'provider': 'custom',
-  'domain': '$input_domain',
-  'sslCert': '$input_cert',
-  'sslKey': '$input_key'
+    'provider': 'custom',
+    'domain': domain,
+    'sslCert': cert,
+    'sslKey': key
 }
-with open(path, 'w') as f:
-  json.dump(data, f, indent=2)
-" 2>/dev/null || true
+flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+fd = os.open(path, flags, 0o600)
+with os.fdopen(fd, 'w') as f:
+    json.dump(data, f, indent=2)
+os.chmod(path, 0o600)
+PYEOF
 
   TUNNEL_BASE_DOMAIN="$input_domain"
   TUNNEL_DOMAIN="tunnel.$input_domain"
@@ -2739,20 +2789,42 @@ action_ssh_start() {
     port=$(find_free_ssh_port)
   fi
 
-  mkdir -p "$SSH_STATE_DIR"
+  if [[ ! -d "$SSH_STATE_DIR" ]]; then
+    mkdir -p "$SSH_STATE_DIR" 2>/dev/null || SSH_STATE_DIR="/tmp/fire-ssh-$UID"
+    mkdir -p "$SSH_STATE_DIR"
+    chmod 700 "$SSH_STATE_DIR" 2>/dev/null || true
+  else
+    local ssh_owner
+    ssh_owner=$(stat -c '%u' "$SSH_STATE_DIR" 2>/dev/null || stat -f '%u' "$SSH_STATE_DIR" 2>/dev/null || echo "")
+    if [[ -n "$ssh_owner" && "$ssh_owner" != "$EUID" && "$EUID" -eq 0 ]]; then
+      rm -rf "$SSH_STATE_DIR"
+      mkdir -p "$SSH_STATE_DIR"
+      chmod 700 "$SSH_STATE_DIR" 2>/dev/null || true
+    fi
+  fi
   local log_file="$SSH_STATE_DIR/${port}.log"
-  > "$log_file"
+  rm -f "$log_file"
+  touch "$log_file"
+  chmod 600 "$log_file" 2>/dev/null || true
 
   local pass_args=()
   if [[ -n "$password" ]]; then
-    pass_args+=("--password" "$password")
+    pass_args+=("--pass-stdin")
   fi
 
-  # Start Python Web Terminal daemon
-  if command -v setsid &>/dev/null; then
-    setsid python3 "$py_script" start --port "$port" "${pass_args[@]}" </dev/null > "$log_file" 2>&1 &
+  # Start Python Web Terminal daemon without exposing plaintext password in argv
+  if [[ -n "$password" ]]; then
+    if command -v setsid &>/dev/null; then
+      printf "%s\n" "$password" | setsid python3 "$py_script" start --port "$port" "${pass_args[@]}" > "$log_file" 2>&1 &
+    else
+      printf "%s\n" "$password" | nohup python3 "$py_script" start --port "$port" "${pass_args[@]}" > "$log_file" 2>&1 &
+    fi
   else
-    nohup python3 "$py_script" start --port "$port" "${pass_args[@]}" </dev/null > "$log_file" 2>&1 &
+    if command -v setsid &>/dev/null; then
+      setsid python3 "$py_script" start --port "$port" </dev/null > "$log_file" 2>&1 &
+    else
+      nohup python3 "$py_script" start --port "$port" </dev/null > "$log_file" 2>&1 &
+    fi
   fi
   local server_pid=$!
 
@@ -2911,24 +2983,33 @@ action_dashboard() {
 
   # If we have the python TUI and textual is installed, use it
   if [[ -n "$tui_script" && -n "$py_bin" ]] && "$py_bin" -c "import textual" &>/dev/null; then
-    local tui_ipc_dir="${XDG_RUNTIME_DIR:-/tmp}/fire-pm-$UID"
-    mkdir -p "$tui_ipc_dir"
+    local tui_ipc_dir="${XDG_RUNTIME_DIR:-/run/user/$UID}"
+    if [[ ! -d "$tui_ipc_dir" ]]; then
+      tui_ipc_dir="/run/fire-pm"
+      mkdir -p "$tui_ipc_dir" 2>/dev/null || tui_ipc_dir="/tmp/fire-pm-$UID"
+    fi
+    if [[ -d "$tui_ipc_dir" ]]; then
+      local dir_owner
+      dir_owner=$(stat -c '%u' "$tui_ipc_dir" 2>/dev/null || stat -f '%u' "$tui_ipc_dir" 2>/dev/null || echo "")
+      if [[ -n "$dir_owner" && "$dir_owner" != "$UID" && "$UID" -ne 0 ]]; then
+        error "IPC directory is owned by another user: $tui_ipc_dir"
+        exit 1
+      fi
+    fi
+    mkdir -p "$tui_ipc_dir" 2>/dev/null || true
     chmod 700 "$tui_ipc_dir" 2>/dev/null || true
     local tui_cmd_file="$tui_ipc_dir/next_cmd"
     export FIRE_TUI_IPC_FILE="$tui_cmd_file"
 
     # Loop to allow returning from live views or info screens
     while true; do
-        rm -f "$tui_cmd_file" /tmp/fire_tui_next_cmd
+        rm -f "$tui_cmd_file"
         "$py_bin" "$tui_script"
         
         local next_cmd=""
-        if [[ -f "$tui_cmd_file" ]]; then
+        if [[ -f "$tui_cmd_file" && ! -L "$tui_cmd_file" ]]; then
             next_cmd=$(cat "$tui_cmd_file")
             rm -f "$tui_cmd_file"
-        elif [[ -f /tmp/fire_tui_next_cmd ]]; then
-            next_cmd=$(cat /tmp/fire_tui_next_cmd)
-            rm -f /tmp/fire_tui_next_cmd
         fi
 
         if [[ -n "$next_cmd" ]]; then
@@ -3219,9 +3300,11 @@ dump_data = {
 }
 
 try:
-    with open(target_path, 'w', encoding='utf-8') as f:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    fd = os.open(target_path, flags, 0o600)
+    with os.fdopen(fd, 'w', encoding='utf-8') as f:
         json.dump(dump_data, f, indent=2)
-    os.chmod(target_path, 0o666)
+    os.chmod(target_path, 0o600)
 except Exception as e:
     if not $json_mode:
         print(f"\033[0;31m✖\033[0m Failed to write dump file: {e}")
@@ -3299,6 +3382,19 @@ for s in services:
     exec_start = s.get("execStart", "").strip()
     if not name or not exec_start:
         continue
+
+    # Strictly validate name to prevent directory traversal
+    import re
+    if not re.match(r'^[a-zA-Z0-9_.-]{1,64}$', name):
+        if not $json_mode:
+            print(f"\033[0;31m✖\033[0m Skipping invalid service name: {name}")
+        continue
+
+    # Reject newlines in fields to prevent directive smuggling
+    if any(('\n' in str(s.get(k, '')) or '\r' in str(s.get(k, ''))) for k in ('execStart', 'user', 'workingDirectory', 'environmentFile')):
+        if not $json_mode:
+            print(f"\033[0;31m✖\033[0m Skipping service with newline injection: {name}")
+        continue
     
     raw_name = s.get("description", "").replace("Fire Service:", "").strip() or name
     user = s.get("user", "root")
@@ -3352,8 +3448,11 @@ for s in services:
     lines.append("")
     
     try:
-        with open(svc_file, 'w', encoding='utf-8') as f:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        fd = os.open(svc_file, flags, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
             f.write("\n".join(lines))
+        os.chmod(svc_file, 0o600)
     except Exception as e:
         if not $json_mode:
             print(f"\033[0;31m✖\033[0m Failed writing unit for {name}: {e}")

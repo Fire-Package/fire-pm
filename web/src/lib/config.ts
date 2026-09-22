@@ -113,10 +113,16 @@ export function saveConfig(config: FireConfig): void {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
+    try {
+      fs.chmodSync(dir, 0o700);
+    } catch {}
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), {
       encoding: "utf-8",
       mode: 0o600,
     });
+    try {
+      fs.chmodSync(configPath, 0o600);
+    } catch {}
   } catch (e) {
     console.error(`Error writing config to ${configPath}:`, e);
   }

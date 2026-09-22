@@ -14,13 +14,11 @@ from textual import work
 import logging
 
 _log = logging.getLogger("fire_tui")
-_log_handler = logging.FileHandler("/tmp/fire_tui.log")
-_log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-_log.addHandler(_log_handler)
+_log.addHandler(logging.NullHandler())
 _log.setLevel(logging.WARNING)
 
 PREFIX = "fire-"
-TUNNEL_DIR = "/tmp/fire-tunnels"
+TUNNEL_DIR = os.environ.get("FIRE_TUNNEL_DIR", "/tmp/fire-tunnels")
 
 class ConfigEditorModal(ModalScreen):
     def __init__(self, svc_name, app_name):
@@ -786,12 +784,17 @@ class FireTUI(App):
 
     def action_refresh_data(self) -> None: self.update_data()
     def exit_with_command(self, cmd):
-        ipc_file = os.environ.get("FIRE_TUI_IPC_FILE", "/tmp/fire_tui_next_cmd")
-        try:
-            with open(ipc_file, "w") as f:
-                f.write(cmd)
-        except Exception:
-            pass
+        ipc_file = os.environ.get("FIRE_TUI_IPC_FILE")
+        if ipc_file:
+            try:
+                flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+                if hasattr(os, "O_NOFOLLOW"):
+                    flags |= os.O_NOFOLLOW
+                fd = os.open(ipc_file, flags, 0o600)
+                with os.fdopen(fd, "w") as f:
+                    f.write(cmd)
+            except Exception:
+                pass
         self.exit()
 
 if __name__ == "__main__": app = FireTUI(); app.run()

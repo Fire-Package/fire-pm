@@ -490,7 +490,7 @@ def main():
     args = parser.parse_args()
 
     port = args.port
-    server = ThreadedHTTPServer(('0.0.0.0', port), AssetUploadHandler)
+    server = ThreadedHTTPServer(('127.0.0.1', port), AssetUploadHandler)
     print(f"\n=======================================================")
     print(f"🔥 Fire PM Screenshot Asset Uploader is running!")
     print(f"  • Local URL:  http://localhost:{port}")

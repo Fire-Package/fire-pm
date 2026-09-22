@@ -20,9 +20,20 @@ interface RateLimitEntry {
 }
 
 const rateLimitMap = new Map<string, RateLimitEntry>();
+const MAX_RATE_LIMIT_ENTRIES = 10000;
 
 export function checkRateLimit(key: string, maxAttempts: number = 5, windowMs: number = 60000): boolean {
   const now = Date.now();
+
+  // Prune expired entries if map grows large to prevent memory exhaustion
+  if (rateLimitMap.size > MAX_RATE_LIMIT_ENTRIES) {
+    for (const [k, v] of rateLimitMap.entries()) {
+      if (now > v.resetAt) {
+        rateLimitMap.delete(k);
+      }
+    }
+  }
+
   const entry = rateLimitMap.get(key);
 
   if (!entry || now > entry.resetAt) {
