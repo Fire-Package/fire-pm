@@ -64,9 +64,15 @@ export class TunnelService {
       throw new Error(result.stderr || result.stdout || `Failed to open tunnel on port ${port}`);
     }
 
-    // Parse URL from stdout (last non-empty line or https:// line)
+    // Parse URL from stdout (ensure URL strictly starts with https:// or http://)
     const lines = result.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
-    const urlLine = lines.find((l) => l.startsWith("https://")) || lines[lines.length - 1] || "";
+    let urlLine = lines.find((l) => l.startsWith("https://")) || "";
+    if (!urlLine && lines.length > 0) {
+      const lastLine = lines[lines.length - 1];
+      if (lastLine.startsWith("https://") || lastLine.startsWith("http://")) {
+        urlLine = lastLine;
+      }
+    }
 
     return {
       port,

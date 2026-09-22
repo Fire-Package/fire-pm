@@ -35,8 +35,7 @@ export async function safeExec(
   args: string[] = [],
   options: ExecFileOptions = {}
 ): Promise<SafeExecResult> {
-  const binaryBase = file.split("/").pop() || file;
-  if (!ALLOWED_COMMANDS.has(file) && !ALLOWED_COMMANDS.has(binaryBase)) {
+  if (!ALLOWED_COMMANDS.has(file)) {
     throw new Error(`Command execution forbidden: ${file}`);
   }
 

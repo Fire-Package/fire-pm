@@ -288,6 +288,10 @@ def ws_read_frame(sock: socket.socket) -> tuple:
     masked = bool(b2 & 0x80)
     payload_len = b2 & 0x7f
 
+    # RFC 6455: Client-to-Server frames must be masked
+    if not masked:
+        return None, b""
+
     if payload_len == 126:
         ext = sock.recv(2)
         if len(ext) < 2: return None, b""
@@ -297,10 +301,12 @@ def ws_read_frame(sock: socket.socket) -> tuple:
         if len(ext) < 8: return None, b""
         payload_len = struct.unpack(">Q", ext)[0]
 
-    mask = b""
-    if masked:
-        mask = sock.recv(4)
-        if len(mask) < 4: return None, b""
+    MAX_WS_PAYLOAD = 10 * 1024 * 1024
+    if payload_len > MAX_WS_PAYLOAD:
+        return None, b""
+
+    mask = sock.recv(4)
+    if len(mask) < 4: return None, b""
 
     data = bytearray()
     while len(data) < payload_len:
@@ -309,10 +315,8 @@ def ws_read_frame(sock: socket.socket) -> tuple:
             break
         data.extend(chunk)
 
-    if masked:
-        unmasked = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
-        return opcode, unmasked
-    return opcode, bytes(data)
+    unmasked = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+    return opcode, unmasked
 
 
 def ws_make_frame(payload: bytes, opcode: int = 1) -> bytes:
@@ -700,10 +704,6 @@ class TerminalSessionManager:
                     for k, sess in self.sessions.items():
                         if (k == token or k.startswith(f"{token}:")) and sess.is_alive():
                             return sess
-                if len(self.sessions) == 1:
-                    sess = next(iter(self.sessions.values()))
-                    if sess.is_alive():
-                        return sess
             return None
 
     def get_or_create(self, token: str, tab_id: str = None, shell: str = None) -> TerminalSession:
@@ -3525,12 +3525,18 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                     expired_html = """<!DOCTYPE html><html><head><title>Fire PM - Share Expired</title><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-slate-950 text-slate-100 flex items-center justify-center min-h-screen"><div class="bg-slate-900 border border-red-500/40 rounded-2xl p-8 max-w-md text-center shadow-2xl"><div class="text-4xl mb-4">🔒</div><h1 class="text-xl font-bold text-red-400 mb-2">Share Link Expired or Invalid</h1><p class="text-sm text-slate-400 mb-6">This read-only session sharing link has expired or was revoked by the host.</p><a href="/" class="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-sm font-semibold transition">Back to Terminal</a></div></body></html>"""
                     self.wfile.write(expired_html.encode('utf-8'))
                     return
-                inject_script = f"<script>window.IS_READONLY = true; window.SHARE_TOKEN = {json.dumps(share_token)}; window.SHARE_LABEL = {json.dumps(share_info.get('label', 'Shared Session'))};</script>"
+                safe_token = json.dumps(str(share_token)).replace('</', r'<\/')
+                safe_label = json.dumps(str(share_info.get('label', 'Shared Session'))[:64]).replace('</', r'<\/')
+                inject_script = f"<script>window.IS_READONLY = true; window.SHARE_TOKEN = {safe_token}; window.SHARE_LABEL = {safe_label};</script>"
                 rendered_html = rendered_html.replace('</head>', f'{inject_script}\n</head>', 1)
 
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Content-Security-Policy", "frame-ancestors 'none';")
             self.end_headers()
             self.wfile.write(rendered_html.encode('utf-8'))
             return
@@ -3578,6 +3584,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 token = self.server.sessions.create_session(ip)
                 if old_token:
                     self.server.terminals.migrate_token(old_token, token)
+                    self.server.sessions.revoke(old_token)
                 
                 tabs = self.server.terminals.list_tabs(token)
                 proto = self.headers.get('X-Forwarded-Proto', '').lower()
@@ -3972,6 +3979,7 @@ def main():
     p_start = subparsers.add_parser("start", help="Start web terminal server")
     p_start.add_argument("--port", type=int, default=DEFAULT_PORT, help="Port to bind (127.0.0.1)")
     p_start.add_argument("--password", type=str, help="Plaintext session password")
+    p_start.add_argument("--pass-stdin", action="store_true", help="Read plaintext password from stdin")
     p_start.add_argument("--salt", type=str, help="Salt hex for PBKDF2 hash")
     p_start.add_argument("--hash", type=str, help="Hash hex for PBKDF2 verification")
     p_start.add_argument("--shell", type=str, help="Target shell executable")
@@ -4000,7 +4008,13 @@ def main():
         print(json.dumps({"valid": valid}))
 
     elif args.command == "start":
-        run_server(args.port, plain_password=args.password, salt_hex=args.salt, hash_hex=args.hash, shell=args.shell)
+        plain_pw = args.password
+        if getattr(args, "pass_stdin", False):
+            try:
+                plain_pw = sys.stdin.readline().rstrip('\r\n')
+            except Exception:
+                plain_pw = None
+        run_server(args.port, plain_password=plain_pw, salt_hex=args.salt, hash_hex=args.hash, shell=args.shell)
 
     else:
         parser.print_help()

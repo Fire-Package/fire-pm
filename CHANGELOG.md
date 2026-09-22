@@ -8,6 +8,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 
 ## [Unreleased]
 
+- `[2026-09-22]{22:54:00} Security Hardening: Validate process start interpreters and environment directives, enforce 0700/0600 on /etc/fire-pm and dump snapshots, eliminate /tmp TUI IPC fallback, drop sudoers SETENV, harden rate limiting, and pass SSH passwords via stdin #Issue 50`
 - `[2026-09-20]{12:05:00} Web Terminal: Add mobile compatibility with virtual keyboard accessory keypad, sticky Ctrl/Alt modifiers, visualViewport dynamic resizing, and responsive actions menu #Issue 48`
 
 - `[2026-09-07]{14:07:31} Web Terminal: Remove predictive echo mode and command bar for standard, deterministic PTY stream I/O #Issue 44`

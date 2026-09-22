@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { verifyJwtToken, AUTH_COOKIE_NAME, CSRF_COOKIE_NAME } from "./auth";
 
 export interface AuthContext {
@@ -22,7 +23,12 @@ export function verifyCsrf(req: NextRequest): boolean {
   const cookieCsrf = req.cookies.get(CSRF_COOKIE_NAME)?.value;
 
   if (!headerCsrf || !cookieCsrf) return false;
-  return headerCsrf === cookieCsrf;
+  if (headerCsrf.length !== cookieCsrf.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(headerCsrf), Buffer.from(cookieCsrf));
+  } catch {
+    return false;
+  }
 }
 
 export function errorResponse(message: string, status: number = 400, code: string = "BAD_REQUEST") {
