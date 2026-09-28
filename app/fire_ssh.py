@@ -830,7 +830,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       -webkit-touch-callout: none;
       -webkit-user-select: none;
       user-select: none;
-      touch-action: manipulation;
+      touch-action: pan-x;
+    }
+    #mobile-keys-list {
+      -webkit-overflow-scrolling: touch;
+      touch-action: pan-x;
+      scroll-behavior: smooth;
     }
   </style>
 </head>
@@ -1110,45 +1115,47 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <!-- MOBILE ACCESSORY KEYPAD BAR -->
     <div id="mobile-accessory-bar" class="w-full bg-slate-900 border-t border-slate-800 select-none z-30 shrink-0 transition-all duration-150">
       <div class="flex items-center justify-between px-1.5 py-1 bg-slate-950/80 border-b border-slate-800/80">
-        <div id="mobile-keys-list" class="flex items-center space-x-1 overflow-x-auto scrollbar-none py-0.5 touch-pan-x flex-1">
+        <div id="mobile-keys-list" class="flex items-center space-x-1 overflow-x-auto scrollbar-none py-0.5 touch-pan-x flex-1 scroll-smooth" ontouchmove="handleMobileKeyTouchMove(event)" ontouchcancel="handleMobileKeyTouchCancel(event)">
           <!-- Essential terminal keys -->
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'esc')" onclick="handleMobileKeyClick('esc')" class="mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">ESC</button>
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'tab')" onclick="handleMobileKeyClick('tab')" class="mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">TAB</button>
-          <button type="button" id="mobile-key-ctrl" ontouchstart="handleMobileKeyTouch(event, 'ctrl')" onclick="handleMobileKeyClick('ctrl')" class="mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-slate-800 text-slate-200 rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">CTRL</button>
-          <button type="button" id="mobile-key-alt" ontouchstart="handleMobileKeyTouch(event, 'alt')" onclick="handleMobileKeyClick('alt')" class="mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-slate-800 text-slate-200 rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">ALT</button>
-          <button type="button" id="mobile-key-shift" ontouchstart="handleMobileKeyTouch(event, 'shift')" onclick="handleMobileKeyClick('shift')" class="mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-slate-800 text-slate-200 rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">SHIFT</button>
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'enter')" onclick="handleMobileKeyClick('enter')" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 select-none" title="Enter / Return">RET</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'esc')" ontouchend="handleMobileKeyTouchEnd(event, 'esc')" onclick="handleMobileKeyClick('esc')" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">ESC</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'tab')" ontouchend="handleMobileKeyTouchEnd(event, 'tab')" onclick="handleMobileKeyClick('tab')" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">TAB</button>
+          <button type="button" id="mobile-key-ctrl" ontouchstart="handleMobileKeyTouchStart(event, 'ctrl')" ontouchend="handleMobileKeyTouchEnd(event, 'ctrl')" onclick="handleMobileKeyClick('ctrl')" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 text-slate-200 rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">CTRL</button>
+          <button type="button" id="mobile-key-alt" ontouchstart="handleMobileKeyTouchStart(event, 'alt')" ontouchend="handleMobileKeyTouchEnd(event, 'alt')" onclick="handleMobileKeyClick('alt')" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 text-slate-200 rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">ALT</button>
+          <button type="button" id="mobile-key-shift" ontouchstart="handleMobileKeyTouchStart(event, 'shift')" ontouchend="handleMobileKeyTouchEnd(event, 'shift')" onclick="handleMobileKeyClick('shift')" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 text-slate-200 rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">SHIFT</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'enter')" ontouchend="handleMobileKeyTouchEnd(event, 'enter')" onclick="handleMobileKeyClick('enter')" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 select-none" title="Enter / Return">RET</button>
           
           <div class="h-4 w-[1px] bg-slate-700/80 shrink-0 mx-0.5"></div>
 
           <!-- Arrows -->
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'up')" onclick="handleMobileKeyClick('up')" title="Up Arrow (Previous Command)" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">▲</button>
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'down')" onclick="handleMobileKeyClick('down')" title="Down Arrow (Next Command)" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">▼</button>
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'left')" onclick="handleMobileKeyClick('left')" title="Left Arrow" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">◀</button>
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'right')" onclick="handleMobileKeyClick('right')" title="Right Arrow" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">▶</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'up')" ontouchend="handleMobileKeyTouchEnd(event, 'up')" onclick="handleMobileKeyClick('up')" title="Up Arrow (Previous Command)" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">▲</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'down')" ontouchend="handleMobileKeyTouchEnd(event, 'down')" onclick="handleMobileKeyClick('down')" title="Down Arrow (Next Command)" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">▼</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'left')" ontouchend="handleMobileKeyTouchEnd(event, 'left')" onclick="handleMobileKeyClick('left')" title="Left Arrow" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">◀</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'right')" ontouchend="handleMobileKeyTouchEnd(event, 'right')" onclick="handleMobileKeyClick('right')" title="Right Arrow" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">▶</button>
 
           <div class="h-4 w-[1px] bg-slate-700/80 shrink-0 mx-0.5"></div>
 
           <!-- Shell Symbols -->
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'char', '|')" onclick="handleMobileKeyClick('char', '|')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">|</button>
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'char', '~')" onclick="handleMobileKeyClick('char', '~')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">~</button>
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'char', '/')" onclick="handleMobileKeyClick('char', '/')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">/</button>
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'char', '-')" onclick="handleMobileKeyClick('char', '-')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">-</button>
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'char', '_')" onclick="handleMobileKeyClick('char', '_')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">_</button>
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'char', '$')" onclick="handleMobileKeyClick('char', '$')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">$</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'char', '|')" ontouchend="handleMobileKeyTouchEnd(event, 'char', '|')" onclick="handleMobileKeyClick('char', '|')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">|</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'char', '~')" ontouchend="handleMobileKeyTouchEnd(event, 'char', '~')" onclick="handleMobileKeyClick('char', '~')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">~</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'char', '/')" ontouchend="handleMobileKeyTouchEnd(event, 'char', '/')" onclick="handleMobileKeyClick('char', '/')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">/</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'char', '-')" ontouchend="handleMobileKeyTouchEnd(event, 'char', '-')" onclick="handleMobileKeyClick('char', '-')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">-</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'char', '_')" ontouchend="handleMobileKeyTouchEnd(event, 'char', '_')" onclick="handleMobileKeyClick('char', '_')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">_</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'char', '$')" ontouchend="handleMobileKeyTouchEnd(event, 'char', '$')" onclick="handleMobileKeyClick('char', '$')" class="mobile-key px-2 py-1 text-xs font-mono bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">$</button>
 
           <div class="h-4 w-[1px] bg-slate-700/80 shrink-0 mx-0.5"></div>
 
           <!-- Fast Signals -->
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'sigint')" onclick="handleMobileKeyClick('sigint')" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-rose-500/20 active:bg-rose-600 text-rose-300 active:text-white rounded-md border border-rose-500/30 shadow-sm shrink-0 select-none">^C</button>
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'eof')" onclick="handleMobileKeyClick('eof')" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">^D</button>
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'clear')" onclick="handleMobileKeyClick('clear')" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">^L</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'sigint')" ontouchend="handleMobileKeyTouchEnd(event, 'sigint')" onclick="handleMobileKeyClick('sigint')" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-rose-500/20 active:bg-rose-600 text-rose-300 active:text-white rounded-md border border-rose-500/30 shadow-sm shrink-0 select-none">^C</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'eof')" ontouchend="handleMobileKeyTouchEnd(event, 'eof')" onclick="handleMobileKeyClick('eof')" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">^D</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'clear')" ontouchend="handleMobileKeyTouchEnd(event, 'clear')" onclick="handleMobileKeyClick('clear')" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800/90 active:bg-orange-600 text-slate-300 active:text-white rounded-md border border-slate-700/80 shadow-sm shrink-0 select-none">^L</button>
         </div>
 
-        <!-- Utility toggles -->
+        <!-- Utility toggles with scroll buttons -->
         <div class="flex items-center space-x-1 pl-1 shrink-0">
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'toggle-kbd')" onclick="handleMobileKeyClick('toggle-kbd')" title="Toggle Keyboard" class="px-2 py-1 text-xs bg-slate-800 active:bg-slate-700 text-slate-300 hover:text-white rounded-md border border-slate-700 shrink-0 select-none">⌨️</button>
-          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'collapse-bar')" onclick="handleMobileKeyClick('collapse-bar')" id="mobile-collapse-btn" title="Collapse / Expand Key Bar" class="px-1.5 py-1 text-xs bg-slate-800 active:bg-slate-700 text-slate-400 hover:text-white rounded-md border border-slate-700 shrink-0 select-none font-bold">⌄</button>
+          <button type="button" onclick="scrollMobileKeys(-120)" title="Scroll Left" class="px-1.5 py-1 text-xs bg-slate-800 active:bg-slate-700 text-slate-400 hover:text-white rounded-md border border-slate-700 shrink-0 select-none font-bold">‹</button>
+          <button type="button" onclick="scrollMobileKeys(120)" title="Scroll Right" class="px-1.5 py-1 text-xs bg-slate-800 active:bg-slate-700 text-slate-400 hover:text-white rounded-md border border-slate-700 shrink-0 select-none font-bold">›</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'toggle-kbd')" ontouchend="handleMobileKeyTouchEnd(event, 'toggle-kbd')" onclick="handleMobileKeyClick('toggle-kbd')" title="Toggle Keyboard" class="px-2 py-1 text-xs bg-slate-800 active:bg-slate-700 text-slate-300 hover:text-white rounded-md border border-slate-700 shrink-0 select-none">⌨️</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'collapse-bar')" ontouchend="handleMobileKeyTouchEnd(event, 'collapse-bar')" onclick="handleMobileKeyClick('collapse-bar')" id="mobile-collapse-btn" title="Collapse / Expand Key Bar" class="px-1.5 py-1 text-xs bg-slate-800 active:bg-slate-700 text-slate-400 hover:text-white rounded-md border border-slate-700 shrink-0 select-none font-bold">⌄</button>
         </div>
       </div>
     </div>
@@ -1560,6 +1567,48 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
     }
 
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchMoved = false;
+    let pendingMobileKey = null;
+
+    function handleMobileKeyTouchStart(e, keyType, val) {
+      if (!e.touches || e.touches.length === 0) return;
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+      touchMoved = false;
+      pendingMobileKey = { keyType, val };
+    }
+
+    function handleMobileKeyTouchMove(e) {
+      if (!pendingMobileKey || !e.touches || e.touches.length === 0) return;
+      const dx = Math.abs(e.touches[0].clientX - touchStartX);
+      const dy = Math.abs(e.touches[0].clientY - touchStartY);
+      if (dx > 6 || dy > 6) {
+        touchMoved = true;
+        pendingMobileKey = null;
+      }
+    }
+
+    function handleMobileKeyTouchEnd(e, keyType, val) {
+      if (e && !touchMoved && pendingMobileKey) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      if (!touchMoved && pendingMobileKey) {
+        lastMobileTouchTime = Date.now();
+        executeMobileKey(pendingMobileKey.keyType, pendingMobileKey.val);
+      }
+      pendingMobileKey = null;
+      touchMoved = false;
+    }
+
+    function handleMobileKeyTouchCancel() {
+      pendingMobileKey = null;
+      touchMoved = false;
+    }
+
+    // Retain handleMobileKeyTouch for backward compatibility
     function handleMobileKeyTouch(e, keyType, val) {
       if (e) {
         e.preventDefault();
@@ -1569,9 +1618,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       executeMobileKey(keyType, val);
     }
 
+    let isListMouseDragging = false;
     function handleMobileKeyClick(keyType, val) {
       if (Date.now() - lastMobileTouchTime < 450) return;
+      if (isListMouseDragging) return;
       executeMobileKey(keyType, val);
+    }
+
+    function scrollMobileKeys(amount) {
+      const list = document.getElementById('mobile-keys-list');
+      if (list) {
+        list.scrollBy({ left: amount, behavior: 'smooth' });
+      }
     }
 
     function executeMobileKey(keyType, val) {
@@ -3409,6 +3467,47 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
     });
 
+    function initMobileKeysListScrolling() {
+      const list = document.getElementById('mobile-keys-list');
+      if (!list) return;
+
+      list.addEventListener('wheel', (e) => {
+        if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+          list.scrollLeft += e.deltaY;
+          e.preventDefault();
+        }
+      }, { passive: false });
+
+      let isDown = false;
+      let startX = 0;
+      let scrollStart = 0;
+
+      list.addEventListener('mousedown', (e) => {
+        isDown = true;
+        isListMouseDragging = false;
+        startX = e.pageX - list.offsetLeft;
+        scrollStart = list.scrollLeft;
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (isDown) {
+          isDown = false;
+          setTimeout(() => { isListMouseDragging = false; }, 50);
+        }
+      });
+
+      list.addEventListener('mousemove', (e) => {
+        if (!isDown) return;
+        const x = e.pageX - list.offsetLeft;
+        const dist = x - startX;
+        if (Math.abs(dist) > 5) {
+          isListMouseDragging = true;
+          list.scrollLeft = scrollStart - dist;
+        }
+      });
+    }
+
+    initMobileKeysListScrolling();
     checkAuth();
   </script>
 </body>
