@@ -1127,10 +1127,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <div class="h-4 w-[1px] bg-slate-700/80 shrink-0 mx-0.5"></div>
 
           <!-- Arrows -->
-          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'up')" ontouchend="handleMobileKeyTouchEnd(event, 'up')" onclick="handleMobileKeyClick('up')" title="Up Arrow (Previous Command)" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">▲</button>
-          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'down')" ontouchend="handleMobileKeyTouchEnd(event, 'down')" onclick="handleMobileKeyClick('down')" title="Down Arrow (Next Command)" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">▼</button>
-          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'left')" ontouchend="handleMobileKeyTouchEnd(event, 'left')" onclick="handleMobileKeyClick('left')" title="Left Arrow" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">◀</button>
-          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'right')" ontouchend="handleMobileKeyTouchEnd(event, 'right')" onclick="handleMobileKeyClick('right')" title="Right Arrow" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">▶</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'up')" ontouchend="handleMobileKeyTouchEnd(event, 'up')" onmousedown="handleMobileKeyMouseDown(event, 'up')" onmouseup="handleMobileKeyMouseUp(event, 'up')" onmouseleave="handleMobileKeyMouseLeave(event)" onclick="handleMobileKeyClick('up')" title="Up Arrow (Previous Command)" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">▲</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'down')" ontouchend="handleMobileKeyTouchEnd(event, 'down')" onmousedown="handleMobileKeyMouseDown(event, 'down')" onmouseup="handleMobileKeyMouseUp(event, 'down')" onmouseleave="handleMobileKeyMouseLeave(event)" onclick="handleMobileKeyClick('down')" title="Down Arrow (Next Command)" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">▼</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'left')" ontouchend="handleMobileKeyTouchEnd(event, 'left')" onmousedown="handleMobileKeyMouseDown(event, 'left')" onmouseup="handleMobileKeyMouseUp(event, 'left')" onmouseleave="handleMobileKeyMouseLeave(event)" onclick="handleMobileKeyClick('left')" title="Left Arrow" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">◀</button>
+          <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'right')" ontouchend="handleMobileKeyTouchEnd(event, 'right')" onmousedown="handleMobileKeyMouseDown(event, 'right')" onmouseup="handleMobileKeyMouseUp(event, 'right')" onmouseleave="handleMobileKeyMouseLeave(event)" onclick="handleMobileKeyClick('right')" title="Right Arrow" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">▶</button>
 
           <div class="h-4 w-[1px] bg-slate-700/80 shrink-0 mx-0.5"></div>
 
@@ -1571,41 +1571,137 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let touchStartY = 0;
     let touchMoved = false;
     let pendingMobileKey = null;
+    let keyRepeatTimeout = null;
+    let keyRepeatInterval = null;
+    let hasRepeated = false;
+    let mouseRepeatTimeout = null;
+    let mouseRepeatInterval = null;
+    let mouseRepeated = false;
+
+    const KEY_REPEAT_INITIAL_DELAY_MS = 350;
+    const KEY_REPEAT_INTERVAL_MS = 100;
+
+    function isRepeatableKey(keyType) {
+      return keyType === 'up' || keyType === 'down' || keyType === 'left' || keyType === 'right';
+    }
+
+    function clearKeyRepeat() {
+      if (keyRepeatTimeout) {
+        clearTimeout(keyRepeatTimeout);
+        keyRepeatTimeout = null;
+      }
+      if (keyRepeatInterval) {
+        clearInterval(keyRepeatInterval);
+        keyRepeatInterval = null;
+      }
+    }
+
+    function clearMouseRepeat() {
+      if (mouseRepeatTimeout) {
+        clearTimeout(mouseRepeatTimeout);
+        mouseRepeatTimeout = null;
+      }
+      if (mouseRepeatInterval) {
+        clearInterval(mouseRepeatInterval);
+        mouseRepeatInterval = null;
+      }
+    }
 
     function handleMobileKeyTouchStart(e, keyType, val) {
+      clearKeyRepeat();
+      hasRepeated = false;
       if (!e.touches || e.touches.length === 0) return;
       touchStartX = e.touches[0].clientX;
       touchStartY = e.touches[0].clientY;
       touchMoved = false;
       pendingMobileKey = { keyType, val };
+
+      if (isRepeatableKey(keyType)) {
+        keyRepeatTimeout = setTimeout(() => {
+          if (!touchMoved && pendingMobileKey) {
+            hasRepeated = true;
+            lastMobileTouchTime = Date.now();
+            executeMobileKey(pendingMobileKey.keyType, pendingMobileKey.val);
+            keyRepeatInterval = setInterval(() => {
+              if (!touchMoved && pendingMobileKey) {
+                executeMobileKey(pendingMobileKey.keyType, pendingMobileKey.val);
+              } else {
+                clearKeyRepeat();
+              }
+            }, KEY_REPEAT_INTERVAL_MS);
+          }
+        }, KEY_REPEAT_INITIAL_DELAY_MS);
+      }
     }
 
     function handleMobileKeyTouchMove(e) {
       if (!pendingMobileKey || !e.touches || e.touches.length === 0) return;
       const dx = Math.abs(e.touches[0].clientX - touchStartX);
       const dy = Math.abs(e.touches[0].clientY - touchStartY);
-      if (dx > 6 || dy > 6) {
-        touchMoved = true;
-        pendingMobileKey = null;
+
+      if (hasRepeated) {
+        if (e.cancelable) e.preventDefault();
+        const touch = e.touches[0];
+        const el = document.elementFromPoint(touch.clientX, touch.clientY);
+        if (!el || !el.closest('.mobile-key') || dx > 35 || dy > 35) {
+          clearKeyRepeat();
+          pendingMobileKey = null;
+          touchMoved = true;
+        }
+      } else {
+        if (dx > 6 || dy > 6) {
+          touchMoved = true;
+          clearKeyRepeat();
+          pendingMobileKey = null;
+        }
       }
     }
 
     function handleMobileKeyTouchEnd(e, keyType, val) {
+      clearKeyRepeat();
       if (e && !touchMoved && pendingMobileKey) {
         e.preventDefault();
         e.stopPropagation();
       }
-      if (!touchMoved && pendingMobileKey) {
+      if (!touchMoved && pendingMobileKey && !hasRepeated) {
         lastMobileTouchTime = Date.now();
         executeMobileKey(pendingMobileKey.keyType, pendingMobileKey.val);
       }
       pendingMobileKey = null;
       touchMoved = false;
+      hasRepeated = false;
     }
 
     function handleMobileKeyTouchCancel() {
+      clearKeyRepeat();
       pendingMobileKey = null;
       touchMoved = false;
+      hasRepeated = false;
+    }
+
+    function handleMobileKeyMouseDown(e, keyType, val) {
+      if (Date.now() - lastMobileTouchTime < 450) return;
+      if (e.button !== 0) return;
+      if (!isRepeatableKey(keyType)) return;
+
+      clearMouseRepeat();
+      mouseRepeated = false;
+
+      mouseRepeatTimeout = setTimeout(() => {
+        mouseRepeated = true;
+        executeMobileKey(keyType, val);
+        mouseRepeatInterval = setInterval(() => {
+          executeMobileKey(keyType, val);
+        }, KEY_REPEAT_INTERVAL_MS);
+      }, KEY_REPEAT_INITIAL_DELAY_MS);
+    }
+
+    function handleMobileKeyMouseUp(e, keyType, val) {
+      clearMouseRepeat();
+    }
+
+    function handleMobileKeyMouseLeave(e) {
+      clearMouseRepeat();
     }
 
     // Retain handleMobileKeyTouch for backward compatibility
@@ -1622,6 +1718,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     function handleMobileKeyClick(keyType, val) {
       if (Date.now() - lastMobileTouchTime < 450) return;
       if (isListMouseDragging) return;
+      if (mouseRepeated) {
+        mouseRepeated = false;
+        return;
+      }
       executeMobileKey(keyType, val);
     }
 
@@ -2062,6 +2162,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         titleBlinkInterval = null;
         document.title = originalDocTitle;
       }
+    });
+
+    window.addEventListener('blur', () => {
+      clearKeyRepeat();
+      clearMouseRepeat();
     });
 
     function toggleNotificationPanel() {
