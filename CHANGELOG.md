@@ -8,6 +8,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 
 ## [Unreleased]
 
+- `[2026-09-29]{02:24:00} Web Terminal: Add hold-to-repeat for arrow keys on mobile keypad bar with typematic repeat timers (350ms delay, 100ms interval) #Issue 56`
 - `[2026-09-29]{02:11:00} Web Terminal: Enable smooth touch swiping and scroll nudges on mobile accessory keypad bar, preventing button accidental firing during swipe #Issue 54`
 - `[2026-09-29]{01:52:00} Web Terminal: Add Shift modifier, Shift+Tab backtab, dedicated Return button, and inter-button modifier interactions to mobile accessory keypad #Issue 52`
 - `[2026-09-22]{22:54:00} Security Hardening: Validate process start interpreters and environment directives, enforce 0700/0600 on /etc/fire-pm and dump snapshots, eliminate /tmp TUI IPC fallback, drop sudoers SETENV, harden rate limiting, and pass SSH passwords via stdin #Issue 50`
