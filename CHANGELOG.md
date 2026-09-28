@@ -8,6 +8,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 
 ## [Unreleased]
 
+- `[2026-09-29]{01:52:00} Web Terminal: Add Shift modifier, Shift+Tab backtab, dedicated Return button, and inter-button modifier interactions to mobile accessory keypad #Issue 52`
 - `[2026-09-22]{22:54:00} Security Hardening: Validate process start interpreters and environment directives, enforce 0700/0600 on /etc/fire-pm and dump snapshots, eliminate /tmp TUI IPC fallback, drop sudoers SETENV, harden rate limiting, and pass SSH passwords via stdin #Issue 50`
 - `[2026-09-20]{12:05:00} Web Terminal: Add mobile compatibility with virtual keyboard accessory keypad, sticky Ctrl/Alt modifiers, visualViewport dynamic resizing, and responsive actions menu #Issue 48`
 
