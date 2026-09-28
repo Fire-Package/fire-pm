@@ -1116,6 +1116,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <button type="button" ontouchstart="handleMobileKeyTouch(event, 'tab')" onclick="handleMobileKeyClick('tab')" class="mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">TAB</button>
           <button type="button" id="mobile-key-ctrl" ontouchstart="handleMobileKeyTouch(event, 'ctrl')" onclick="handleMobileKeyClick('ctrl')" class="mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-slate-800 text-slate-200 rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">CTRL</button>
           <button type="button" id="mobile-key-alt" ontouchstart="handleMobileKeyTouch(event, 'alt')" onclick="handleMobileKeyClick('alt')" class="mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-slate-800 text-slate-200 rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">ALT</button>
+          <button type="button" id="mobile-key-shift" ontouchstart="handleMobileKeyTouch(event, 'shift')" onclick="handleMobileKeyClick('shift')" class="mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-slate-800 text-slate-200 rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none">SHIFT</button>
+          <button type="button" ontouchstart="handleMobileKeyTouch(event, 'enter')" onclick="handleMobileKeyClick('enter')" class="mobile-key px-2 py-1 text-xs font-mono font-bold bg-slate-800 active:bg-orange-600 text-slate-200 active:text-white rounded-md border border-slate-700 shadow-sm shrink-0 select-none" title="Enter / Return">RET</button>
           
           <div class="h-4 w-[1px] bg-slate-700/80 shrink-0 mx-0.5"></div>
 
@@ -1545,6 +1547,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let mobileBarCollapsed = false;
     let ctrlSticky = false;
     let altSticky = false;
+    let shiftSticky = false;
     let currentFontSize = window.innerWidth < 480 ? 12 : (window.innerWidth < 768 ? 13 : 14);
     let lastMobileTouchTime = 0;
 
@@ -1581,9 +1584,25 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       switch (keyType) {
         case 'esc':
           sendTerminalData('\x1b');
+          if (ctrlSticky || altSticky || shiftSticky) {
+            ctrlSticky = false;
+            altSticky = false;
+            shiftSticky = false;
+            updateModifierUI();
+          }
           break;
         case 'tab':
-          sendTerminalData('\t');
+          if (shiftSticky) {
+            sendTerminalData('\x1b[Z'); // ANSI Backtab (Shift+Tab)
+            shiftSticky = false;
+            updateModifierUI();
+          } else if (altSticky) {
+            sendTerminalData('\x1b\t');
+            altSticky = false;
+            updateModifierUI();
+          } else {
+            sendTerminalData('\t');
+          }
           break;
         case 'ctrl':
           toggleCtrlSticky();
@@ -1591,17 +1610,90 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         case 'alt':
           toggleAltSticky();
           break;
+        case 'shift':
+          toggleShiftSticky();
+          break;
+        case 'enter':
+          if (altSticky) {
+            sendTerminalData('\x1b\r');
+            altSticky = false;
+            updateModifierUI();
+          } else {
+            sendTerminalData('\r');
+            if (shiftSticky || ctrlSticky) {
+              shiftSticky = false;
+              ctrlSticky = false;
+              updateModifierUI();
+            }
+          }
+          break;
         case 'up':
-          sendTerminalData('\x1b[A');
+          if (shiftSticky) {
+            sendTerminalData('\x1b[1;2A');
+            shiftSticky = false;
+            updateModifierUI();
+          } else if (ctrlSticky) {
+            sendTerminalData('\x1b[1;5A');
+            ctrlSticky = false;
+            updateModifierUI();
+          } else if (altSticky) {
+            sendTerminalData('\x1b[1;3A');
+            altSticky = false;
+            updateModifierUI();
+          } else {
+            sendTerminalData('\x1b[A');
+          }
           break;
         case 'down':
-          sendTerminalData('\x1b[B');
+          if (shiftSticky) {
+            sendTerminalData('\x1b[1;2B');
+            shiftSticky = false;
+            updateModifierUI();
+          } else if (ctrlSticky) {
+            sendTerminalData('\x1b[1;5B');
+            ctrlSticky = false;
+            updateModifierUI();
+          } else if (altSticky) {
+            sendTerminalData('\x1b[1;3B');
+            altSticky = false;
+            updateModifierUI();
+          } else {
+            sendTerminalData('\x1b[B');
+          }
           break;
         case 'left':
-          sendTerminalData('\x1b[D');
+          if (shiftSticky) {
+            sendTerminalData('\x1b[1;2D');
+            shiftSticky = false;
+            updateModifierUI();
+          } else if (ctrlSticky) {
+            sendTerminalData('\x1b[1;5D');
+            ctrlSticky = false;
+            updateModifierUI();
+          } else if (altSticky) {
+            sendTerminalData('\x1bb');
+            altSticky = false;
+            updateModifierUI();
+          } else {
+            sendTerminalData('\x1b[D');
+          }
           break;
         case 'right':
-          sendTerminalData('\x1b[C');
+          if (shiftSticky) {
+            sendTerminalData('\x1b[1;2C');
+            shiftSticky = false;
+            updateModifierUI();
+          } else if (ctrlSticky) {
+            sendTerminalData('\x1b[1;5C');
+            ctrlSticky = false;
+            updateModifierUI();
+          } else if (altSticky) {
+            sendTerminalData('\x1bf');
+            altSticky = false;
+            updateModifierUI();
+          } else {
+            sendTerminalData('\x1b[C');
+          }
           break;
         case 'char':
           if (val) {
@@ -1611,6 +1703,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               sendTerminalData('\x1b' + val);
               altSticky = false;
               updateModifierUI();
+            } else if (shiftSticky) {
+              sendShiftChar(val);
             } else {
               sendTerminalData(val);
             }
@@ -1645,13 +1739,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     function toggleCtrlSticky() {
       ctrlSticky = !ctrlSticky;
-      if (ctrlSticky) altSticky = false;
+      if (ctrlSticky) { altSticky = false; shiftSticky = false; }
       updateModifierUI();
     }
 
     function toggleAltSticky() {
       altSticky = !altSticky;
-      if (altSticky) ctrlSticky = false;
+      if (altSticky) { ctrlSticky = false; shiftSticky = false; }
+      updateModifierUI();
+    }
+
+    function toggleShiftSticky() {
+      shiftSticky = !shiftSticky;
+      if (shiftSticky) { ctrlSticky = false; altSticky = false; }
       updateModifierUI();
     }
 
@@ -1673,6 +1773,41 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           altBtn.className = 'mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-slate-800 text-slate-200 rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none';
         }
       }
+
+      const shiftBtn = document.getElementById('mobile-key-shift');
+      if (shiftBtn) {
+        if (shiftSticky) {
+          shiftBtn.className = 'mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-orange-500 text-white rounded-md border border-orange-400 shadow-sm shrink-0 transition select-none ring-2 ring-orange-500/50';
+        } else {
+          shiftBtn.className = 'mobile-key px-2.5 py-1 text-xs font-mono font-bold bg-slate-800 text-slate-200 rounded-md border border-slate-700 shadow-sm shrink-0 transition select-none';
+        }
+      }
+    }
+
+    const SHIFT_MAP = {
+      '1': '!', '2': '@', '3': '#', '4': '$', '5': '%',
+      '6': '^', '7': '&', '8': '*', '9': '(', '0': ')',
+      '`': '~', '-': '_', '=': '+', '[': '{', ']': '}',
+      '\\': '|', ';': ':', "'": '"', ',': '<', '.': '>',
+      '/': '?'
+    };
+
+    function sendShiftChar(str) {
+      if (!str) return;
+      let out = '';
+      for (let i = 0; i < str.length; i++) {
+        const c = str[i];
+        if (SHIFT_MAP[c]) {
+          out += SHIFT_MAP[c];
+        } else if (c >= 'a' && c <= 'z') {
+          out += c.toUpperCase();
+        } else {
+          out += c;
+        }
+      }
+      sendTerminalData(out);
+      shiftSticky = false;
+      updateModifierUI();
     }
 
     function sendCtrlChar(char) {
@@ -2903,6 +3038,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             return false;
           }
 
+          // Shift+Tab: Backtab
+          if (e.shiftKey && e.key === 'Tab') {
+            e.preventDefault();
+            sendTerminalData('\x1b[Z');
+            return false;
+          }
+
         }
         return true;
       });
@@ -2921,6 +3063,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             sendTerminalData('\x1b' + data);
             altSticky = false;
             updateModifierUI();
+            return;
+          }
+          if (shiftSticky && data.length > 0) {
+            if (data === '\t') {
+              sendTerminalData('\x1b[Z');
+              shiftSticky = false;
+              updateModifierUI();
+              return;
+            }
+            sendShiftChar(data[0]);
+            if (data.length > 1) {
+              sendTerminalData(data.slice(1));
+            }
             return;
           }
           if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
