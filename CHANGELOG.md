@@ -8,6 +8,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 
 ## [Unreleased]
 
+- `[2026-09-29]{14:58:00} Web Terminal: Bridge browser microphone to loopback 127.0.0.1:4713 for Antigravity (agy) voice dictation, intercept F5 to prevent browser reload, and add desktop & mobile 🎙️ controls #Issue 58`
 - `[2026-09-29]{02:24:00} Web Terminal: Add hold-to-repeat for arrow keys on mobile keypad bar with typematic repeat timers (350ms delay, 100ms interval) #Issue 56`
 - `[2026-09-29]{02:11:00} Web Terminal: Enable smooth touch swiping and scroll nudges on mobile accessory keypad bar, preventing button accidental firing during swipe #Issue 54`
 - `[2026-09-29]{01:52:00} Web Terminal: Add Shift modifier, Shift+Tab backtab, dedicated Return button, and inter-button modifier interactions to mobile accessory keypad #Issue 52`
