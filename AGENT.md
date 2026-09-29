@@ -49,6 +49,7 @@ fire-pm/
 - **Read-Only Session Sharing:** Cryptographically secure 256-bit share tokens (`ShareTokenManager`) with configurable TTLs (1h, 6h, 24h, or session lifespan). Read-only observers stream stdout and scrollback buffers in real time, while all stdin inputs, signals, resizing, and file transfers are strictly rejected and dropped on the server.
 - **Signal Dispatching:** Fast loop / process interrupts (`Ctrl+C`, `Ctrl+Z`, `Ctrl+D`) resolve the active foreground process group via `os.tcgetpgrp` and dispatch direct kernel signals (`os.killpg`) to instantly break infinite stdout loops (e.g. `yes`).
 - **Authentication & Security:** Salted PBKDF2-HMAC-SHA256 password hashing, brute-force IP rate limiting with loopback proxy header verification (5 attempts / 5-min lockout), 24-hour session tokens with dynamic HTTPS Secure cookies, WebSocket Origin validation against CSWSH, and 500MB upload limits.
+- **Browser Microphone & Voice Bridge (`AgyMicBridge`):** Emulates `agy mic-serve` on loopback `127.0.0.1:4713`. Intercepts `F5` across window capture phase and xterm to prevent accidental browser reloads, triggering Web Audio API capture downsampled to 16kHz 16-bit mono signed PCM (`audio/L16`). Audio packets stream over WebSocket with a 32KB pre-buffer, routing remote client voice input seamlessly into Antigravity CLI dictation turns.
 - **Tunnel Routing:** Automatically routes through custom Nginx domain tunnels when configured, or falls back to Cloudflare tunnels.
 
 ### 3. Public HTTPS Tunnels
