@@ -8,6 +8,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 
 ## [Unreleased]
 
+- `[2026-10-01]{22:42:00} Web Terminal: Add dynamic session and tab title updates via fire ssh title CLI, POST /api/title daemon endpoint, and interactive UI prompt with real-time WebSocket broadcast and independent tab renaming`
 - `[2026-10-01]{22:32:00} Web Terminal: Remove voice dictation system and legacy mic bridge, eliminating unused loopback TCP listener, F5 terminal key interception, and mobile/desktop voice controls`
 - `[2026-10-01]{21:52:00} Web Terminal: Add --title flag to fire ssh to customize browser tab title, header branding, and session status across web and CLI list outputs`
 - `[2026-10-01]{21:35:00} Web Terminal: Replace raw PCM audio streaming with browser-native Web Speech API Voice-to-Text, typing transcribed speech directly into active terminal with CLI command normalization and live preview badge`

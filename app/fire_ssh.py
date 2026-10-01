@@ -426,13 +426,21 @@ class TerminalSession:
 
     def send_ws_json(self, data: dict):
         with self.sock_lock:
+            payload = json.dumps(data).encode('utf-8')
+            frame = ws_make_frame(payload, opcode=1)
             if self.sock:
                 try:
-                    payload = json.dumps(data).encode('utf-8')
-                    frame = ws_make_frame(payload, opcode=1)
                     self.sock.sendall(frame)
                 except Exception:
                     self.sock = None
+            dead_ro = []
+            for ro in list(self.readonly_socks):
+                try:
+                    ro.sendall(frame)
+                except Exception:
+                    dead_ro.append(ro)
+            for ro in dead_ro:
+                self.readonly_socks.discard(ro)
 
     def _check_fg_process(self):
         if not self.master_fd or self.closed:
@@ -917,7 +925,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <header class="h-12 bg-slate-900 border-b border-slate-800 px-2 sm:px-4 flex items-center justify-between select-none">
       <div class="flex items-center space-x-1.5 sm:space-x-3 min-w-0">
         <span class="text-lg shrink-0">🔥</span>
-        <span id="brand-header-title" class="text-xs sm:text-sm font-semibold text-white truncate max-w-[140px] sm:max-w-xs">Fire PM</span>
+        <button id="brand-header-btn" onclick="promptUpdateTitle()" class="flex items-center gap-1 group/title text-left bg-transparent border-0 p-0 cursor-pointer min-w-0" title="Click to rename session title">
+          <span id="brand-header-title" class="text-xs sm:text-sm font-semibold text-white truncate max-w-[140px] sm:max-w-xs group-hover/title:text-orange-300 transition">Fire PM</span>
+          <svg class="w-3 h-3 text-slate-400 opacity-0 group-hover/title:opacity-100 transition shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </button>
         <span id="conn-badge" class="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono flex items-center gap-1 shrink-0">
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
           Connected
@@ -1098,6 +1109,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             </button>
 
             <div class="border-t border-slate-800 pt-1">
+              <button onclick="promptUpdateTitle(); closeMobileActionsMenu()" class="w-full px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 rounded-lg flex items-center gap-2 transition">
+                <span>🏷️</span> <span>Rename Session</span>
+              </button>
+              <button onclick="promptRenameTab(activeTabId); closeMobileActionsMenu()" class="w-full px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 rounded-lg flex items-center gap-2 transition">
+                <span>✏️</span> <span>Rename Active Tab</span>
+              </button>
               <button onclick="openShareModal(); closeMobileActionsMenu()" class="w-full px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 rounded-lg flex items-center gap-2 transition">
                 <span>🔗</span> <span>Share Session</span>
               </button>
@@ -1390,6 +1407,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <span>Close Tab</span>
         </span>
         <span class="text-[10px] text-slate-500 font-mono">Alt+W</span>
+      </button>
+      <button onclick="promptRenameTab(activeTabId); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16M4 4h16M9 4v16M15 4v16"/></svg>
+          <span>Rename Active Tab...</span>
+        </span>
+      </button>
+      <button onclick="promptUpdateTitle(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          <span>Rename Session Title...</span>
+        </span>
       </button>
       <div class="h-px bg-slate-800 my-1"></div>
       <button onclick="triggerFileInput(); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
@@ -2182,20 +2211,60 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let originalDocTitle = (window.SESSION_TITLE || document.title || 'Fire SSH');
     let titleBlinkInterval = null;
 
-    function applySessionTitle() {
-      if (!window.SESSION_TITLE) return;
-      document.title = window.SESSION_TITLE;
-      originalDocTitle = window.SESSION_TITLE;
+    function applySessionTitle(newTitle) {
+      if (typeof newTitle === 'string') {
+        window.SESSION_TITLE = newTitle;
+      }
+      const titleToApply = window.SESSION_TITLE || 'Fire PM';
+      document.title = titleToApply;
+      originalDocTitle = titleToApply;
 
       const brandEl = document.getElementById('brand-header-title');
       if (brandEl) {
-        brandEl.textContent = window.SESSION_TITLE;
-        brandEl.title = window.SESSION_TITLE;
+        brandEl.textContent = titleToApply;
+        brandEl.title = titleToApply + (window.IS_READONLY ? '' : ' (Click to rename)');
       }
       const loginSubtitle = document.getElementById('login-card-subtitle');
       if (loginSubtitle) {
-        loginSubtitle.textContent = window.SESSION_TITLE;
+        loginSubtitle.textContent = titleToApply;
       }
+    }
+
+    async function promptUpdateTitle() {
+      if (window.IS_READONLY) return;
+      const current = window.SESSION_TITLE || '';
+      const newTitle = prompt('Enter session title (browser tab & header):', current);
+      if (newTitle === null) return;
+      const clean = newTitle.trim();
+      try {
+        const res = await fetch('/api/title', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: clean })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          applySessionTitle(data.title);
+          showToast(`Session title updated to "${data.title || 'Fire PM'}"`);
+        } else {
+          showToast(data.error || 'Failed to update title');
+        }
+      } catch (e) {
+        showToast('Error updating session title');
+      }
+    }
+
+    function promptRenameTab(tabId) {
+      if (window.IS_READONLY) return;
+      const targetId = tabId || activeTabId;
+      const tab = tabs[targetId];
+      if (!tab) return;
+      const newName = prompt(`Rename Tab ${tab.index}:`, tab.title || '');
+      if (newName === null) return;
+      tab.title = newName.trim() || 'bash';
+      renderTabsList();
+      saveTabsState();
+      showToast(`Tab ${tab.index} renamed to "${tab.title}"`);
     }
 
     function playNotificationChime() {
@@ -3151,7 +3220,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           </button>` : '';
 
         return `
-          <div onclick="switchTab('${tabId}')" class="group flex items-center gap-1.5 px-3 py-1 rounded-t-lg text-xs font-mono cursor-pointer transition select-none border-t-2 ${
+          <div onclick="switchTab('${tabId}')" ondblclick="event.stopPropagation(); promptRenameTab('${tabId}')" title="Click to switch, double-click to rename" class="group flex items-center gap-1.5 px-3 py-1 rounded-t-lg text-xs font-mono cursor-pointer transition select-none border-t-2 ${
             isActive
               ? 'bg-slate-900 text-white border-orange-500 shadow-md font-semibold'
               : 'bg-slate-950/70 text-slate-400 border-transparent hover:bg-slate-900/60 hover:text-slate-200'
@@ -3429,6 +3498,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             } else if (msg.type === 'latency_terminal_result') {
               serverTerminalLatency = msg.latency;
               updateLatencyDisplay();
+            } else if (msg.type === 'title_update') {
+              applySessionTitle(msg.title);
             }
           } catch(e) {
             renderTabOutput(tab, event.data);
@@ -4322,6 +4393,52 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_json({"success": False, "error": "Invalid share token or unauthorized"}, status=403)
             return
 
+        elif parsed.path == '/api/title':
+            client_ip = self.get_client_ip()
+            is_loopback = client_ip in ('127.0.0.1', '::1', 'localhost') or client_ip.startswith('127.')
+
+            if not is_loopback:
+                if not self.is_authenticated():
+                    self.send_json({"success": False, "error": "Unauthorized"}, status=401)
+                    return
+                token = self.get_auth_token() or self.get_cookie_token()
+                if not token or (hasattr(self.server, 'shares') and self.server.shares.validate(token)):
+                    self.send_json({"success": False, "error": "Read-only users cannot modify session title"}, status=403)
+                    return
+
+            content_len = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_len).decode('utf-8', errors='ignore') if content_len > 0 else '{}'
+            new_title = ""
+            try:
+                data = json.loads(body)
+                new_title = str(data.get('title', '')).strip()
+            except Exception:
+                pass
+
+            self.server.title = new_title
+
+            try:
+                port = self.server.server_address[1]
+                state_file = f"/tmp/fire-ssh/{port}.json"
+                if os.path.exists(state_file):
+                    with open(state_file, 'r', encoding='utf-8') as f:
+                        s_data = json.load(f)
+                    s_data['title'] = new_title
+                    with open(state_file, 'w', encoding='utf-8') as f:
+                        json.dump(s_data, f, indent=2)
+            except Exception:
+                pass
+
+            try:
+                msg = {"type": "title_update", "title": new_title}
+                for sess in self.server.terminals.list_all():
+                    sess.send_ws_json(msg)
+            except Exception:
+                pass
+
+            self.send_json({"success": True, "title": new_title})
+            return
+
         elif parsed.path == '/api/logout':
             token = self.get_auth_token() or self.get_cookie_token()
             if token:
@@ -4595,6 +4712,10 @@ def main():
     p_check.add_argument("salt", type=str, help="Salt hex")
     p_check.add_argument("hash", type=str, help="Hash hex")
 
+    p_title = subparsers.add_parser("title", help="Update web terminal session title")
+    p_title.add_argument("new_title", type=str, help="New session title")
+    p_title.add_argument("--port", type=int, default=DEFAULT_PORT, help="Port of running session")
+
     args = parser.parse_args()
 
     if args.command == "hash-password":
@@ -4617,6 +4738,22 @@ def main():
             except Exception:
                 plain_pw = None
         run_server(args.port, plain_password=plain_pw, salt_hex=args.salt, hash_hex=args.hash, shell=args.shell, title=getattr(args, "title", None))
+
+    elif args.command == "title":
+        import urllib.request
+        url = f"http://127.0.0.1:{args.port}/api/title"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps({"title": args.new_title}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=3) as r:
+                res = json.loads(r.read().decode("utf-8"))
+                print(json.dumps(res))
+        except Exception as e:
+            print(json.dumps({"success": False, "error": str(e)}))
 
     else:
         parser.print_help()

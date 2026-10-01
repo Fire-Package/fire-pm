@@ -2704,6 +2704,103 @@ action_ssh_close() {
   return 0
 }
 
+action_ssh_title() {
+  local target_port=""
+  local new_title=""
+
+  if [[ ${#ARGS[@]} -eq 0 ]]; then
+    error "Title cannot be empty. Usage: fire ssh title [PORT] \"<new-title>\""
+    exit 1
+  elif [[ ${#ARGS[@]} -eq 1 ]]; then
+    new_title="${ARGS[0]}"
+  else
+    if [[ "${ARGS[0]}" =~ ^[0-9]+$ ]]; then
+      target_port="${ARGS[0]}"
+      new_title="${ARGS[1]}"
+    else
+      target_port="${ARGS[1]}"
+      new_title="${ARGS[0]}"
+      if [[ ! "$target_port" =~ ^[0-9]+$ ]]; then
+        target_port=""
+        new_title="${ARGS[*]}"
+      fi
+    fi
+  fi
+
+  if [[ -z "$target_port" ]]; then
+    local active_ports=()
+    if [[ -d "$SSH_STATE_DIR" ]]; then
+      for state_file in "$SSH_STATE_DIR"/*.json; do
+        [[ -f "$state_file" ]] || continue
+        local p pid
+        p=$(basename "$state_file" .json)
+        pid=$(grep -o '"pid": *[0-9]*' "$state_file" | awk -F: '{print $2}' | tr -d ' ')
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+          active_ports+=("$p")
+        fi
+      done
+    fi
+
+    if [[ ${#active_ports[@]} -eq 0 ]]; then
+      error "No active SSH web terminal sessions found."
+      exit 1
+    elif [[ ${#active_ports[@]} -eq 1 ]]; then
+      target_port="${active_ports[0]}"
+    else
+      error "Multiple active SSH sessions found (${active_ports[*]}). Please specify the port:"
+      echo -e "  Usage: ${CYAN}fire ssh title <PORT> \"$new_title\"${NC}"
+      action_ssh_list
+      exit 1
+    fi
+  fi
+
+  local state_file="$SSH_STATE_DIR/${target_port}.json"
+  if [[ ! -f "$state_file" ]]; then
+    error "No active SSH session found on port $target_port"
+    exit 1
+  fi
+
+  # 1. Update state file on disk
+  python3 -c "
+import json, sys
+path = '$state_file'
+try:
+    with open(path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    data['title'] = sys.argv[1]
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2)
+except Exception:
+    pass
+" "$new_title"
+
+  # 2. Notify the running daemon via local loopback endpoint
+  local py_script
+  py_script=$(find_fire_ssh_script 2>/dev/null)
+  if [[ -n "$py_script" && -f "$py_script" ]]; then
+    python3 "$py_script" title "$new_title" --port "$target_port" >/dev/null 2>&1 || true
+  else
+    python3 -c "
+import urllib.request, json, sys
+url = f'http://127.0.0.1:${target_port}/api/title'
+req = urllib.request.Request(
+    url,
+    data=json.dumps({'title': sys.argv[1]}).encode('utf-8'),
+    headers={'Content-Type': 'application/json'},
+    method='POST'
+)
+try:
+    with urllib.request.urlopen(req, timeout=3) as r:
+        pass
+except Exception:
+    pass
+" "$new_title" 2>/dev/null || true
+  fi
+
+  success "Updated title for SSH session on port ${CYAN}$target_port${NC} to ${YELLOW}\"${new_title}\"${NC}"
+  return 0
+}
+
 action_ssh_start() {
   local py_script
   py_script=$(find_fire_ssh_script) || { error "fire_ssh.py not found"; exit 1; }
@@ -2970,6 +3067,10 @@ action_ssh() {
       ARGS=("${ARGS[@]:1}")
       action_ssh_close
       ;;
+    title|rename|set-title)
+      ARGS=("${ARGS[@]:1}")
+      action_ssh_title
+      ;;
     restart)
       ARGS=("${ARGS[@]:1}")
       action_ssh_close
@@ -2987,7 +3088,7 @@ action_ssh() {
         action_ssh_start
       else
         error "Unknown ssh command: $subcmd"
-        echo "Usage: fire ssh [start|list|close|restart|password] [options]"
+        echo "Usage: fire ssh [start|list|close|restart|password|title] [options]"
         exit 1
       fi
       ;;
@@ -3623,6 +3724,9 @@ _fire_completions() {
           if [[ "$cur" == -* ]]; then
             COMPREPLY=( $(compgen -W "--password -p --port --daemon -d --no-tunnel --title -t" -- "$cur") )
             return 0
+          else
+            COMPREPLY=( $(compgen -W "start list close restart password title rename" -- "$cur") )
+            return 0
           fi
           ;;
       esac
@@ -3841,7 +3945,7 @@ show_help() {
   echo "  tunnel list         List active tunnels"
   echo "  tunnel close <port> Close a tunnel"
   echo "  tunnel setup        Configure custom domain tunnels"
-  echo "  ssh [start|list|close|restart|password] Remote web terminal via secure tunnel (password protected)"
+  echo "  ssh [start|list|close|restart|password|title] Remote web terminal via secure tunnel (password protected)"
   echo ""
   echo "Examples:"
   echo "  fire start server.py --name api"
@@ -3855,6 +3959,7 @@ show_help() {
   echo "  fire tunnel open 3000"
   echo "  fire ssh"
   echo "  fire ssh --title \"Production\" --daemon"
+  echo "  fire ssh title \"Staging\""
   echo "  fire ssh --password mysecret --daemon"
   echo "  fire ssh list"
   echo "  fire ssh close"
