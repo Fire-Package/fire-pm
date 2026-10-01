@@ -1057,10 +1057,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           </svg>
           <span class="hidden md:inline">Download</span>
         </button>
-        <button id="voice-btn" onclick="toggleVoiceRecording()" title="Voice-to-Text (F5)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1.5">
-          <span id="voice-btn-icon" class="text-xs">🎙️</span>
-          <span id="voice-btn-text" class="hidden md:inline">Voice</span>
-        </button>
         <button id="logout-btn" onclick="handleLogout()" class="hidden sm:inline-flex px-2.5 py-1 text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-lg transition">Disconnect</button>
 
         <!-- Mobile Actions Menu Button -->
@@ -1075,9 +1071,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               <span class="text-slate-500 font-mono">Mobile</span>
             </div>
             
-            <button onclick="toggleVoiceRecording(); closeMobileActionsMenu()" class="w-full px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 rounded-lg flex items-center gap-2 transition">
-              <span id="mobile-menu-voice-icon">🎙️</span> <span id="mobile-menu-voice-text">Voice-to-Text (F5)</span>
-            </button>
             <button onclick="copySelectionToClipboard(true); closeMobileActionsMenu()" class="w-full px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 rounded-lg flex items-center gap-2 transition">
               <span>📋</span> <span>Copy Selection</span>
             </button>
@@ -1180,7 +1173,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         <!-- Utility toggles with scroll buttons -->
         <div class="flex items-center space-x-1 pl-1 shrink-0">
-          <button type="button" id="mobile-voice-btn" ontouchstart="handleMobileKeyTouchStart(event, 'voice')" ontouchend="handleMobileKeyTouchEnd(event, 'voice')" onclick="handleMobileKeyClick('voice')" title="Voice-to-Text (F5)" class="px-2 py-1 text-xs bg-slate-800 active:bg-slate-700 text-slate-300 hover:text-white rounded-md border border-slate-700 shrink-0 select-none">🎙️</button>
           <button type="button" onclick="scrollMobileKeys(-120)" title="Scroll Left" class="px-1.5 py-1 text-xs bg-slate-800 active:bg-slate-700 text-slate-400 hover:text-white rounded-md border border-slate-700 shrink-0 select-none font-bold">‹</button>
           <button type="button" onclick="scrollMobileKeys(120)" title="Scroll Right" class="px-1.5 py-1 text-xs bg-slate-800 active:bg-slate-700 text-slate-400 hover:text-white rounded-md border border-slate-700 shrink-0 select-none font-bold">›</button>
           <button type="button" ontouchstart="handleMobileKeyTouchStart(event, 'toggle-kbd')" ontouchend="handleMobileKeyTouchEnd(event, 'toggle-kbd')" onclick="handleMobileKeyClick('toggle-kbd')" title="Toggle Keyboard" class="px-2 py-1 text-xs bg-slate-800 active:bg-slate-700 text-slate-300 hover:text-white rounded-md border border-slate-700 shrink-0 select-none">⌨️</button>
@@ -1353,13 +1345,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           </button>
         </div>
       </div>
-    </div>
-
-    <!-- Voice-to-Text Live Dictation Indicator -->
-    <div id="voice-dictation-pill" class="hidden fixed bottom-16 sm:bottom-6 right-4 sm:right-6 z-50 max-w-sm sm:max-w-md bg-slate-900/95 backdrop-blur-md border border-rose-500/50 shadow-2xl shadow-black/80 rounded-xl px-3 py-2 flex items-center gap-2.5 font-mono text-xs text-slate-200 pointer-events-none transition-all duration-200">
-      <span class="inline-block w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping shrink-0"></span>
-      <span id="voice-dictation-label" class="text-rose-400 font-semibold shrink-0">Listening:</span>
-      <span id="voice-dictation-preview" class="truncate italic text-slate-300">Speak command or text...</span>
     </div>
 
     <!-- Custom Right-Click Context Menu -->
@@ -1603,12 +1588,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     });
 
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'F5' || e.keyCode === 116) {
-        e.preventDefault();
-        e.stopPropagation();
-        toggleVoiceRecording();
-        return false;
-      }
       if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'w' || e.key === 'W')) {
         e.preventDefault();
         e.stopPropagation();
@@ -1815,9 +1794,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const cur = getActiveTab();
 
       switch (keyType) {
-        case 'voice':
-          toggleVoiceRecording();
-          break;
         case 'esc':
           sendTerminalData('\x1b');
           if (ctrlSticky || altSticky || shiftSticky) {
@@ -2883,269 +2859,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
     }
 
-    // ==================== BROWSER VOICE-TO-TEXT (SPEECH RECOGNITION) ====================
-    let isVoiceRecording = false;
-    let speechRecognitionInstance = null;
-    let voiceSafetyTimer = null;
-    let hasSentVoiceChunkInSession = false;
-    let lastVoiceChunkEndedWithSpace = false;
-
-    function isSpeechRecognitionSupported() {
-      return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-    }
-
-    function updateVoiceUI(recording) {
-      // Desktop header button
-      const voiceBtn = document.getElementById('voice-btn');
-      const voiceBtnIcon = document.getElementById('voice-btn-icon');
-      const voiceBtnText = document.getElementById('voice-btn-text');
-      if (voiceBtn) {
-        if (recording) {
-          voiceBtn.className = 'hidden sm:inline-flex px-2 py-1 text-xs bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-lg transition font-mono flex items-center gap-1.5 animate-pulse';
-          if (voiceBtnIcon) voiceBtnIcon.textContent = '🔴';
-          if (voiceBtnText) voiceBtnText.textContent = 'Listening...';
-        } else {
-          voiceBtn.className = 'hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1.5';
-          if (voiceBtnIcon) voiceBtnIcon.textContent = '🎙️';
-          if (voiceBtnText) voiceBtnText.textContent = 'Voice';
-        }
-      }
-
-      // Mobile accessory bar button
-      const mobileVoiceBtn = document.getElementById('mobile-voice-btn');
-      if (mobileVoiceBtn) {
-        if (recording) {
-          mobileVoiceBtn.className = 'px-2 py-1 text-xs bg-rose-500/30 active:bg-rose-600 text-rose-300 rounded-md border border-rose-500/50 shrink-0 select-none animate-pulse';
-          mobileVoiceBtn.textContent = '🔴';
-        } else {
-          mobileVoiceBtn.className = 'px-2 py-1 text-xs bg-slate-800 active:bg-slate-700 text-slate-300 hover:text-white rounded-md border border-slate-700 shrink-0 select-none';
-          mobileVoiceBtn.textContent = '🎙️';
-        }
-      }
-
-      // Mobile actions menu
-      const mobileMenuIcon = document.getElementById('mobile-menu-voice-icon');
-      const mobileMenuText = document.getElementById('mobile-menu-voice-text');
-      if (mobileMenuIcon) mobileMenuIcon.textContent = recording ? '🔴' : '🎙️';
-      if (mobileMenuText) mobileMenuText.textContent = recording ? 'Stop Dictation (F5)' : 'Voice-to-Text (F5)';
-
-      // Floating dictation preview pill
-      const pill = document.getElementById('voice-dictation-pill');
-      if (pill) {
-        if (recording) {
-          pill.classList.remove('hidden');
-          const preview = document.getElementById('voice-dictation-preview');
-          if (preview) preview.textContent = 'Speak command or text...';
-        } else {
-          pill.classList.add('hidden');
-        }
-      }
-    }
-
-    function formatSpokenTextForTerminal(rawText) {
-      if (!rawText) return '';
-      let text = rawText;
-
-      // Check for standalone terminal verbal commands
-      const lowerTrimmed = text.trim().toLowerCase();
-      if (lowerTrimmed === 'enter' || lowerTrimmed === 'return') {
-        return '\r';
-      }
-      if (lowerTrimmed === 'backspace' || lowerTrimmed === 'delete') {
-        return '\x7f';
-      }
-      if (lowerTrimmed === 'tab') {
-        return '\t';
-      }
-      if (lowerTrimmed === 'escape' || lowerTrimmed === 'cancel') {
-        return '\x1b';
-      }
-      if (lowerTrimmed === 'control c' || lowerTrimmed === 'ctrl c') {
-        return '\x03';
-      }
-      if (lowerTrimmed === 'control d' || lowerTrimmed === 'ctrl d') {
-        return '\x04';
-      }
-      if (lowerTrimmed === 'control z' || lowerTrimmed === 'ctrl z') {
-        return '\x1a';
-      }
-      if (lowerTrimmed === 'control l' || lowerTrimmed === 'ctrl l') {
-        return '\x0c';
-      }
-
-      // Normalize Titlecased words to lowercase for Linux shell commands (e.g. "Git status" -> "git status", "Docker ps" -> "docker ps")
-      // Retains all-caps words/acronyms (e.g. AWS, URL, PORT)
-      text = text.replace(/\b([A-Z])([a-z]+)\b/g, (match, p1, p2) => p1.toLowerCase() + p2);
-
-      // Normalize common CLI spoken path separators: "cd / var / log" -> "cd /var/log"
-      text = text.replace(/\s*\/\s*/g, '/');
-
-      // Normalize CLI flags: "ls - la" -> "ls -la", "git checkout - b" -> "git checkout -b"
-      text = text.replace(/(\s+)-\s+([a-zA-Z0-9])/g, '$1-$2');
-
-      return text;
-    }
-
-    function initSpeechRecognition() {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (!SpeechRecognition) return null;
-
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = navigator.language || 'en-US';
-
-      recognition.onresult = (event) => {
-        if (!isVoiceRecording) return;
-        let interimText = '';
-        let finalText = '';
-
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const res = event.results[i];
-          const transcript = res[0] ? res[0].transcript : '';
-          if (res.isFinal) {
-            finalText += transcript;
-          } else {
-            interimText += transcript;
-          }
-        }
-
-        const preview = document.getElementById('voice-dictation-preview');
-        if (interimText && preview) {
-          preview.textContent = interimText;
-        }
-
-        if (finalText) {
-          const formatted = formatSpokenTextForTerminal(finalText);
-          if (formatted) {
-            if (formatted.length === 1 && formatted.charCodeAt(0) < 32) {
-              sendTerminalData(formatted);
-              hasSentVoiceChunkInSession = false;
-              lastVoiceChunkEndedWithSpace = false;
-            } else {
-              let chunk = formatted;
-              if (hasSentVoiceChunkInSession && !chunk.startsWith(' ') && !lastVoiceChunkEndedWithSpace) {
-                chunk = ' ' + chunk;
-              }
-              sendTerminalData(chunk);
-              hasSentVoiceChunkInSession = true;
-              lastVoiceChunkEndedWithSpace = chunk.endsWith(' ');
-            }
-            if (preview) {
-              preview.textContent = '"' + formatted.trim() + '" typed';
-            }
-          }
-        }
-      };
-
-      recognition.onerror = (event) => {
-        console.warn('Speech recognition error:', event.error);
-        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-          showToast('Microphone access denied or blocked by browser');
-          stopBrowserVoiceRecording(false);
-        } else if (event.error === 'network') {
-          showToast('Speech recognition network error');
-          stopBrowserVoiceRecording(false);
-        } else if (event.error !== 'no-speech') {
-          showToast('Voice error: ' + event.error);
-        }
-      };
-
-      recognition.onend = () => {
-        // If continuous recognition was terminated by browser timeout while user is still dictating, resume it
-        if (isVoiceRecording) {
-          try {
-            recognition.start();
-            return;
-          } catch(e) {}
-        }
-        isVoiceRecording = false;
-        updateVoiceUI(false);
-      };
-
-      return recognition;
-    }
-
-    async function startBrowserVoiceRecording() {
-      if (isVoiceRecording) return;
-      if (!isSpeechRecognitionSupported()) {
-        showToast('Voice-to-text is not supported in this browser (Chrome, Edge, or Safari recommended)');
-        return;
-      }
-
-      hasSentVoiceChunkInSession = false;
-      lastVoiceChunkEndedWithSpace = false;
-
-      if (!speechRecognitionInstance) {
-        speechRecognitionInstance = initSpeechRecognition();
-      }
-
-      if (!speechRecognitionInstance) {
-        showToast('Could not initialize speech recognition');
-        return;
-      }
-
-      try {
-        isVoiceRecording = true;
-        speechRecognitionInstance.start();
-        updateVoiceUI(true);
-        showToast('🎙️ Voice-to-Text active (speak commands or text)');
-
-        if (voiceSafetyTimer) clearTimeout(voiceSafetyTimer);
-        voiceSafetyTimer = setTimeout(() => {
-          if (isVoiceRecording) {
-            stopBrowserVoiceRecording(true);
-          }
-        }, 180000); // 3-minute safety cutoff
-      } catch (err) {
-        console.error('Speech recognition start error:', err);
-        if (err.name !== 'InvalidStateError') {
-          showToast('Microphone initialization failed: ' + (err.message || err.name));
-          isVoiceRecording = false;
-          updateVoiceUI(false);
-        }
-      }
-    }
-
-    function stopBrowserVoiceRecording(notifyServer = true) {
-      if (voiceSafetyTimer) {
-        clearTimeout(voiceSafetyTimer);
-        voiceSafetyTimer = null;
-      }
-      isVoiceRecording = false;
-      updateVoiceUI(false);
-
-      if (speechRecognitionInstance) {
-        try {
-          speechRecognitionInstance.stop();
-        } catch(e) {}
-      }
-
-      hasSentVoiceChunkInSession = false;
-      lastVoiceChunkEndedWithSpace = false;
-
-      if (notifyServer) {
-        const cur = getActiveTab();
-        const s = cur && cur.socket ? cur.socket : socket;
-        if (s && s.readyState === WebSocket.OPEN) {
-          s.send(JSON.stringify({ type: 'voice_stop' }));
-        }
-      }
-    }
-
-    async function toggleVoiceRecording() {
-      if (window.IS_READONLY) {
-        showToast('Read-only mode: voice input disabled');
-        return;
-      }
-
-      if (isVoiceRecording) {
-        stopBrowserVoiceRecording(true);
-      } else {
-        await startBrowserVoiceRecording();
-      }
-    }
-
     function saveTabsState() {
       if (window.IS_READONLY) return;
       try {
@@ -3598,14 +3311,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             return false;
           }
 
-          // F5: Voice-to-Text Dictation
-          if (e.key === 'F5' || e.keyCode === 116) {
-            e.preventDefault();
-            e.stopPropagation();
-            toggleVoiceRecording();
-            return false;
-          }
-
         }
         return true;
       });
@@ -3724,14 +3429,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             } else if (msg.type === 'latency_terminal_result') {
               serverTerminalLatency = msg.latency;
               updateLatencyDisplay();
-            } else if (msg.type === 'voice_record_start') {
-              if (tab.id === activeTabId && !isVoiceRecording) {
-                startBrowserVoiceRecording();
-              }
-            } else if (msg.type === 'voice_record_stop') {
-              if (isVoiceRecording) {
-                stopBrowserVoiceRecording(false);
-              }
             }
           } catch(e) {
             renderTabOutput(tab, event.data);
@@ -4105,128 +3802,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </html>
 """
 
-# ==================== AGY MICROPHONE BRIDGE ====================
-
-class AgyMicBridge:
-    """
-    Listens on 127.0.0.1:4713 to emulate `agy mic-serve`.
-    When `agy` connects (e.g. user pressed F5 or typed /voice),
-    it bridges 16kHz 16-bit mono PCM audio from the connected browser session.
-    """
-    def __init__(self, host="127.0.0.1", port=4713):
-        self.host = host
-        self.port = port
-        self.server_sock = None
-        self.client_sock = None
-        self.lock = threading.Lock()
-        self.running = False
-        self.server_ref = None
-        self.pre_buffer = bytearray()
-        self.MAX_PRE_BUFFER = 32000  # ~1 second buffer of 16kHz 16-bit mono audio
-
-    def start(self, server_ref):
-        self.server_ref = server_ref
-        self.running = True
-        t = threading.Thread(target=self._listen_loop, daemon=True, name="AgyMicBridge")
-        t.start()
-
-    def _listen_loop(self):
-        try:
-            self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_sock.bind((self.host, self.port))
-            self.server_sock.listen(5)
-        except Exception:
-            # If port 4713 is already occupied (e.g. user manually ran agy mic-serve), don't fail
-            return
-
-        while self.running:
-            try:
-                sock, _ = self.server_sock.accept()
-                with self.lock:
-                    if self.client_sock:
-                        try:
-                            self.client_sock.close()
-                        except Exception:
-                            pass
-                    self.client_sock = sock
-                    # Send any pre-buffered audio chunks immediately
-                    if self.pre_buffer:
-                        try:
-                            self.client_sock.sendall(self.pre_buffer)
-                        except Exception:
-                            pass
-                        self.pre_buffer.clear()
-
-                self._notify_record_state(True)
-                t = threading.Thread(target=self._watch_client, args=(sock,), daemon=True)
-                t.start()
-            except Exception:
-                if not self.running:
-                    break
-
-    def _notify_record_state(self, active: bool):
-        if self.server_ref and hasattr(self.server_ref, 'terminals'):
-            msg = {"type": "voice_record_start" if active else "voice_record_stop"}
-            for sess in self.server_ref.terminals.list_all():
-                sess.send_ws_json(msg)
-
-    def feed_pcm(self, pcm_bytes: bytes):
-        with self.lock:
-            if self.client_sock:
-                try:
-                    self.client_sock.sendall(pcm_bytes)
-                except Exception:
-                    self._close_client_unlocked()
-            else:
-                self.pre_buffer.extend(pcm_bytes)
-                if len(self.pre_buffer) > self.MAX_PRE_BUFFER:
-                    self.pre_buffer = self.pre_buffer[-self.MAX_PRE_BUFFER:]
-
-    def _watch_client(self, sock):
-        try:
-            while self.running:
-                data = sock.recv(1024)
-                if not data:
-                    break
-        except Exception:
-            pass
-        finally:
-            with self.lock:
-                if self.client_sock == sock:
-                    self._close_client_unlocked()
-
-    def _close_client_unlocked(self):
-        if self.client_sock:
-            try:
-                self.client_sock.close()
-            except Exception:
-                pass
-            self.client_sock = None
-            self.pre_buffer.clear()
-            self._notify_record_state(False)
-
-    def close_client(self):
-        with self.lock:
-            self._close_client_unlocked()
-
-    def stop(self):
-        self.running = False
-        with self.lock:
-            if self.client_sock:
-                try:
-                    self.client_sock.close()
-                except Exception:
-                    pass
-                self.client_sock = None
-            self.pre_buffer.clear()
-        if self.server_sock:
-            try:
-                self.server_sock.close()
-            except Exception:
-                pass
-
-
 # ==================== HTTP & WEBSOCKET SERVER ====================
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -4243,13 +3818,6 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
         self.sessions = SessionManager()
         self.terminals = TerminalSessionManager()
         self.shares = ShareTokenManager()
-        self.mic_bridge = AgyMicBridge()
-        self.mic_bridge.start(self)
-
-    def server_close(self):
-        if hasattr(self, 'mic_bridge') and self.mic_bridge:
-            self.mic_bridge.stop()
-        super().server_close()
 
 
 class FireSSHServerHandler(BaseHTTPRequestHandler):
@@ -4842,17 +4410,6 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                         elif mtype == 'latency_terminal':
                             pty_lat = session.measure_pty_latency()
                             sock.sendall(ws_make_frame(json.dumps({"type": "latency_terminal_result", "latency": round(pty_lat, 2)}), opcode=1))
-                        elif mtype == 'voice_data':
-                            b64_data = msg.get('data', '')
-                            if b64_data and hasattr(self.server, 'mic_bridge') and self.server.mic_bridge:
-                                try:
-                                    pcm = base64.b64decode(b64_data)
-                                    self.server.mic_bridge.feed_pcm(pcm)
-                                except Exception:
-                                    pass
-                        elif mtype == 'voice_stop':
-                            if hasattr(self.server, 'mic_bridge') and self.server.mic_bridge:
-                                self.server.mic_bridge.close_client()
                     except Exception:
                         pass
                 elif opcode == 2:
