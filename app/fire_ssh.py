@@ -1329,6 +1329,31 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       </div>
     </div>
 
+    <!-- Session Closed Modal Dialog -->
+    <div id="session-closed-modal" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl p-6 w-full max-w-md text-center font-sans space-y-4">
+        <div class="w-14 h-14 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center text-3xl">
+          🔌
+        </div>
+        <div>
+          <h2 class="text-base sm:text-lg font-bold text-white tracking-tight">SSH Session Closed</h2>
+          <p id="session-closed-msg" class="text-xs text-slate-300 mt-2 leading-relaxed">
+            This remote web terminal session was closed (<code class="px-1.5 py-0.5 rounded bg-slate-950 text-orange-400 font-mono text-[11px]">fire ssh close</code>).
+          </p>
+        </div>
+        <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] text-slate-400 text-left font-mono space-y-1.5">
+          <div class="text-slate-500 text-[10px] uppercase font-bold tracking-wider">To start a new session:</div>
+          <div class="text-slate-300"># On your server terminal:</div>
+          <div class="text-orange-400 font-bold">$ fire ssh</div>
+        </div>
+        <div class="flex items-center justify-center gap-2 pt-1">
+          <button type="button" onclick="handleSessionClosedReload()" class="w-full py-2.5 px-4 text-xs bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white font-semibold rounded-xl transition shadow-lg shadow-orange-500/20 flex items-center justify-center gap-2">
+            <span>🔄 Reconnect / Login</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Custom Right-Click Context Menu -->
     <div id="term-context-menu" class="hidden fixed z-50 bg-slate-900/95 backdrop-blur-sm border border-slate-800 rounded-xl shadow-2xl shadow-black/60 py-1 min-w-[170px] text-xs select-none">
       <button onclick="copySelectionToClipboard(true); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
@@ -3548,6 +3573,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       tab.socket.onopen = () => {
         tab.connected = true;
+        tab.reconnectAttempts = 0;
         renderTabsList();
 
         if (tab.id === activeTabId) {
@@ -3583,6 +3609,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const msg = JSON.parse(event.data);
             if (msg.type === 'output') {
               renderTabOutput(tab, msg.data);
+            } else if (msg.type === 'session_closed') {
+              handleSessionClosed(msg.message || msg.reason || "SSH session closed via 'fire ssh close'");
+              return;
             } else if (msg.type === 'pong') {
               // pong
             } else if (msg.type === 'process_name') {
@@ -3626,9 +3655,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
       };
 
-      tab.socket.onclose = () => {
+      tab.socket.onclose = (event) => {
         tab.connected = false;
         renderTabsList();
+
+        if (sessionClosed) {
+          return;
+        }
+
+        if (event && (event.code === 1000 || event.code === 1001) && event.reason && (event.reason.includes('closed') || event.reason.includes('fire ssh'))) {
+          handleSessionClosed(event.reason);
+          return;
+        }
+
         if (tab.id === activeTabId) {
           const connBadge = document.getElementById('conn-badge');
           if (connBadge) {
@@ -3636,8 +3675,26 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             connBadge.className = 'text-[11px] sm:text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-mono flex items-center gap-1';
           }
         }
+
+        tab.reconnectAttempts = (tab.reconnectAttempts || 0) + 1;
+
+        if (tab.reconnectAttempts >= 3) {
+          fetch('/api/status')
+            .then(res => {
+              if (!res.ok) throw new Error('status ' + res.status);
+            })
+            .catch(() => {
+              handleSessionClosed("SSH session closed or server unreachable (fire ssh close).");
+            });
+        }
+
+        if (tab.reconnectAttempts >= 8) {
+          handleSessionClosed("Server disconnected. The session was closed or is unreachable.");
+          return;
+        }
+
         tab.reconnectTimer = setTimeout(() => {
-          if (!document.getElementById('terminal-view').classList.contains('hidden')) {
+          if (!sessionClosed && !document.getElementById('terminal-view').classList.contains('hidden')) {
             connectTabWebSocket(tab);
           }
         }, 1500);
@@ -3802,6 +3859,53 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       });
       if (latencyInterval) { clearInterval(latencyInterval); latencyInterval = null; }
       await fetch('/api/logout', { method: 'POST' });
+      window.location.reload();
+    }
+
+    let sessionClosed = false;
+
+    function handleSessionClosed(message) {
+      if (sessionClosed) return;
+      sessionClosed = true;
+
+      Object.values(tabs).forEach(t => {
+        if (t.reconnectTimer) {
+          clearTimeout(t.reconnectTimer);
+          t.reconnectTimer = null;
+        }
+        if (t.pingTimer) {
+          clearInterval(t.pingTimer);
+          t.pingTimer = null;
+        }
+        if (t.socket) {
+          try { t.socket.close(); } catch(e) {}
+        }
+        if (t.term) {
+          t.term.write('\r\n\x1b[33m[Fire SSH] ' + (message || "Session closed via 'fire ssh close'") + '\x1b[0m\r\n');
+        }
+      });
+
+      const connBadge = document.getElementById('conn-badge');
+      if (connBadge) {
+        connBadge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span> Closed';
+        connBadge.className = 'text-[11px] sm:text-xs px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 font-mono flex items-center gap-1';
+      }
+
+      const modal = document.getElementById('session-closed-modal');
+      const msgEl = document.getElementById('session-closed-msg');
+      if (msgEl && message) {
+        msgEl.textContent = message;
+      }
+      if (modal) {
+        modal.classList.remove('hidden');
+      }
+    }
+
+    function handleSessionClosedReload() {
+      try {
+        localStorage.removeItem('fire_ssh_open_tabs');
+        localStorage.removeItem('fire_ssh_active_tab');
+      } catch (e) {}
       window.location.reload();
     }
 
@@ -4746,6 +4850,43 @@ def run_server(port: int, plain_password: str = None, salt_hex: str = None, hash
     server.sessions = SessionManager()
     server.terminals = TerminalSessionManager()
     server.shares = ShareTokenManager()
+
+    def _shutdown_handler(signum, frame):
+        try:
+            close_data = {
+                "type": "session_closed",
+                "reason": "SSH session closed via 'fire ssh close'",
+                "message": "This remote web terminal session was closed (fire ssh close)."
+            }
+            payload = json.dumps(close_data).encode('utf-8')
+            msg_frame = ws_make_frame(payload, opcode=1)
+            close_frame = ws_make_frame(struct.pack("!H", 1000) + b"Session closed", opcode=8)
+
+            with server.terminals.lock:
+                for sess in list(server.terminals.sessions.values()):
+                    with sess.sock_lock:
+                        if sess.sock:
+                            try:
+                                sess.sock.sendall(msg_frame)
+                                sess.sock.sendall(close_frame)
+                            except Exception:
+                                pass
+                        for ro in list(sess.readonly_socks):
+                            try:
+                                ro.sendall(msg_frame)
+                                ro.sendall(close_frame)
+                            except Exception:
+                                pass
+            time.sleep(0.15)
+        except Exception:
+            pass
+        sys.exit(0)
+
+    try:
+        signal.signal(signal.SIGTERM, _shutdown_handler)
+        signal.signal(signal.SIGINT, _shutdown_handler)
+    except Exception:
+        pass
 
     print(json.dumps({
         "status": "ready",

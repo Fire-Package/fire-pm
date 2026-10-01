@@ -8,6 +8,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 
 ## [Unreleased]
 
+- `[2026-10-01]{21:18:00} Web Terminal: Add session closed notification modal when fire ssh close runs, replacing infinite reconnecting loops with a clear status and reconnect action`
 - `[2026-10-01]{20:44:00} Web Terminal: Prevent mobile accessory keys from unintentionally summoning virtual keyboard, restricting automatic focus to sticky modifiers (CTRL, ALT, SHIFT) and keyboard toggle button #Issue 62`
 - `[2026-10-01]{20:12:00} Web Terminal: Hide mobile accessory keypad bar on desktop viewports and fine-pointer devices, reclaiming vertical terminal space while keeping mobile/touch functional #Issue 60`
 - `[2026-09-29]{14:58:00} Web Terminal: Bridge browser microphone to loopback 127.0.0.1:4713 for Antigravity (agy) voice dictation, intercept F5 to prevent browser reload, and add desktop & mobile 🎙️ controls #Issue 58`
