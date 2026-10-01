@@ -21,6 +21,7 @@ import secrets
 import hashlib
 import hmac
 import base64
+import html
 import mimetypes
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -873,7 +874,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             Fire PM
             <span class="text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 font-mono font-medium">SSH</span>
           </h1>
-          <p class="text-xs text-slate-400">Persistent Remote Terminal</p>
+          <p id="login-card-subtitle" class="text-xs text-slate-400">Persistent Remote Terminal</p>
         </div>
       </div>
 
@@ -916,7 +917,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <header class="h-12 bg-slate-900 border-b border-slate-800 px-2 sm:px-4 flex items-center justify-between select-none">
       <div class="flex items-center space-x-1.5 sm:space-x-3 min-w-0">
         <span class="text-lg shrink-0">🔥</span>
-        <span class="text-xs sm:text-sm font-semibold text-white truncate max-w-[80px] xs:max-w-none">Fire PM</span>
+        <span id="brand-header-title" class="text-xs sm:text-sm font-semibold text-white truncate max-w-[140px] sm:max-w-xs">Fire PM</span>
         <span id="conn-badge" class="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono flex items-center gap-1 shrink-0">
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
           Connected
@@ -1501,16 +1502,23 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       try {
         const res = await fetch('/api/status');
         const data = await res.json();
+        if (data.title && !window.SESSION_TITLE) {
+          window.SESSION_TITLE = data.title;
+        }
+        applySessionTitle();
         if (data.authenticated) {
           showTerminal(data.tabs);
         }
-      } catch (e) {}
+      } catch (e) {
+        applySessionTitle();
+      }
     }
 
     function showTerminal(knownTabs) {
       document.getElementById('login-view').classList.add('hidden');
       document.getElementById('terminal-view').classList.remove('hidden');
       updateMobileBarVisibility();
+      applySessionTitle();
       if (window.IS_READONLY) {
         applyReadonlyUI();
       }
@@ -2195,8 +2203,24 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       termFit();
     }
 
-    let originalDocTitle = document.title || 'Fire SSH';
+    let originalDocTitle = (window.SESSION_TITLE || document.title || 'Fire SSH');
     let titleBlinkInterval = null;
+
+    function applySessionTitle() {
+      if (!window.SESSION_TITLE) return;
+      document.title = window.SESSION_TITLE;
+      originalDocTitle = window.SESSION_TITLE;
+
+      const brandEl = document.getElementById('brand-header-title');
+      if (brandEl) {
+        brandEl.textContent = window.SESSION_TITLE;
+        brandEl.title = window.SESSION_TITLE;
+      }
+      const loginSubtitle = document.getElementById('login-card-subtitle');
+      if (loginSubtitle) {
+        loginSubtitle.textContent = window.SESSION_TITLE;
+      }
+    }
 
     function playNotificationChime() {
       try {
@@ -3230,7 +3254,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         tabId = 'tab-' + tabSequence;
       }
       const tabIndex = Object.keys(tabs).length + 1;
-      const title = initialTitle || 'bash';
+      const title = initialTitle || (window.SESSION_TITLE && tabIndex === 1 ? window.SESSION_TITLE : 'bash');
 
       const container = document.getElementById('terminal-container');
       if (!container) return;
@@ -4074,6 +4098,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     initMobileKeysListScrolling();
+    applySessionTitle();
     checkAuth();
   </script>
 </body>
@@ -4361,17 +4386,18 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
         elif parsed.path == '/api/status':
             query = urllib.parse.parse_qs(parsed.query)
             share_token = query.get('share', [None])[0]
+            server_title = getattr(self.server, "title", "") or None
             if share_token:
                 share_info = self.server.shares.validate(share_token)
                 if share_info:
-                    self.send_json({"authenticated": True, "readonly": True, "label": share_info.get("label", "Shared Session")})
+                    self.send_json({"authenticated": True, "readonly": True, "label": share_info.get("label", "Shared Session"), "title": server_title})
                     return
                 else:
                     self.send_json({"authenticated": False, "readonly": True, "error": "Expired or invalid share link"}, status=403)
                     return
             auth = self.is_authenticated()
             locked, rem = self.server.rate_limiter.is_locked(ip)
-            data = {"authenticated": auth, "locked": locked, "lockout_remaining": rem}
+            data = {"authenticated": auth, "locked": locked, "lockout_remaining": rem, "title": server_title}
             if auth:
                 token = self.get_auth_token()
                 data["tabs"] = self.server.terminals.list_tabs(token)
@@ -4465,6 +4491,20 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             query = urllib.parse.parse_qs(parsed.query)
             share_token = query.get('share', [None])[0]
             rendered_html = HTML_TEMPLATE
+
+            custom_title = getattr(self.server, 'title', '') or query.get('title', [None])[0] or ''
+            inject_vars = []
+
+            if custom_title:
+                safe_title_esc = html.escape(custom_title)
+                rendered_html = rendered_html.replace(
+                    '<title>Fire PM — Remote Terminal</title>',
+                    f'<title>{safe_title_esc}</title>',
+                    1
+                )
+                safe_title_json = json.dumps(custom_title).replace('</', r'<\/')
+                inject_vars.append(f"window.SESSION_TITLE = {safe_title_json};")
+
             if share_token:
                 share_info = self.server.shares.validate(share_token)
                 if not share_info:
@@ -4476,7 +4516,12 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                     return
                 safe_token = json.dumps(str(share_token)).replace('</', r'<\/')
                 safe_label = json.dumps(str(share_info.get('label', 'Shared Session'))[:64]).replace('</', r'<\/')
-                inject_script = f"<script>window.IS_READONLY = true; window.SHARE_TOKEN = {safe_token}; window.SHARE_LABEL = {safe_label};</script>"
+                inject_vars.append("window.IS_READONLY = true;")
+                inject_vars.append(f"window.SHARE_TOKEN = {safe_token};")
+                inject_vars.append(f"window.SHARE_LABEL = {safe_label};")
+
+            if inject_vars:
+                inject_script = f"<script>{' '.join(inject_vars)}</script>"
                 rendered_html = rendered_html.replace('</head>', f'{inject_script}\n</head>', 1)
 
             self.send_response(200)
@@ -4886,7 +4931,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
         pass
 
 
-def run_server(port: int, plain_password: str = None, salt_hex: str = None, hash_hex: str = None, shell: str = None):
+def run_server(port: int, plain_password: str = None, salt_hex: str = None, hash_hex: str = None, shell: str = None, title: str = None):
     def _sigchld_handler(signum, frame):
         while True:
             try:
@@ -4909,6 +4954,7 @@ def run_server(port: int, plain_password: str = None, salt_hex: str = None, hash
     server.salt_hex = salt_hex
     server.hash_hex = hash_hex
     server.target_shell = shell
+    server.title = title.strip() if title else ""
     server.rate_limiter = RateLimiter()
     server.sessions = SessionManager()
     server.terminals = TerminalSessionManager()
@@ -4954,6 +5000,7 @@ def run_server(port: int, plain_password: str = None, salt_hex: str = None, hash
     print(json.dumps({
         "status": "ready",
         "port": port,
+        "title": server.title,
         "auth_configured": bool(plain_password or hash_hex),
         "shell": shell or os.environ.get('SHELL', '/bin/bash')
     }), flush=True)
@@ -4980,6 +5027,7 @@ def main():
     p_start.add_argument("--salt", type=str, help="Salt hex for PBKDF2 hash")
     p_start.add_argument("--hash", type=str, help="Hash hex for PBKDF2 verification")
     p_start.add_argument("--shell", type=str, help="Target shell executable")
+    p_start.add_argument("--title", type=str, default="", help="Web terminal session title")
 
     p_hash = subparsers.add_parser("hash-password", help="Hash password using PBKDF2-HMAC-SHA256")
     p_hash.add_argument("password", type=str, help="Plaintext password to hash")
@@ -5011,7 +5059,7 @@ def main():
                 plain_pw = sys.stdin.readline().rstrip('\r\n')
             except Exception:
                 plain_pw = None
-        run_server(args.port, plain_password=plain_pw, salt_hex=args.salt, hash_hex=args.hash, shell=args.shell)
+        run_server(args.port, plain_password=plain_pw, salt_hex=args.salt, hash_hex=args.hash, shell=args.shell, title=getattr(args, "title", None))
 
     else:
         parser.print_help()

@@ -2640,13 +2640,18 @@ action_ssh_list() {
   if [[ -d "$SSH_STATE_DIR" ]]; then
     for state_file in "$SSH_STATE_DIR"/*.json; do
       [[ -f "$state_file" ]] || continue
-      local port pid url
+      local port pid url title
       port=$(basename "$state_file" .json)
       pid=$(grep -o '"pid": *[0-9]*' "$state_file" | awk -F: '{print $2}' | tr -d ' ')
       url=$(grep -o '"url": *"[^"]*"' "$state_file" | awk -F'"' '{print $4}')
+      title=$(grep -o '"title": *"[^"]*"' "$state_file" | awk -F'"' '{print $4}')
       
       if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-        printf "  %-8s ${GREEN}%-18s${NC} %-10s ${CYAN}%-38s${NC}\n" "$port" "ACTIVE" "$pid" "${url:-http://localhost:$port}"
+        local title_str=""
+        if [[ -n "$title" ]]; then
+          title_str=" [${title}]"
+        fi
+        printf "  %-8s ${GREEN}%-18s${NC} %-10s ${CYAN}%-38s${NC}%s\n" "$port" "ACTIVE" "$pid" "${url:-http://localhost:$port}" "$title_str"
         count=$((count + 1))
       else
         rm -f "$state_file"
@@ -2708,10 +2713,20 @@ action_ssh_start() {
   local daemon_mode=0
   local no_tunnel=0
   local provider_opt=""
+  local session_title=""
 
   for ((i=0; i<${#ARGS[@]}; i++)); do
     local a="${ARGS[i]}"
     case "$a" in
+      --title=*|-t=*|-title=*)
+        session_title="${a#*=}"
+        ;;
+      --title|-t|-title)
+        if [[ $((i+1)) -lt ${#ARGS[@]} ]]; then
+          session_title="${ARGS[i+1]}"
+          i=$((i+1))
+        fi
+        ;;
       --password=*|-p=*|-password=*)
         password="${a#*=}"
         ;;
@@ -2812,19 +2827,23 @@ action_ssh_start() {
   if [[ -n "$password" ]]; then
     pass_args+=("--pass-stdin")
   fi
+  local title_args=()
+  if [[ -n "$session_title" ]]; then
+    title_args+=("--title" "$session_title")
+  fi
 
   # Start Python Web Terminal daemon without exposing plaintext password in argv
   if [[ -n "$password" ]]; then
     if command -v setsid &>/dev/null; then
-      printf "%s\n" "$password" | setsid python3 "$py_script" start --port "$port" "${pass_args[@]}" > "$log_file" 2>&1 &
+      printf "%s\n" "$password" | setsid python3 "$py_script" start --port "$port" "${pass_args[@]}" "${title_args[@]}" > "$log_file" 2>&1 &
     else
-      printf "%s\n" "$password" | nohup python3 "$py_script" start --port "$port" "${pass_args[@]}" > "$log_file" 2>&1 &
+      printf "%s\n" "$password" | nohup python3 "$py_script" start --port "$port" "${pass_args[@]}" "${title_args[@]}" > "$log_file" 2>&1 &
     fi
   else
     if command -v setsid &>/dev/null; then
-      setsid python3 "$py_script" start --port "$port" </dev/null > "$log_file" 2>&1 &
+      setsid python3 "$py_script" start --port "$port" "${title_args[@]}" </dev/null > "$log_file" 2>&1 &
     else
-      nohup python3 "$py_script" start --port "$port" </dev/null > "$log_file" 2>&1 &
+      nohup python3 "$py_script" start --port "$port" "${title_args[@]}" </dev/null > "$log_file" 2>&1 &
     fi
   fi
   local server_pid=$!
@@ -2873,11 +2892,15 @@ action_ssh_start() {
     fi
   fi
 
+  local title_json
+  title_json=$(printf '%s' "$session_title" | python3 -c 'import sys, json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo "\"$session_title\"")
+
   cat << JSONEOF > "$SSH_STATE_DIR/${port}.json"
 {
   "port": "$port",
   "pid": $server_pid,
   "url": "$public_url",
+  "title": $title_json,
   "created_at": $(date +%s)
 }
 JSONEOF
@@ -2885,6 +2908,9 @@ JSONEOF
   echo ""
   echo -e "  ${BOLD}🔥 Fire PM Remote Web Terminal (SSH)${NC}"
   echo -e "  ${GREY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  if [[ -n "$session_title" ]]; then
+    echo -e "  ${GREY}🏷️${NC}  ${BOLD}Session Title:${NC}  ${YELLOW}${BOLD}${session_title}${NC}"
+  fi
   echo -e "  ${ORANGE}🔗${NC} ${YELLOW}${BOLD}Web Terminal URL:${NC} ${CYAN}${BOLD}${public_url}${NC}"
   echo -e "  ${GREY}⚡${NC} ${BOLD}Local Endpoint:${NC}   ${GREY}http://127.0.0.1:${port}${NC}"
   echo -e "  ${GREEN}🔒${NC} ${BOLD}Authentication:${NC}   ${GREEN}Password Protected (PBKDF2-HMAC-SHA256)${NC}"
@@ -3595,7 +3621,7 @@ _fire_completions() {
           ;;
         ssh)
           if [[ "$cur" == -* ]]; then
-            COMPREPLY=( $(compgen -W "--password -p --port --daemon -d --no-tunnel" -- "$cur") )
+            COMPREPLY=( $(compgen -W "--password -p --port --daemon -d --no-tunnel --title -t" -- "$cur") )
             return 0
           fi
           ;;
@@ -3828,6 +3854,7 @@ show_help() {
   echo "  fire restore"
   echo "  fire tunnel open 3000"
   echo "  fire ssh"
+  echo "  fire ssh --title \"Production\" --daemon"
   echo "  fire ssh --password mysecret --daemon"
   echo "  fire ssh list"
   echo "  fire ssh close"
