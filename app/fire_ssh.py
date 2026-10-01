@@ -1492,7 +1492,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         s.send(JSON.stringify({ type: 'signal', signal: 'SIGINT' }));
         s.send(JSON.stringify({ type: 'input', data: '\x03' }));
       }
-      if (term) term.focus();
+      if (term && !isTouchDevice) term.focus();
     }
 
     function sendSuspend() {
@@ -1502,7 +1502,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         s.send(JSON.stringify({ type: 'signal', signal: 'SIGTSTP' }));
         s.send(JSON.stringify({ type: 'input', data: '\x1a' }));
       }
-      if (term) term.focus();
+      if (term && !isTouchDevice) term.focus();
     }
 
     function sendEOF() {
@@ -1511,7 +1511,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (s && s.readyState === WebSocket.OPEN) {
         s.send(JSON.stringify({ type: 'input', data: '\x04' }));
       }
-      if (term) term.focus();
+      if (term && !isTouchDevice) term.focus();
     }
 
     function sendCtrlW() {
@@ -1520,7 +1520,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (s && s.readyState === WebSocket.OPEN) {
         s.send(JSON.stringify({ type: 'input', data: '\x17' }));
       }
-      if (term) term.focus();
+      if (term && !isTouchDevice) term.focus();
     }
 
     function toggleFullscreen() {
@@ -1924,30 +1924,38 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         default:
           break;
       }
-
-      // Re-focus terminal textarea if needed
-      if (cur && cur.term && keyType !== 'toggle-kbd' && keyType !== 'collapse-bar') {
-        if (cur.term.textarea && document.activeElement !== cur.term.textarea) {
-          cur.term.focus();
-        }
-      }
     }
 
     function toggleCtrlSticky() {
       ctrlSticky = !ctrlSticky;
-      if (ctrlSticky) { altSticky = false; shiftSticky = false; }
+      if (ctrlSticky) {
+        altSticky = false;
+        shiftSticky = false;
+        const cur = getActiveTab();
+        if (cur && cur.term) cur.term.focus();
+      }
       updateModifierUI();
     }
 
     function toggleAltSticky() {
       altSticky = !altSticky;
-      if (altSticky) { ctrlSticky = false; shiftSticky = false; }
+      if (altSticky) {
+        ctrlSticky = false;
+        shiftSticky = false;
+        const cur = getActiveTab();
+        if (cur && cur.term) cur.term.focus();
+      }
       updateModifierUI();
     }
 
     function toggleShiftSticky() {
       shiftSticky = !shiftSticky;
-      if (shiftSticky) { ctrlSticky = false; altSticky = false; }
+      if (shiftSticky) {
+        ctrlSticky = false;
+        altSticky = false;
+        const cur = getActiveTab();
+        if (cur && cur.term) cur.term.focus();
+      }
       updateModifierUI();
     }
 
