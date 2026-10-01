@@ -71,3 +71,14 @@ fire-pm/
 * **Web UI Build:** `cd web && pnpm build`
 * **Web UI Production Start:** `fire start /opt/fire-pm/web/start.sh --name fire-web --env PORT=3000`
 * **Update Fire PM:** `fire update` / `fire update --force`
+
+---
+
+## Safe Command Execution & Human Intervention Policy
+
+* **Whitelisted Safe Commands Only**: AI agents must strictly prioritize and limit execution to the safe, non-destructive commands whitelisted in `~/.gemini/antigravity-cli/settings.json` (e.g. `pnpm`, `systemctl status`, `systemctl reload nginx`, `curl`, `ss`, `dig`, `playwright-cli`, read-only file/directory inspections).
+* **Strict Ban on Dangerous Commands**: NEVER execute dangerous or destructive commands autonomously, including but not limited to:
+  - Arbitrary recursive deletions (`rm -rf *`, `rm -rf /`, or broad directory wipes)
+  - Destructive Git operations (`git reset --hard`, `git clean -fd`, `git checkout -- .`, force-pushes)
+  - Disruptive service kills, raw database drops, or mass process termination.
+* **Mandatory Human Approval**: If a potentially dangerous, destructive, or high-risk command is ever genuinely required, STOP immediately, clearly present the command and explain the associated risks, and ask the user for explicit approval before proceeding.

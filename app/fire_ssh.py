@@ -851,6 +851,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       touch-action: pan-x;
       scroll-behavior: smooth;
     }
+    /* Hide mobile accessory keypad bar on desktop / fine-pointer viewports */
+    @media (hover: hover) and (pointer: fine) {
+      #mobile-accessory-bar {
+        display: none !important;
+      }
+    }
   </style>
 </head>
 <body class="h-full flex flex-col font-sans antialiased overflow-hidden select-none bg-[#020617]">
@@ -1134,7 +1140,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div id="terminal-container" class="flex-1 w-full bg-[#020617] relative overflow-hidden"></div>
 
     <!-- MOBILE ACCESSORY KEYPAD BAR -->
-    <div id="mobile-accessory-bar" class="w-full bg-slate-900 border-t border-slate-800 select-none z-30 shrink-0 transition-all duration-150">
+    <div id="mobile-accessory-bar" class="hidden w-full bg-slate-900 border-t border-slate-800 select-none z-30 shrink-0 transition-all duration-150">
       <div class="flex items-center justify-between px-1.5 py-1 bg-slate-950/80 border-b border-slate-800/80">
         <div id="mobile-keys-list" class="flex items-center space-x-1 overflow-x-auto scrollbar-none py-0.5 touch-pan-x flex-1 scroll-smooth" ontouchmove="handleMobileKeyTouchMove(event)" ontouchcancel="handleMobileKeyTouchCancel(event)">
           <!-- Essential terminal keys -->
@@ -1472,6 +1478,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     function showTerminal(knownTabs) {
       document.getElementById('login-view').classList.add('hidden');
       document.getElementById('terminal-view').classList.remove('hidden');
+      updateMobileBarVisibility();
       if (window.IS_READONLY) {
         applyReadonlyUI();
       }
@@ -2060,7 +2067,30 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       termFit();
     }
 
+    let userToggledMobileBar = false;
+
+    function updateMobileBarVisibility() {
+      if (userToggledMobileBar) return;
+      const bar = document.getElementById('mobile-accessory-bar');
+      if (!bar) return;
+      const isFinePointer = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+      const isDesktop = isFinePointer || (!isTouchDevice && window.innerWidth >= 768);
+      if (isDesktop) {
+        bar.classList.add('hidden');
+        mobileBarVisible = false;
+      } else {
+        bar.classList.remove('hidden');
+        mobileBarVisible = true;
+      }
+      const statusText = document.getElementById('mobile-bar-status-text');
+      if (statusText) {
+        statusText.textContent = mobileBarVisible ? 'Active' : 'Hidden';
+        statusText.className = mobileBarVisible ? 'text-[10px] font-mono text-emerald-400' : 'text-[10px] font-mono text-slate-500';
+      }
+    }
+
     function toggleMobileBarVisibility() {
+      userToggledMobileBar = true;
       mobileBarVisible = !mobileBarVisible;
       const bar = document.getElementById('mobile-accessory-bar');
       const statusText = document.getElementById('mobile-bar-status-text');
@@ -2110,6 +2140,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     function updateViewportLayout() {
       const termView = document.getElementById('terminal-view');
       if (!termView) return;
+
+      updateMobileBarVisibility();
 
       if (window.visualViewport) {
         const vv = window.visualViewport;
