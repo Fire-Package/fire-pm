@@ -8,6 +8,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 
 ## [Unreleased]
 
+- `[2026-10-02]{00:14:00} Web Terminal: Map F11 key in window capture and terminal handler to toggle fullscreen mode with keyboard lock for Ctrl+W protection`
 - `[2026-10-01]{22:42:00} Web Terminal: Add dynamic session and tab title updates via fire ssh title CLI, POST /api/title daemon endpoint, and interactive UI prompt with real-time WebSocket broadcast and independent tab renaming`
 - `[2026-10-01]{22:32:00} Web Terminal: Remove voice dictation system and legacy mic bridge, eliminating unused loopback TCP listener, F5 terminal key interception, and mobile/desktop voice controls`
 - `[2026-10-01]{21:52:00} Web Terminal: Add --title flag to fire ssh to customize browser tab title, header branding, and session status across web and CLI list outputs`

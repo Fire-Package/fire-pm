@@ -1629,6 +1629,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         sendCtrlW();
         return false;
       }
+      if (e.key === 'F11' || e.keyCode === 122) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleFullscreen();
+        return false;
+      }
     }, { capture: true });
 
     // ==================== MOBILE TERMINAL COMPATIBILITY ====================
@@ -3377,6 +3383,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           if (e.shiftKey && e.key === 'Tab') {
             e.preventDefault();
             sendTerminalData('\x1b[Z');
+            return false;
+          }
+
+          // F11: Toggle Fullscreen
+          if (e.key === 'F11' || e.keyCode === 122) {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleFullscreen();
             return false;
           }
 
