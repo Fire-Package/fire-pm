@@ -29,18 +29,18 @@
 
 ## 🚀 Overview
 
-**Fire PM** turns Linux `systemd` into a developer-friendly, high-performance process manager without introducing heavy background daemons or duplicate state layers. It provides three cohesive interfaces—a fast CLI, an interactive Terminal UI (TUI), and a modern Next.js 15 Web Dashboard—alongside zero-configuration public HTTPS tunnels and a secure, persistent remote browser terminal.
+**Fire PM** manages Linux `systemd` services without background daemons or extra state files. It includes a CLI, an interactive terminal UI (TUI), and a Next.js 15 web dashboard, plus quick HTTPS tunnels and a persistent web terminal (`fire ssh`).
 
 ### Why Fire PM?
 
 * **⚡ Zero Daemon Overhead**: Operates directly against `systemd` and Linux `cgroups`. No continuous runtime daemon eating 80+ MB of RAM just to monitor your processes.
-* **🖥️ Three First-Class Surfaces**: Switch seamlessly between a scriptable CLI, an interactive keyboard-driven TUI, and a full-featured Web Dashboard.
-* **🌐 Zero-Config HTTPS Tunnels**: Expose any local service instantly to the internet with Cloudflare Quick Tunnels, or route through your own wildcard domain with dynamic Nginx mapping.
+* **🖥️ Three Surfaces**: Switch between a scriptable CLI, an interactive keyboard-driven TUI, and a full-featured web dashboard.
+* **🌐 Zero-Config HTTPS Tunnels**: Expose any local service to the internet with Cloudflare Quick Tunnels, or route through your own wildcard domain with dynamic Nginx mapping.
 * **🔒 Persistent Remote Web Terminal (`fire ssh`)**: Access an xterm-backed, password-protected server terminal in your browser with session persistence, 128 KB scrollback replay, and process group signal dispatching.
-* **📊 Live Log Streaming & Metrics**: Real-time Server-Sent Events (SSE) streaming from `journalctl`, live CPU/memory telemetry, and instant log flushing.
+* **📊 Live Log Streaming & Metrics**: Real-time Server-Sent Events (SSE) streaming from `journalctl`, live CPU/memory stats, and instant log flushing.
 * **🛡️ Kernel-Level Resource Limiting**: Adjust Memory and CPU cgroup limits on running services on the fly (`fire limit api 512M 50%`).
-* **🔄 State Snapshots & Boot Persistence**: Dump and restore entire process fleets (`fire save` / `fire restore`), toggle system boot persistence (`fire startup` / `fire unstartup`).
-* **📦 Automatic Runtime Detection**: Intelligently handles Python (virtual environments aware), Node.js, Shell scripts, and compiled binaries.
+* **🔄 State Snapshots & Boot Persistence**: Save and restore process lists (`fire save` / `fire restore`), and toggle system boot persistence (`fire startup` / `fire unstartup`).
+* **📦 Automatic Runtime Detection**: Detects Python (virtualenv-aware), Node.js, shell scripts, and compiled binaries automatically.
 
 ---
 
@@ -390,7 +390,7 @@ Open `http://localhost:3000` (or your configured port). On first launch, set you
 | Feature | **Fire PM** | **PM2** | **Supervisord** | **Raw systemd** |
 | :--- | :---: | :---: | :---: | :---: |
 | **Underlying Engine** | **Linux `systemd`** | Node.js daemon | Python daemon | Linux `systemd` |
-| **Daemon Memory Footprint** | **0 MB** (CLI / stateless) | ~80–120 MB | ~30–50 MB | 0 MB |
+| **Daemon Memory Footprint** | **0 MB** (CLI / stateless) | ~80-120 MB | ~30-50 MB | 0 MB |
 | **Native Cgroups Limits** | ✅ Instant (`fire limit`) | ❌ (Memory restart only) | ❌ | ⚠️ Manual file edits |
 | **Interactive Terminal UI (TUI)** | ✅ Built-in (Textual) | ⚠️ Basic `pm2 monit` | ❌ | ❌ |
 | **Developer Web Dashboard** | ✅ Modern Next.js 15 | ❌ Paid / PM2 Plus | ⚠️ Legacy Web UI | ❌ |
@@ -458,7 +458,7 @@ flowchart TD
 ┌────────────────────────────────────────────────────────────────────────┐
 │                   LINUX KERNEL & SYSTEM LAYER                          │
 │                                                                        │
-│   • systemd (Single Source of Truth — No Duplicate State Machines)    │
+│   • systemd (Single Source of Truth: No Duplicate State Machines)     │
 │   • cgroups (Kernel Memory & CPU Quota Resource Limits)                │
 │   • journald (High-Performance Structured System Logging)              │
 │   • PTY Subsystem (Persistent WebSockets Terminal Emulation)           │
@@ -550,6 +550,6 @@ Contributions, issues, and feature proposals are warmly welcomed! Please read ou
 
 ## 📄 License
 
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
 
 Developed with ❤️ by [**Fire Package**](https://github.com/Fire-Package).
