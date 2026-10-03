@@ -8,6 +8,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 
 ## [Unreleased]
 
+- `[2026-10-03]{22:06:00} Web Terminal: Stop auto-generated terminal replies (DA1/DA2 like ^[[>0;276;0c, DSR, OSC color reports) from leaking onto the shell prompt by absorbing DA2/DA3 queries in xterm.js and dropping such replies in the client and PTY input path`
 - `[2026-10-02]{00:14:00} Web Terminal: Map F11 key in window capture and terminal handler to toggle fullscreen mode with keyboard lock for Ctrl+W protection`
 - `[2026-10-01]{22:42:00} Web Terminal: Add dynamic session and tab title updates via fire ssh title CLI, POST /api/title daemon endpoint, and interactive UI prompt with real-time WebSocket broadcast and independent tab renaming`
 - `[2026-10-01]{22:32:00} Web Terminal: Remove voice dictation system and legacy mic bridge, eliminating unused loopback TCP listener, F5 terminal key interception, and mobile/desktop voice controls`

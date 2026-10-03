@@ -575,7 +575,20 @@ class TerminalSession:
                 self.sock = None
                 self.last_seen = time.time()
 
+    @staticmethod
+    def is_terminal_query_response(data: bytes) -> bool:
+        """True for auto-generated terminal replies (DA1/DA2, DSR, kitty keyboard, OSC colors) that arrive late and would be echoed as junk at the prompt."""
+        if not data or data[:1] != b'\x1b':
+            return False
+        if data[:3] in (b'\x1b[>', b'\x1b[?') and data.endswith((b'c', b'u')):
+            return True
+        if data in (b'\x1b[0n', b'\x1b[3n'):
+            return True
+        return data.startswith((b'\x1b]10;', b'\x1b]11;', b'\x1b]12;', b'\x1b]4;'))
+
     def write_input(self, data: bytes):
+        if self.is_terminal_query_response(data):
+            return
         if self.master_fd and not self.closed:
             try:
                 os.write(self.master_fd, data)
@@ -3240,6 +3253,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }).join('');
     }
 
+    function isTerminalQueryResponse(data) {
+      if (!data || data.charCodeAt(0) !== 27) return false;
+      if ((data.startsWith('\x1b[>') || data.startsWith('\x1b[?')) && /[cu]$/.test(data)) return true;
+      if (data === '\x1b[0n' || data === '\x1b[3n') return true;
+      return /^\x1b\](4|10|11|12);/.test(data);
+    }
+
     function setupTabEvents(tab) {
       const t = tab.term;
 
@@ -3273,6 +3293,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           }
           return true;
         });
+      }
+
+      if (t.parser && t.parser.registerCsiHandler) {
+        t.parser.registerCsiHandler({ prefix: '>', final: 'c' }, () => true);
+        t.parser.registerCsiHandler({ prefix: '=', final: 'c' }, () => true);
       }
 
       // Mouse & contextmenu on mountEl
@@ -3401,6 +3426,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       // Terminal Data handler
       if (!window.IS_READONLY) {
         t.onData(data => {
+          if (isTerminalQueryResponse(data)) return;
           if (ctrlSticky && data.length > 0) {
             sendCtrlChar(data[0]);
             if (data.length > 1) {
