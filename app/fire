@@ -311,8 +311,11 @@ ensure_root() {
     if command -v sudo &>/dev/null; then
       if sudo -n -E true 2>/dev/null; then
         exec sudo -E "$0" "$@"
-      else
+      elif [[ -t 0 ]]; then
         exec sudo "$0" "$@"
+      else
+        error "This action requires root privileges, but sudo requires a password and no interactive terminal is available."
+        exit 1
       fi
     else
       error "This action requires root privileges. Please install sudo or run as root."
@@ -330,8 +333,17 @@ command_needs_root() {
       ;;
     tunnel)
       case "$subcmd" in
-        open|start|close|stop|setup|config)
+        setup|config)
           return 0
+          ;;
+        open|start)
+          for a in "${ARGS[@]}"; do
+            [[ "$a" == "--custom" || "$a" == "--nginx" || "$a" == "--provider=custom" || "$a" == "custom" ]] && return 0
+          done
+          return 1
+          ;;
+        close|stop)
+          return 1
           ;;
         *)
           return 1
@@ -343,15 +355,8 @@ command_needs_root() {
       return 1
       ;;
     ssh)
-      case "$subcmd" in
-        password|set-password|start|open|close|stop)
-          return 0
-          ;;
-        *)
-          [[ -z "$subcmd" || "$subcmd" == -* ]] && return 0
-          return 1
-          ;;
-      esac
+      # fire ssh runs in user-space (PTY terminal for current user + cloudflare quick tunnel)
+      return 1
       ;;
     *)
       return 1
@@ -454,7 +459,8 @@ format_mem_kb() {
 
 ensure_tunnel_dir() {
   if [[ ! -d "$TUNNEL_DIR" ]]; then
-    mkdir -p "$TUNNEL_DIR"
+    mkdir -p "$TUNNEL_DIR" 2>/dev/null || TUNNEL_DIR="/tmp/fire-tunnels-$UID"
+    mkdir -p "$TUNNEL_DIR" 2>/dev/null || true
     chmod 700 "$TUNNEL_DIR" 2>/dev/null || true
   else
     local owner
@@ -462,6 +468,10 @@ ensure_tunnel_dir() {
     if [[ -n "$owner" && "$owner" != "$EUID" && "$EUID" -eq 0 ]]; then
       rm -rf "$TUNNEL_DIR"
       mkdir -p "$TUNNEL_DIR"
+      chmod 700 "$TUNNEL_DIR" 2>/dev/null || true
+    elif [[ -n "$owner" && "$owner" != "$EUID" ]]; then
+      TUNNEL_DIR="/tmp/fire-tunnels-$UID"
+      mkdir -p "$TUNNEL_DIR" 2>/dev/null || true
       chmod 700 "$TUNNEL_DIR" 2>/dev/null || true
     fi
   fi
@@ -2657,11 +2667,22 @@ action_ssh_list() {
     echo -e "  ${GREY}─────────────────────────────────────────────────────────────────────────────────────${NC}"
   fi
 
-  if [[ -d "$SSH_STATE_DIR" ]]; then
-    for state_file in "$SSH_STATE_DIR"/*.json; do
+  local state_dirs=()
+  [[ -d "/tmp/fire-ssh" ]] && state_dirs+=("/tmp/fire-ssh")
+  [[ -n "$UID" && -d "/tmp/fire-ssh-$UID" ]] && state_dirs+=("/tmp/fire-ssh-$UID")
+  if [[ ${#state_dirs[@]} -eq 0 && -d "$SSH_STATE_DIR" ]]; then
+    state_dirs+=("$SSH_STATE_DIR")
+  fi
+
+  declare -A seen_ports
+  for sdir in "${state_dirs[@]}"; do
+    for state_file in "$sdir"/*.json; do
       [[ -f "$state_file" ]] || continue
       local port pid url title created_at age
       port=$(basename "$state_file" .json)
+      [[ -n "${seen_ports[$port]}" ]] && continue
+      seen_ports["$port"]=1
+
       pid=$(grep -o '"pid": *[0-9]*' "$state_file" | awk -F: '{print $2}' | tr -d ' ')
       url=$(grep -o '"url": *"[^"]*"' "$state_file" | awk -F'"' '{print $4}')
       title=$(grep -o '"title": *"[^"]*"' "$state_file" | awk -F'"' '{print $4}')
@@ -2689,7 +2710,7 @@ action_ssh_list() {
         rm -f "$state_file"
       fi
     done
-  fi
+  done
 
   if [[ $json_mode -eq 1 ]]; then
     local old_ifs="$IFS"
@@ -2725,8 +2746,15 @@ action_ssh_close() {
 
   local closed=0
 
-  if [[ -d "$SSH_STATE_DIR" ]]; then
-    for state_file in "$SSH_STATE_DIR"/*.json; do
+  local state_dirs=()
+  [[ -d "/tmp/fire-ssh" ]] && state_dirs+=("/tmp/fire-ssh")
+  [[ -n "$UID" && -d "/tmp/fire-ssh-$UID" ]] && state_dirs+=("/tmp/fire-ssh-$UID")
+  if [[ ${#state_dirs[@]} -eq 0 && -d "$SSH_STATE_DIR" ]]; then
+    state_dirs+=("$SSH_STATE_DIR")
+  fi
+
+  for sdir in "${state_dirs[@]}"; do
+    for state_file in "$sdir"/*.json; do
       [[ -f "$state_file" ]] || continue
       local port pid
       port=$(basename "$state_file" .json)
@@ -2742,13 +2770,13 @@ action_ssh_close() {
       fi
       action_tunnel_close "$port" >/dev/null 2>&1 || true
       rm -f "$state_file"
-      rm -f "$SSH_STATE_DIR/${port}.log"
+      rm -f "$sdir/${port}.log"
       if [[ $json_mode -eq 0 ]]; then
         success "Closed SSH web terminal on port ${CYAN}$port${NC}"
       fi
       closed=$((closed + 1))
     done
-  fi
+  done
 
   if [[ $json_mode -eq 1 ]]; then
     echo "{\"success\":true,\"closed\":$closed}"

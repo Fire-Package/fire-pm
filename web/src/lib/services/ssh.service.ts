@@ -56,60 +56,64 @@ export class SshService {
   }
 
   private static listFromStateFiles(): SshSessionListResponse {
-    const stateDir = this.getStateDir();
-    if (!fs.existsSync(stateDir)) {
-      return { sessions: [], total: 0, online: 0 };
-    }
-
+    const uid = typeof process.getuid === "function" ? process.getuid() : 0;
+    const dirs = ["/tmp/fire-ssh", `/tmp/fire-ssh-${uid}`];
+    const seenPorts = new Set<number>();
     const sessions: SshSessionItem[] = [];
-    try {
-      const files = fs.readdirSync(stateDir).filter((f) => f.endsWith(".json"));
-      const now = Math.floor(Date.now() / 1000);
+    const now = Math.floor(Date.now() / 1000);
 
-      for (const file of files) {
-        const filePath = path.join(stateDir, file);
-        try {
-          const raw = fs.readFileSync(filePath, "utf-8");
-          const data = JSON.parse(raw);
-          const pid = Number(data.pid);
+    for (const stateDir of dirs) {
+      if (!fs.existsSync(stateDir)) continue;
+      try {
+        const files = fs.readdirSync(stateDir).filter((f) => f.endsWith(".json"));
+        for (const file of files) {
+          const filePath = path.join(stateDir, file);
+          try {
+            const raw = fs.readFileSync(filePath, "utf-8");
+            const data = JSON.parse(raw);
+            const port = Number(data.port);
+            if (seenPorts.has(port)) continue;
+            seenPorts.add(port);
 
-          let isAlive = false;
-          if (pid > 0) {
-            try {
-              process.kill(pid, 0);
-              isAlive = true;
-            } catch {
-              isAlive = false;
-            }
-          }
-
-          if (isAlive) {
-            const createdAt = Number(data.created_at || data.createdAt || 0);
-            let age = "-";
-            if (createdAt > 0 && now >= createdAt) {
-              const diff = now - createdAt;
-              if (diff < 60) age = `${diff}s`;
-              else if (diff < 3600) age = `${Math.floor(diff / 60)}m`;
-              else age = `${Math.floor(diff / 3600)}h`;
+            const pid = Number(data.pid);
+            let isAlive = false;
+            if (pid > 0) {
+              try {
+                process.kill(pid, 0);
+                isAlive = true;
+              } catch {
+                isAlive = false;
+              }
             }
 
-            sessions.push({
-              port: Number(data.port),
-              pid,
-              url: data.url || `http://localhost:${data.port}`,
-              title: data.title || "",
-              status: "ONLINE",
-              age,
-              createdAt,
-              localUrl: `http://127.0.0.1:${data.port}`,
-            });
+            if (isAlive) {
+              const createdAt = Number(data.created_at || data.createdAt || 0);
+              let age = "-";
+              if (createdAt > 0 && now >= createdAt) {
+                const diff = now - createdAt;
+                if (diff < 60) age = `${diff}s`;
+                else if (diff < 3600) age = `${Math.floor(diff / 60)}m`;
+                else age = `${Math.floor(diff / 3600)}h`;
+              }
+
+              sessions.push({
+                port,
+                pid,
+                url: data.url || `http://localhost:${port}`,
+                title: data.title || "",
+                status: "ONLINE",
+                age,
+                createdAt,
+                localUrl: `http://127.0.0.1:${port}`,
+              });
+            }
+          } catch {
+            // Ignore invalid files
           }
-        } catch {
-          // Ignore invalid files
         }
+      } catch {
+        // Continue to next dir
       }
-    } catch {
-      // Return whatever gathered
     }
 
     return {
@@ -209,12 +213,15 @@ export class SshService {
 
     // Ensure state file is deleted
     if (port !== "all") {
-      const stateDir = this.getStateDir();
-      const stateFile = path.join(stateDir, `${port}.json`);
-      if (fs.existsSync(stateFile)) {
-        try {
-          fs.unlinkSync(stateFile);
-        } catch {}
+      const uid = typeof process.getuid === "function" ? process.getuid() : 0;
+      const dirs = ["/tmp/fire-ssh", `/tmp/fire-ssh-${uid}`];
+      for (const d of dirs) {
+        const stateFile = path.join(d, `${port}.json`);
+        if (fs.existsSync(stateFile)) {
+          try {
+            fs.unlinkSync(stateFile);
+          } catch {}
+        }
       }
     }
 
