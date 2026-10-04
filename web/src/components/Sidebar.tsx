@@ -24,6 +24,7 @@ export const Sidebar: React.FC = () => {
     { label: "Overview", href: "/dashboard", icon: SquaresFour },
     { label: "Processes", href: "/processes", icon: Stack },
     { label: "Tunnels", href: "/tunnels", icon: Plugs },
+    { label: "SSH Sessions", href: "/ssh", icon: TerminalWindow },
     { label: "Settings", href: "/settings", icon: Gear },
   ];
 

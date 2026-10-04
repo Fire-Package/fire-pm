@@ -2630,33 +2630,70 @@ action_ssh_password() {
 }
 
 action_ssh_list() {
-  echo ""
-  echo -e "  ${BOLD}🔥 Fire PM Remote Web Terminal Sessions${NC}"
-  echo -e "  ${GREY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-  printf "  ${BOLD}%-8s %-18s %-10s %-38s${NC}\n" "PORT" "STATUS" "PID" "PUBLIC ACCESS URL"
-  echo -e "  ${GREY}─────────────────────────────────────────────────────────────────────────────────────${NC}"
+  local json_mode=0
+  if [[ "${JSON_OPT:-0}" -eq 1 ]]; then
+    json_mode=1
+  fi
+  for arg in "${ARGS[@]}"; do
+    if [[ "$arg" == "--json" ]]; then
+      json_mode=1
+    fi
+  done
 
+  local current_ts
+  current_ts=$(date +%s)
   local count=0
+  local json_sessions=()
+
+  if [[ $json_mode -eq 0 ]]; then
+    echo ""
+    echo -e "  ${BOLD}🔥 Fire PM Remote Web Terminal Sessions${NC}"
+    echo -e "  ${GREY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf "  ${BOLD}%-8s %-18s %-10s %-38s${NC}\n" "PORT" "STATUS" "PID" "PUBLIC ACCESS URL"
+    echo -e "  ${GREY}─────────────────────────────────────────────────────────────────────────────────────${NC}"
+  fi
+
   if [[ -d "$SSH_STATE_DIR" ]]; then
     for state_file in "$SSH_STATE_DIR"/*.json; do
       [[ -f "$state_file" ]] || continue
-      local port pid url title
+      local port pid url title created_at age
       port=$(basename "$state_file" .json)
       pid=$(grep -o '"pid": *[0-9]*' "$state_file" | awk -F: '{print $2}' | tr -d ' ')
       url=$(grep -o '"url": *"[^"]*"' "$state_file" | awk -F'"' '{print $4}')
       title=$(grep -o '"title": *"[^"]*"' "$state_file" | awk -F'"' '{print $4}')
+      created_at=$(grep -o '"created_at": *[0-9]*' "$state_file" | awk -F: '{print $2}' | tr -d ' ')
       
+      age="-"
+      if [[ "$created_at" =~ ^[0-9]+$ ]]; then
+        age=$(format_elapsed "$((current_ts - created_at))")
+      fi
+
       if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-        local title_str=""
-        if [[ -n "$title" ]]; then
-          title_str=" [${title}]"
-        fi
-        printf "  %-8s ${GREEN}%-18s${NC} %-10s ${CYAN}%-38s${NC}%s\n" "$port" "ACTIVE" "$pid" "${url:-http://localhost:$port}" "$title_str"
         count=$((count + 1))
+        if [[ $json_mode -eq 1 ]]; then
+          local escaped_title
+          escaped_title=$(printf '%s' "$title" | python3 -c 'import sys, json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo "\"$title\"")
+          json_sessions+=("{\"port\":$port,\"pid\":$pid,\"url\":\"${url:-http://localhost:$port}\",\"title\":$escaped_title,\"status\":\"ONLINE\",\"age\":\"$age\",\"createdAt\":${created_at:-0}}")
+        else
+          local title_str=""
+          if [[ -n "$title" ]]; then
+            title_str=" [${title}]"
+          fi
+          printf "  %-8s ${GREEN}%-18s${NC} %-10s ${CYAN}%-38s${NC}%s\n" "$port" "ACTIVE" "$pid" "${url:-http://localhost:$port}" "$title_str"
+        fi
       else
         rm -f "$state_file"
       fi
     done
+  fi
+
+  if [[ $json_mode -eq 1 ]]; then
+    local old_ifs="$IFS"
+    IFS=","
+    local sessions_json="${json_sessions[*]}"
+    IFS="$old_ifs"
+    echo "{\"sessions\":[$sessions_json],\"total\":$count,\"online\":$count}"
+    return 0
   fi
 
   if [[ $count -eq 0 ]]; then
@@ -2669,6 +2706,19 @@ action_ssh_list() {
 
 action_ssh_close() {
   local target_port="${ARGS[0]}"
+  local json_mode=0
+  if [[ "${JSON_OPT:-0}" -eq 1 ]]; then
+    json_mode=1
+  fi
+  for arg in "${ARGS[@]}"; do
+    if [[ "$arg" == "--json" ]]; then
+      json_mode=1
+    fi
+  done
+  if [[ "$target_port" == "--json" ]]; then
+    target_port=""
+  fi
+
   local closed=0
 
   if [[ -d "$SSH_STATE_DIR" ]]; then
@@ -2689,9 +2739,16 @@ action_ssh_close() {
       action_tunnel_close "$port" >/dev/null 2>&1 || true
       rm -f "$state_file"
       rm -f "$SSH_STATE_DIR/${port}.log"
-      success "Closed SSH web terminal on port ${CYAN}$port${NC}"
+      if [[ $json_mode -eq 0 ]]; then
+        success "Closed SSH web terminal on port ${CYAN}$port${NC}"
+      fi
       closed=$((closed + 1))
     done
+  fi
+
+  if [[ $json_mode -eq 1 ]]; then
+    echo "{\"success\":true,\"closed\":$closed}"
+    return 0
   fi
 
   if [[ $closed -eq 0 ]]; then
@@ -2811,6 +2868,10 @@ action_ssh_start() {
   local no_tunnel=0
   local provider_opt=""
   local session_title=""
+  local json_mode=0
+  if [[ "${JSON_OPT:-0}" -eq 1 ]]; then
+    json_mode=1
+  fi
 
   for ((i=0; i<${#ARGS[@]}; i++)); do
     local a="${ARGS[i]}"
@@ -2844,6 +2905,9 @@ action_ssh_start() {
         ;;
       --daemon|-d|--detach)
         daemon_mode=1
+        ;;
+      --json)
+        json_mode=1
         ;;
       --no-tunnel)
         no_tunnel=1
@@ -3017,6 +3081,10 @@ JSONEOF
 
   if [[ $daemon_mode -eq 1 ]]; then
     disown "$server_pid" 2>/dev/null || true
+    if [[ $json_mode -eq 1 ]]; then
+      echo "{\"success\":true,\"port\":$port,\"pid\":$server_pid,\"url\":\"$public_url\",\"title\":$title_json,\"createdAt\":$(date +%s)}"
+      return 0
+    fi
     success "Remote terminal running in background (PID: $server_pid)"
     echo -e "  To close session: ${CYAN}fire ssh close $port${NC}"
     return 0

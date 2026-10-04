@@ -64,6 +64,23 @@ export interface TunnelListResponse {
   pending: number;
 }
 
+export interface SshSessionItem {
+  port: number;
+  pid: number;
+  url: string;
+  title: string;
+  status: "ONLINE" | "STOPPED" | string;
+  age: string;
+  createdAt: number;
+  localUrl?: string;
+}
+
+export interface SshSessionListResponse {
+  sessions: SshSessionItem[];
+  total: number;
+  online: number;
+}
+
 export interface HealthCheckItem {
   name: string;
   passed: boolean;

@@ -11,6 +11,7 @@ export function middleware(req: NextRequest) {
     path.startsWith("/dashboard") ||
     path.startsWith("/processes") ||
     path.startsWith("/tunnels") ||
+    path.startsWith("/ssh") ||
     path.startsWith("/settings");
 
   if (isProtectedPage && !token) {
@@ -30,6 +31,7 @@ export const config = {
     "/dashboard/:path*",
     "/processes/:path*",
     "/tunnels/:path*",
+    "/ssh/:path*",
     "/settings/:path*",
     "/login",
     "/setup",
