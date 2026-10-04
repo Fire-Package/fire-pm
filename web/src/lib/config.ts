@@ -48,6 +48,37 @@ function getConfigPath(): string {
   }
 }
 
+export function resolveCliBinary(configured?: string): string {
+  if (configured && fs.existsSync(configured)) {
+    return configured;
+  }
+  const candidates = [
+    "/usr/local/bin/fire",
+    "/usr/bin/fire",
+    "/opt/fire-pm/app/fire",
+    path.resolve(process.cwd(), "../app/fire"),
+    path.resolve(process.cwd(), "app/fire"),
+    path.resolve(process.cwd(), "../../app/fire"),
+  ];
+
+  for (const c of candidates) {
+    if (fs.existsSync(c)) {
+      return c;
+    }
+  }
+
+  const envPath = process.env.PATH || "";
+  for (const dir of envPath.split(path.delimiter)) {
+    if (!dir) continue;
+    const fullPath = path.join(dir, "fire");
+    if (fs.existsSync(fullPath)) {
+      return fullPath;
+    }
+  }
+
+  return configured || "/usr/local/bin/fire";
+}
+
 const DEFAULT_CONFIG: FireConfig = {
   auth: {
     passwordHash: "",
@@ -90,7 +121,11 @@ export function loadConfig(): FireConfig {
         ...parsed,
         auth: { ...DEFAULT_CONFIG.auth, ...(parsed.auth || {}) },
         server: { ...DEFAULT_CONFIG.server, ...(parsed.server || {}) },
-        fire: { ...DEFAULT_CONFIG.fire, ...(parsed.fire || {}) },
+        fire: {
+          ...DEFAULT_CONFIG.fire,
+          ...(parsed.fire || {}),
+          cliBinary: resolveCliBinary(parsed.fire?.cliBinary || DEFAULT_CONFIG.fire.cliBinary),
+        },
         tunnel: { ...DEFAULT_CONFIG.tunnel, ...(parsed.tunnel || {}) },
       };
       return cachedConfig!;
@@ -100,7 +135,13 @@ export function loadConfig(): FireConfig {
   }
 
   // Create initial config if not exists
-  cachedConfig = { ...DEFAULT_CONFIG };
+  cachedConfig = {
+    ...DEFAULT_CONFIG,
+    fire: {
+      ...DEFAULT_CONFIG.fire,
+      cliBinary: resolveCliBinary(DEFAULT_CONFIG.fire.cliBinary),
+    },
+  };
   saveConfig(cachedConfig);
   return cachedConfig;
 }

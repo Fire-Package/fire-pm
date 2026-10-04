@@ -1,4 +1,4 @@
-import { execFile, spawn, ExecFileOptions } from "child_process";
+import { execFile, spawn, type ExecFileOptions } from "child_process";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
@@ -35,7 +35,8 @@ export async function safeExec(
   args: string[] = [],
   options: ExecFileOptions = {}
 ): Promise<SafeExecResult> {
-  if (!ALLOWED_COMMANDS.has(file)) {
+  const binaryBase = file.split("/").pop() || file;
+  if (!ALLOWED_COMMANDS.has(file) && !ALLOWED_COMMANDS.has(binaryBase)) {
     throw new Error(`Command execution forbidden: ${file}`);
   }
 

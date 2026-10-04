@@ -2572,10 +2572,14 @@ action_tunnel() {
 SSH_STATE_DIR="/tmp/fire-ssh"
 
 find_fire_ssh_script() {
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
   local candidates=(
     "/usr/local/bin/fire_ssh.py"
     "/opt/fire-pm/app/fire_ssh.py"
+    "${script_dir}/fire_ssh.py"
     "${WORKDIR}/app/fire_ssh.py"
+    "${WORKDIR}/../app/fire_ssh.py"
   )
   for c in "${candidates[@]}"; do
     if [[ -f "$c" ]]; then

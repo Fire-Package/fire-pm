@@ -1,11 +1,16 @@
 import fs from "fs";
 import path from "path";
 import { safeExec } from "../shell";
-import { loadConfig } from "../config";
+import { loadConfig, resolveCliBinary } from "../config";
 import { validatePort } from "../validation";
 import { SshSessionItem, SshSessionListResponse } from "../types";
 
 export class SshService {
+  private static getFireBinary(): string {
+    const config = loadConfig();
+    return resolveCliBinary(config.fire.cliBinary);
+  }
+
   private static getStateDir(): string {
     const defaultDir = "/tmp/fire-ssh";
     if (fs.existsSync(defaultDir)) {
@@ -20,9 +25,9 @@ export class SshService {
   }
 
   static async list(): Promise<SshSessionListResponse> {
-    const config = loadConfig();
+    const binary = this.getFireBinary();
     try {
-      const result = await safeExec(config.fire.cliBinary, ["ssh", "list", "--json"]);
+      const result = await safeExec(binary, ["ssh", "list", "--json"]);
       if (result.code === 0 && result.stdout) {
         const data = JSON.parse(result.stdout.trim());
         if (data && Array.isArray(data.sessions)) {
@@ -125,7 +130,7 @@ export class SshService {
       throw new Error(`Invalid port number: ${options.port}`);
     }
 
-    const config = loadConfig();
+    const binary = this.getFireBinary();
     const args = ["ssh", "--daemon", "--json"];
 
     if (options.port) {
@@ -144,9 +149,14 @@ export class SshService {
       args.push("--no-tunnel");
     }
 
-    const result = await safeExec(config.fire.cliBinary, args);
+    const result = await safeExec(binary, args);
 
     if (result.code !== 0 && !result.stdout) {
+      if (result.stderr && result.stderr.includes("ENOENT")) {
+        throw new Error(
+          `Fire PM CLI binary not found at "${binary}". Please ensure Fire PM is installed (sudo ./install.sh) or that app/fire is executable.`
+        );
+      }
       throw new Error(result.stderr || `Failed to create SSH session`);
     }
 
@@ -189,9 +199,9 @@ export class SshService {
       throw new Error(`Invalid port number: ${port}`);
     }
 
-    const config = loadConfig();
+    const binary = this.getFireBinary();
     const args = ["ssh", "close", port.toString(), "--json"];
-    const result = await safeExec(config.fire.cliBinary, args);
+    const result = await safeExec(binary, args);
 
     if (result.code !== 0 && result.stderr && !result.stderr.includes("Closed")) {
       throw new Error(result.stderr || `Failed to close SSH session on port ${port}`);
@@ -216,8 +226,8 @@ export class SshService {
       throw new Error(`Invalid port number: ${port}`);
     }
 
-    const config = loadConfig();
-    const result = await safeExec(config.fire.cliBinary, ["ssh", "title", port.toString(), title]);
+    const binary = this.getFireBinary();
+    const result = await safeExec(binary, ["ssh", "title", port.toString(), title]);
 
     if (result.code !== 0) {
       throw new Error(result.stderr || `Failed to update title for SSH session on port ${port}`);
