@@ -1246,9 +1246,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       </div>
     </div>
 
-    <!-- Download Modal Dialog -->
+    <!-- Download Modal Dialog with Autocomplete -->
     <div id="download-modal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-5 w-full max-w-md text-left font-sans">
+      <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-5 w-full max-w-lg text-left font-sans">
         <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
           <div class="flex items-center gap-2">
             <span class="text-base">📥</span>
@@ -1257,20 +1257,84 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <button type="button" onclick="closeDownloadModal()" class="text-slate-400 hover:text-slate-200 text-sm p-1">✕</button>
         </div>
         <form onsubmit="handleDownloadSubmit(event)" class="space-y-3.5">
-          <div>
+          <div class="relative">
             <label class="block text-xs font-medium text-slate-300 mb-1">File Path to Download</label>
             <div class="text-[11px] text-slate-400 mb-1.5 font-mono truncate">
               Working directory: <span id="download-cwd-hint" class="text-orange-300">/root</span>
             </div>
-            <input type="text" id="download-path-input" required placeholder="e.g. filename.ext or /var/log/syslog"
-                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500">
-            <p class="text-[10px] text-slate-500 mt-1">Relative paths are resolved against the active terminal directory.</p>
+            <div class="relative">
+              <input type="text" id="download-path-input" required autocomplete="off" spellcheck="false"
+                     placeholder="Type or select a file/directory..."
+                     class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 pr-8">
+              <div id="download-spinner" class="hidden absolute right-2.5 top-2.5 text-slate-400 animate-spin text-xs">⟳</div>
+            </div>
+            <!-- Download Autocomplete Dropdown -->
+            <div id="download-suggestions" class="hidden absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-950/95 border border-slate-700 rounded-xl shadow-2xl max-h-56 overflow-y-auto font-mono text-xs backdrop-blur-sm divide-y divide-slate-800/60">
+            </div>
+            <p class="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
+              <span>Use <kbd class="px-1 py-0.5 bg-slate-800 rounded text-slate-300">Tab</kbd> or <kbd class="px-1 py-0.5 bg-slate-800 rounded text-slate-300">↑↓</kbd> to complete suggestions.</span>
+              <span id="download-count-badge" class="text-slate-400"></span>
+            </p>
           </div>
           <div class="flex items-center justify-end gap-2 pt-2">
             <button type="button" onclick="closeDownloadModal()" class="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition">Cancel</button>
             <button type="submit" class="px-3.5 py-1.5 text-xs bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl transition flex items-center gap-1.5 shadow-lg shadow-orange-500/20">
               <span>Download</span>
               <span class="text-[10px]">↓</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Upload Modal Dialog with Destination Autocomplete -->
+    <div id="upload-modal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-5 w-full max-w-lg text-left font-sans">
+        <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
+          <div class="flex items-center gap-2">
+            <span class="text-base">📤</span>
+            <div>
+              <span class="font-semibold text-sm text-white block">Upload Files</span>
+              <span class="text-[11px] text-slate-400">Choose destination directory and files to upload</span>
+            </div>
+          </div>
+          <button type="button" onclick="closeUploadModal()" class="text-slate-400 hover:text-slate-200 text-sm p-1">✕</button>
+        </div>
+        <form onsubmit="handleUploadSubmit(event)" class="space-y-3.5">
+          <!-- Destination Directory Field -->
+          <div class="relative">
+            <label class="block text-xs font-medium text-slate-300 mb-1">Destination Directory</label>
+            <div class="relative">
+              <input type="text" id="upload-dest-input" required autocomplete="off" spellcheck="false"
+                     placeholder="/root or relative path..."
+                     class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 pr-8">
+              <div id="upload-dest-spinner" class="hidden absolute right-2.5 top-2.5 text-slate-400 animate-spin text-xs">⟳</div>
+            </div>
+            <!-- Upload Destination Dropdown -->
+            <div id="upload-dest-suggestions" class="hidden absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-950/95 border border-slate-700 rounded-xl shadow-2xl max-h-52 overflow-y-auto font-mono text-xs backdrop-blur-sm divide-y divide-slate-800/60">
+            </div>
+            <p class="text-[10px] text-slate-500 mt-1">Files will be saved into this directory on the remote server.</p>
+          </div>
+
+          <!-- Selected Files Display / File Picker -->
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-medium text-slate-300">Files to Upload</label>
+              <button type="button" onclick="document.getElementById('upload-modal-file-input').click()" class="text-[11px] text-orange-400 hover:text-orange-300 transition">
+                + Select More
+              </button>
+            </div>
+            <input id="upload-modal-file-input" type="file" multiple class="hidden" onchange="handleModalFileSelect(event)">
+            <div id="upload-files-list" class="bg-slate-950 border border-slate-800 rounded-xl p-2.5 max-h-36 overflow-y-auto space-y-1 text-xs font-mono">
+              <div class="text-slate-500 text-[11px] text-center py-3">No files selected. Drag & drop files here or click "+ Select More".</div>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-2">
+            <button type="button" onclick="closeUploadModal()" class="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition">Cancel</button>
+            <button type="submit" id="start-upload-btn" class="px-3.5 py-1.5 text-xs bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl transition flex items-center gap-1.5 shadow-lg shadow-orange-500/20 disabled:opacity-50 disabled:cursor-not-allowed">
+              <span>Start Upload</span>
+              <span class="text-[10px]">↑</span>
             </button>
           </div>
         </form>
@@ -2454,6 +2518,289 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     // ==================== FILE TRANSFER & DRAG-AND-DROP ====================
     let dragCounter = 0;
     let currentCwd = '/root';
+    let pendingUploadFiles = [];
+
+    // ==================== FAST 0-LATENCY DIRECTORY AUTOCOMPLETE ====================
+    // Caches directory listings so keystrokes filter instantly in-memory without network calls
+    const fsDirCache = new Map(); // dirPath -> { items: [], ts: Date.now() }
+    const FS_CACHE_TTL = 30000; // 30 seconds cache
+
+    async function fetchDirListing(dirPath, filterType = 'all', forceRefresh = false) {
+      const cacheKey = `${filterType}:${dirPath}`;
+      const cached = fsDirCache.get(cacheKey);
+      if (!forceRefresh && cached && (Date.now() - cached.ts < FS_CACHE_TTL)) {
+        return cached.items;
+      }
+
+      try {
+        const tabParam = activeTabId ? `&tab=${encodeURIComponent(activeTabId)}` : '';
+        const res = await fetch(`/api/suggest?dir=${encodeURIComponent(dirPath)}&type=${encodeURIComponent(filterType)}${tabParam}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.success && Array.isArray(data.items)) {
+            fsDirCache.set(cacheKey, { items: data.items, ts: Date.now() });
+            return data.items;
+          }
+        }
+      } catch(e) {}
+      return cached ? cached.items : [];
+    }
+
+    class PathAutocomplete {
+      constructor(options) {
+        this.inputEl = options.inputEl;
+        this.dropdownEl = options.dropdownEl;
+        this.spinnerEl = options.spinnerEl;
+        this.countBadgeEl = options.countBadgeEl;
+        this.filterType = options.filterType || 'all'; // 'all' or 'dir_only'
+        this.onSelect = options.onSelect || null;
+        this.items = [];
+        this.selectedIndex = -1;
+        this.debounceTimer = null;
+        this.isFetching = false;
+
+        this.init();
+      }
+
+      init() {
+        if (!this.inputEl || !this.dropdownEl) return;
+
+        this.inputEl.addEventListener('input', () => this.handleInput());
+        this.inputEl.addEventListener('focus', () => this.handleFocus());
+        this.inputEl.addEventListener('keydown', (e) => this.handleKeyDown(e));
+
+        document.addEventListener('click', (e) => {
+          if (!this.inputEl.contains(e.target) && !this.dropdownEl.contains(e.target)) {
+            this.hide();
+          }
+        });
+      }
+
+      parseInputPath(val) {
+        const raw = val.trim();
+        if (!raw) {
+          return { parentDir: currentCwd, baseName: '', isAbsolute: false };
+        }
+        if (raw === '/' || raw === '~') {
+          return { parentDir: raw, baseName: '', isAbsolute: true };
+        }
+        if (raw.endsWith('/')) {
+          return { parentDir: raw.slice(0, -1) || '/', baseName: '', isAbsolute: raw.startsWith('/') };
+        }
+        const lastSlash = raw.lastIndexOf('/');
+        if (lastSlash === -1) {
+          return { parentDir: currentCwd, baseName: raw, isAbsolute: false };
+        }
+        const parent = raw.slice(0, lastSlash) || '/';
+        const base = raw.slice(lastSlash + 1);
+        return { parentDir: parent, baseName: base, isAbsolute: raw.startsWith('/') };
+      }
+
+      async handleFocus() {
+        await this.refreshSuggestions();
+      }
+
+      handleInput() {
+        clearTimeout(this.debounceTimer);
+        // Instant local filter if we already have items from the parent directory
+        const { parentDir, baseName } = this.parseInputPath(this.inputEl.value);
+        const cacheKey = `${this.filterType}:${parentDir}`;
+        const cached = fsDirCache.get(cacheKey);
+
+        if (cached) {
+          this.renderList(cached.items, baseName, parentDir);
+        }
+
+        // Slight debounce for fetching new directory if not in cache
+        this.debounceTimer = setTimeout(() => {
+          this.refreshSuggestions();
+        }, 120);
+      }
+
+      async refreshSuggestions(force = false) {
+        const { parentDir, baseName } = this.parseInputPath(this.inputEl.value);
+        if (this.spinnerEl) this.spinnerEl.classList.remove('hidden');
+
+        const items = await fetchDirListing(parentDir, this.filterType, force);
+        if (this.spinnerEl) this.spinnerEl.classList.add('hidden');
+
+        this.renderList(items, baseName, parentDir);
+      }
+
+      renderList(items, query, parentDir) {
+        if (!items || !items.length) {
+          this.dropdownEl.innerHTML = '<div class="px-3 py-2 text-[11px] text-slate-500 italic">No matching files or directories</div>';
+          this.dropdownEl.classList.remove('hidden');
+          if (this.countBadgeEl) this.countBadgeEl.textContent = '';
+          this.items = [];
+          this.selectedIndex = -1;
+          return;
+        }
+
+        const q = (query || '').toLowerCase();
+        // Instant matching: prefix matches first, then substring matches
+        let matches = items.filter(item => {
+          const name = item.name.toLowerCase();
+          return !q || name.includes(q);
+        });
+
+        // Sort exact prefix matches first
+        matches.sort((a, b) => {
+          const aName = a.name.toLowerCase();
+          const bName = b.name.toLowerCase();
+          const aPrefix = aName.startsWith(q);
+          const bPrefix = bName.startsWith(q);
+          if (aPrefix && !bPrefix) return -1;
+          if (!aPrefix && bPrefix) return 1;
+          if (a.is_dir && !b.is_dir) return -1;
+          if (!a.is_dir && b.is_dir) return 1;
+          return aName.localeCompare(bName);
+        });
+
+        // Limit dropdown items to 40 for DOM performance
+        matches = matches.slice(0, 40);
+        this.items = matches;
+        this.selectedIndex = matches.length > 0 ? 0 : -1;
+
+        if (matches.length === 0) {
+          this.dropdownEl.innerHTML = `<div class="px-3 py-2 text-[11px] text-slate-500 italic">No files matching "${query}"</div>`;
+          this.dropdownEl.classList.remove('hidden');
+          if (this.countBadgeEl) this.countBadgeEl.textContent = '0 items';
+          return;
+        }
+
+        if (this.countBadgeEl) {
+          this.countBadgeEl.textContent = `${matches.length} item${matches.length === 1 ? '' : 's'}`;
+        }
+
+        this.dropdownEl.innerHTML = matches.map((item, idx) => {
+          const icon = item.is_dir ? '📁' : '📄';
+          const sizeStr = item.is_dir ? '' : `<span class="text-[10px] text-slate-500 font-mono">${formatBytes(item.size || 0)}</span>`;
+          const isSelected = idx === this.selectedIndex;
+          const activeClass = isSelected ? 'bg-orange-500/20 text-orange-200 border-l-2 border-orange-500' : 'text-slate-300 hover:bg-slate-900 border-l-2 border-transparent';
+
+          return `
+            <div data-idx="${idx}" class="suggestion-item px-3 py-1.5 cursor-pointer flex items-center justify-between transition text-xs font-mono select-none ${activeClass}">
+              <div class="flex items-center gap-2 truncate">
+                <span>${icon}</span>
+                <span class="truncate ${item.is_dir ? 'font-medium text-white' : ''}">${item.name}${item.is_dir ? '/' : ''}</span>
+              </div>
+              ${sizeStr}
+            </div>
+          `;
+        }).join('');
+
+        this.dropdownEl.querySelectorAll('.suggestion-item').forEach(el => {
+          el.addEventListener('mousedown', (e) => {
+            e.preventDefault(); // keep input focused
+            const idx = parseInt(el.getAttribute('data-idx'), 10);
+            this.selectItem(idx);
+          });
+        });
+
+        this.dropdownEl.classList.remove('hidden');
+        this.scrollSelectedIntoView();
+      }
+
+      scrollSelectedIntoView() {
+        const active = this.dropdownEl.querySelector(`.suggestion-item[data-idx="${this.selectedIndex}"]`);
+        if (active) {
+          active.scrollIntoView({ block: 'nearest' });
+        }
+      }
+
+      updateSelectionUI() {
+        const items = this.dropdownEl.querySelectorAll('.suggestion-item');
+        items.forEach((el, idx) => {
+          if (idx === this.selectedIndex) {
+            el.className = 'suggestion-item px-3 py-1.5 cursor-pointer flex items-center justify-between transition text-xs font-mono select-none bg-orange-500/20 text-orange-200 border-l-2 border-orange-500';
+          } else {
+            el.className = 'suggestion-item px-3 py-1.5 cursor-pointer flex items-center justify-between transition text-xs font-mono select-none text-slate-300 hover:bg-slate-900 border-l-2 border-transparent';
+          }
+        });
+        this.scrollSelectedIntoView();
+      }
+
+      selectItem(idx) {
+        if (idx < 0 || idx >= this.items.length) return;
+        const item = this.items[idx];
+        const val = this.inputEl.value.trim();
+        const lastSlash = val.lastIndexOf('/');
+
+        let newPath = '';
+        if (lastSlash === -1) {
+          newPath = item.name;
+        } else {
+          newPath = val.slice(0, lastSlash + 1) + item.name;
+        }
+
+        if (item.is_dir) {
+          newPath += '/';
+        }
+
+        this.inputEl.value = newPath;
+
+        if (item.is_dir) {
+          // Immediately prefetch directory contents for the next stage
+          this.refreshSuggestions(false);
+        } else {
+          this.hide();
+        }
+
+        if (this.onSelect) this.onSelect(item, newPath);
+      }
+
+      handleKeyDown(e) {
+        const isVisible = !this.dropdownEl.classList.contains('hidden');
+
+        if (e.key === 'ArrowDown') {
+          if (!isVisible) {
+            this.refreshSuggestions();
+            return;
+          }
+          e.preventDefault();
+          if (this.items.length > 0) {
+            this.selectedIndex = (this.selectedIndex + 1) % this.items.length;
+            this.updateSelectionUI();
+          }
+        } else if (e.key === 'ArrowUp') {
+          if (!isVisible) return;
+          e.preventDefault();
+          if (this.items.length > 0) {
+            this.selectedIndex = (this.selectedIndex - 1 + this.items.length) % this.items.length;
+            this.updateSelectionUI();
+          }
+        } else if (e.key === 'Tab') {
+          if (isVisible && this.items.length > 0) {
+            e.preventDefault();
+            this.selectItem(this.selectedIndex >= 0 ? this.selectedIndex : 0);
+          }
+        } else if (e.key === 'Enter') {
+          if (isVisible && this.selectedIndex >= 0 && this.items.length > 0) {
+            const item = this.items[this.selectedIndex];
+            if (item.is_dir) {
+              e.preventDefault();
+              this.selectItem(this.selectedIndex);
+              return;
+            }
+          }
+          this.hide();
+        } else if (e.key === 'Escape') {
+          if (isVisible) {
+            e.preventDefault();
+            this.hide();
+          }
+        }
+      }
+
+      hide() {
+        this.dropdownEl.classList.add('hidden');
+        if (this.countBadgeEl) this.countBadgeEl.textContent = '';
+      }
+    }
+
+    let downloadAutoComp = null;
+    let uploadDestAutoComp = null;
 
     async function updateCwd() {
       try {
@@ -2467,6 +2814,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             if (dropDirEl) dropDirEl.textContent = currentCwd;
             const dlHintEl = document.getElementById('download-cwd-hint');
             if (dlHintEl) dlHintEl.textContent = currentCwd;
+            const upDestInput = document.getElementById('upload-dest-input');
+            if (upDestInput && !upDestInput.value) upDestInput.value = currentCwd;
           }
         }
       } catch(e) {}
@@ -2480,6 +2829,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
 
+    // Drag and Drop Event Listeners
     window.addEventListener('dragenter', (e) => {
       if (window.IS_READONLY) return;
       e.preventDefault();
@@ -2514,28 +2864,123 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (overlay) overlay.classList.add('hidden');
 
       if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-        uploadFiles(e.dataTransfer.files);
+        // Drop into upload modal to allow choosing/verifying target directory
+        openUploadModal(e.dataTransfer.files);
       }
     });
 
     function triggerFileInput() {
-      updateCwd();
-      const fileInput = document.getElementById('file-upload-input');
-      if (fileInput) {
-        fileInput.value = '';
-        fileInput.click();
-      }
+      openUploadModal();
     }
 
     function handleFileSelect(e) {
       if (e.target && e.target.files && e.target.files.length > 0) {
-        uploadFiles(e.target.files);
+        openUploadModal(e.target.files);
       }
     }
 
-    async function uploadFiles(files) {
-      if (!files || files.length === 0) return;
+    // ==================== UPLOAD MODAL & DESTINATION SELECTION ====================
+    async function openUploadModal(initialFiles = null) {
+      if (window.IS_READONLY) return;
       await updateCwd();
+
+      const modal = document.getElementById('upload-modal');
+      const destInput = document.getElementById('upload-dest-input');
+
+      if (modal) modal.classList.remove('hidden');
+      if (destInput) {
+        destInput.value = currentCwd;
+      }
+
+      if (!uploadDestAutoComp) {
+        uploadDestAutoComp = new PathAutocomplete({
+          inputEl: document.getElementById('upload-dest-input'),
+          dropdownEl: document.getElementById('upload-dest-suggestions'),
+          spinnerEl: document.getElementById('upload-dest-spinner'),
+          filterType: 'dir_only'
+        });
+      }
+
+      if (initialFiles && initialFiles.length > 0) {
+        pendingUploadFiles = Array.from(initialFiles);
+      } else {
+        pendingUploadFiles = [];
+      }
+      renderUploadFilesList();
+
+      setTimeout(() => {
+        if (destInput) destInput.focus();
+        if (uploadDestAutoComp) uploadDestAutoComp.refreshSuggestions();
+      }, 50);
+    }
+
+    function closeUploadModal() {
+      const modal = document.getElementById('upload-modal');
+      if (modal) modal.classList.add('hidden');
+      if (uploadDestAutoComp) uploadDestAutoComp.hide();
+      pendingUploadFiles = [];
+    }
+
+    function handleModalFileSelect(e) {
+      if (e.target && e.target.files && e.target.files.length > 0) {
+        for (let i = 0; i < e.target.files.length; i++) {
+          pendingUploadFiles.push(e.target.files[i]);
+        }
+        renderUploadFilesList();
+      }
+    }
+
+    function removePendingFile(idx) {
+      if (idx >= 0 && idx < pendingUploadFiles.length) {
+        pendingUploadFiles.splice(idx, 1);
+        renderUploadFilesList();
+      }
+    }
+
+    function renderUploadFilesList() {
+      const listEl = document.getElementById('upload-files-list');
+      const startBtn = document.getElementById('start-upload-btn');
+      if (!listEl) return;
+
+      if (!pendingUploadFiles.length) {
+        listEl.innerHTML = '<div class="text-slate-500 text-[11px] text-center py-3">No files selected. Drag & drop files here or click "+ Select More".</div>';
+        if (startBtn) startBtn.disabled = true;
+        return;
+      }
+
+      if (startBtn) startBtn.disabled = false;
+      let totalSize = 0;
+      listEl.innerHTML = pendingUploadFiles.map((file, idx) => {
+        totalSize += file.size || 0;
+        return `
+          <div class="flex items-center justify-between px-2 py-1 bg-slate-900 rounded-lg text-slate-300">
+            <span class="truncate max-w-[280px]">${file.name}</span>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="text-[10px] text-slate-500">${formatBytes(file.size || 0)}</span>
+              <button type="button" onclick="removePendingFile(${idx})" class="text-slate-400 hover:text-red-400 transition text-xs">✕</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function handleUploadSubmit(e) {
+      e.preventDefault();
+      if (!pendingUploadFiles || !pendingUploadFiles.length) {
+        showToast('Please select at least one file to upload');
+        return;
+      }
+
+      const destInput = document.getElementById('upload-dest-input');
+      const targetDest = (destInput && destInput.value.trim()) ? destInput.value.trim() : currentCwd;
+      const filesToUpload = [...pendingUploadFiles];
+
+      closeUploadModal();
+      await executeFileUpload(filesToUpload, targetDest);
+    }
+
+    async function executeFileUpload(files, destDirectory) {
+      if (!files || files.length === 0) return;
 
       const progressCard = document.getElementById('upload-progress-card');
       const filenameEl = document.getElementById('upload-filename');
@@ -2556,7 +3001,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           await new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             const tabParam = activeTabId ? `&tab=${encodeURIComponent(activeTabId)}` : '';
-            const url = `/api/upload?name=${encodeURIComponent(file.name)}&dest=${encodeURIComponent(currentCwd)}${tabParam}`;
+            const url = `/api/upload?name=${encodeURIComponent(file.name)}&dest=${encodeURIComponent(destDirectory)}${tabParam}`;
             xhr.open('POST', url, true);
 
             xhr.upload.onprogress = (evt) => {
@@ -2571,7 +3016,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             xhr.onload = () => {
               if (xhr.status === 200) {
                 successCount++;
-                showToast(`Uploaded ${file.name} to ${currentCwd}`);
+                showToast(`Uploaded ${file.name} to ${destDirectory}`);
                 resolve();
               } else {
                 let errMsg = 'Upload failed';
@@ -2606,26 +3051,42 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         playNotificationChime();
         if ('Notification' in window && Notification.permission === 'granted') {
           new Notification('Fire SSH', {
-            body: `Uploaded ${successCount} file(s) to ${currentCwd}`
+            body: `Uploaded ${successCount} file(s) to ${destDirectory}`
           });
         }
       }
     }
 
-    function openDownloadModal() {
-      updateCwd();
+    // ==================== DOWNLOAD MODAL & FILE AUTOCOMPLETE ====================
+    async function openDownloadModal() {
+      await updateCwd();
       const modal = document.getElementById('download-modal');
       const input = document.getElementById('download-path-input');
       if (modal) modal.classList.remove('hidden');
+
+      if (!downloadAutoComp) {
+        downloadAutoComp = new PathAutocomplete({
+          inputEl: document.getElementById('download-path-input'),
+          dropdownEl: document.getElementById('download-suggestions'),
+          spinnerEl: document.getElementById('download-spinner'),
+          countBadgeEl: document.getElementById('download-count-badge'),
+          filterType: 'all'
+        });
+      }
+
       if (input) {
         input.value = '';
-        setTimeout(() => input.focus(), 50);
+        setTimeout(() => {
+          input.focus();
+          if (downloadAutoComp) downloadAutoComp.refreshSuggestions();
+        }, 50);
       }
     }
 
     function closeDownloadModal() {
       const modal = document.getElementById('download-modal');
       if (modal) modal.classList.add('hidden');
+      if (downloadAutoComp) downloadAutoComp.hide();
     }
 
     function handleDownloadSubmit(e) {
@@ -4111,6 +4572,63 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             session = self.server.terminals.get(token, tab_id)
             cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
             self.send_json({"success": True, "cwd": cwd})
+            return
+
+        elif parsed.path == '/api/suggest':
+            if not self.is_authenticated():
+                self.send_error(401, "Unauthorized")
+                return
+            token = self.get_auth_token()
+            query = urllib.parse.parse_qs(parsed.query)
+            tab_id = query.get('tab', [None])[0]
+            session = self.server.terminals.get(token, tab_id)
+            cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
+
+            req_dir = query.get('dir', [None])[0]
+            filter_type = query.get('type', ['all'])[0]  # 'all' or 'dir_only'
+
+            if not req_dir:
+                target_dir = cwd
+            else:
+                if req_dir.startswith('~'):
+                    home = os.environ.get("HOME", "/root")
+                    req_dir = os.path.join(home, req_dir[1:].lstrip('/'))
+                target_dir = os.path.realpath(req_dir) if os.path.isabs(req_dir) else os.path.realpath(os.path.join(cwd, req_dir))
+
+            if not os.path.exists(target_dir):
+                self.send_json({"success": False, "error": "Directory not found", "items": [], "dir": target_dir}, status=404)
+                return
+            if not os.path.isdir(target_dir):
+                self.send_json({"success": False, "error": "Not a directory", "items": [], "dir": target_dir}, status=400)
+                return
+
+            items = []
+            try:
+                with os.scandir(target_dir) as entries:
+                    for entry in entries:
+                        try:
+                            is_dir = entry.is_dir(follow_symlinks=True)
+                            if filter_type == 'dir_only' and not is_dir:
+                                continue
+                            item_info = {
+                                "name": entry.name,
+                                "is_dir": is_dir
+                            }
+                            if not is_dir:
+                                try:
+                                    item_info["size"] = entry.stat(follow_symlinks=True).st_size
+                                except Exception:
+                                    item_info["size"] = 0
+                            items.append(item_info)
+                        except (PermissionError, OSError):
+                            continue
+            except (PermissionError, OSError) as e:
+                self.send_json({"success": False, "error": str(e), "items": [], "dir": target_dir}, status=403)
+                return
+
+            # Sort directories first, then alphabetically case-insensitive
+            items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+            self.send_json({"success": True, "dir": target_dir, "cwd": cwd, "items": items[:250]})
             return
 
         elif parsed.path == '/api/download':
