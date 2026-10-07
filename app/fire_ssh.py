@@ -24,6 +24,8 @@ import base64
 import html
 import mimetypes
 import urllib.parse
+import zipfile
+import tempfile
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 import threading
@@ -1276,10 +1278,31 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               <span id="download-count-badge" class="text-slate-400"></span>
             </p>
           </div>
-          <div class="flex items-center justify-end gap-2 pt-2">
+
+          <!-- Download Directory as Zip Toggle (Off by default) -->
+          <div class="pt-1 pb-1">
+            <label class="flex items-center justify-between p-2.5 bg-slate-950/70 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition">
+              <div class="flex items-center gap-2">
+                <span class="text-sm">🗜️</span>
+                <div>
+                  <span class="text-xs text-slate-200 font-medium block">Allow folder download as .zip</span>
+                  <span class="text-[10px] text-slate-400 block">Package entire directory into a zip archive on the fly</span>
+                </div>
+              </div>
+              <input type="checkbox" id="download-zip-toggle" class="w-4 h-4 rounded text-orange-500 bg-slate-900 border-slate-700 focus:ring-orange-500 focus:ring-offset-slate-900 cursor-pointer">
+            </label>
+          </div>
+
+          <!-- Error Alert Banner -->
+          <div id="download-error-banner" class="hidden p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-start gap-2">
+            <span class="shrink-0 text-sm">⚠️</span>
+            <span id="download-error-msg" class="flex-1"></span>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-1">
             <button type="button" onclick="closeDownloadModal()" class="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition">Cancel</button>
-            <button type="submit" class="px-3.5 py-1.5 text-xs bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl transition flex items-center gap-1.5 shadow-lg shadow-orange-500/20">
-              <span>Download</span>
+            <button type="submit" id="download-submit-btn" class="px-3.5 py-1.5 text-xs bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl transition flex items-center gap-1.5 shadow-lg shadow-orange-500/20">
+              <span id="download-submit-label">Download</span>
               <span class="text-[10px]">↓</span>
             </button>
           </div>
@@ -3062,7 +3085,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       await updateCwd();
       const modal = document.getElementById('download-modal');
       const input = document.getElementById('download-path-input');
+      const zipToggle = document.getElementById('download-zip-toggle');
+      const errorBanner = document.getElementById('download-error-banner');
       if (modal) modal.classList.remove('hidden');
+      if (zipToggle) zipToggle.checked = false; // Off by default
+      if (errorBanner) errorBanner.classList.add('hidden');
 
       if (!downloadAutoComp) {
         downloadAutoComp = new PathAutocomplete({
@@ -3070,7 +3097,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           dropdownEl: document.getElementById('download-suggestions'),
           spinnerEl: document.getElementById('download-spinner'),
           countBadgeEl: document.getElementById('download-count-badge'),
-          filterType: 'all'
+          filterType: 'all',
+          onSelect: (item) => {
+            const errorBanner = document.getElementById('download-error-banner');
+            if (errorBanner) errorBanner.classList.add('hidden');
+          }
         });
       }
 
@@ -3085,45 +3116,81 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     function closeDownloadModal() {
       const modal = document.getElementById('download-modal');
+      const errorBanner = document.getElementById('download-error-banner');
       if (modal) modal.classList.add('hidden');
+      if (errorBanner) errorBanner.classList.add('hidden');
       if (downloadAutoComp) downloadAutoComp.hide();
     }
 
-    function handleDownloadSubmit(e) {
+    function showDownloadModalError(msg) {
+      const errorBanner = document.getElementById('download-error-banner');
+      const errorMsgEl = document.getElementById('download-error-msg');
+      if (errorBanner && errorMsgEl) {
+        errorMsgEl.textContent = msg;
+        errorBanner.classList.remove('hidden');
+      }
+      showToast(msg);
+    }
+
+    async function handleDownloadSubmit(e) {
       e.preventDefault();
       const input = document.getElementById('download-path-input');
+      const zipToggle = document.getElementById('download-zip-toggle');
+      const submitBtn = document.getElementById('download-submit-btn');
+      const errorBanner = document.getElementById('download-error-banner');
       if (!input) return;
       const val = input.value.trim();
       if (!val) return;
 
-      closeDownloadModal();
+      if (errorBanner) errorBanner.classList.add('hidden');
+      const isZip = zipToggle && zipToggle.checked;
       const tabParam = activeTabId ? `&tab=${encodeURIComponent(activeTabId)}` : '';
-      const dlUrl = `/api/download?file=${encodeURIComponent(val)}${tabParam}`;
+      const zipParam = isZip ? '&zip=1' : '';
+      const dlUrl = `/api/download?file=${encodeURIComponent(val)}${zipParam}${tabParam}`;
 
-      fetch(dlUrl, { method: 'HEAD' }).then(res => {
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.classList.add('opacity-75');
+      }
+
+      try {
+        const res = await fetch(dlUrl, { method: 'HEAD' });
         if (res.ok) {
+          closeDownloadModal();
+          const cleanName = val.replace(/\/+$/, '').split('/').pop() || 'download';
+          const filename = isZip ? `${cleanName}.zip` : cleanName;
           const a = document.createElement('a');
           a.href = dlUrl;
-          a.download = val.split('/').pop() || 'download';
+          a.download = filename;
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);
-          showToast(`Downloading ${val}...`);
+          showToast(`Downloading ${filename}...`);
         } else {
-          res.json().then(data => {
-            showToast(`Download error: ${data.error || res.statusText}`);
-          }).catch(() => {
-            showToast(`Download failed with status ${res.status}`);
-          });
+          // If HEAD check returns an error, fetch error details via GET JSON
+          try {
+            const errRes = await fetch(dlUrl, { method: 'GET' });
+            const data = await errRes.json();
+            const errMsg = data.error || `Download failed (${res.status} ${res.statusText})`;
+            showDownloadModalError(errMsg);
+          } catch(e) {
+            if (res.status === 404) {
+              showDownloadModalError(`File or directory not found: "${val}"`);
+            } else if (res.status === 400) {
+              showDownloadModalError(`Cannot download: Target is a directory. Enable "Allow folder download as .zip" to download.`);
+            } else {
+              showDownloadModalError(`Download request failed with HTTP ${res.status}`);
+            }
+          }
         }
-      }).catch(() => {
-        const a = document.createElement('a');
-        a.href = dlUrl;
-        a.download = val.split('/').pop() || 'download';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-      });
+      } catch(err) {
+        showDownloadModalError(`Network error while preparing download: ${err.message || 'connection issue'}`);
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.classList.remove('opacity-75');
+        }
+      }
     }
 
     // ==================== READ-ONLY LIVE SESSION SHARING ====================
@@ -4447,9 +4514,29 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_error(400, "Missing file parameter")
                 return
             target_path = os.path.realpath(file_param) if os.path.isabs(file_param) else os.path.realpath(os.path.join(cwd, file_param))
-            if not os.path.exists(target_path) or not os.path.isfile(target_path):
-                self.send_error(404, "File not found or is not a regular file")
+            allow_zip = query.get('zip', ['0'])[0] in ('1', 'true', 'yes')
+
+            if not os.path.exists(target_path):
+                self.send_error(404, "File or directory not found")
                 return
+
+            if os.path.isdir(target_path):
+                if not allow_zip:
+                    self.send_error(400, "Directory download as zip is disabled. Enable the zip option in the download dialog to download this folder.")
+                    return
+                # Allow directory zip download
+                folder_name = os.path.basename(target_path.rstrip(os.sep)) or "archive"
+                safe_name = urllib.parse.quote(f"{folder_name}.zip")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Disposition", f'attachment; filename="{folder_name}.zip"; filename*=UTF-8\'\'{safe_name}')
+                self.end_headers()
+                return
+
+            if not os.path.isfile(target_path):
+                self.send_error(404, "Target is not a regular file")
+                return
+
             try:
                 file_size = os.path.getsize(target_path)
                 content_type = mimetypes.guess_type(target_path)[0] or "application/octet-stream"
@@ -4649,13 +4736,63 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 return
 
             target_path = os.path.realpath(file_param) if os.path.isabs(file_param) else os.path.realpath(os.path.join(cwd, file_param))
+            allow_zip = query.get('zip', ['0'])[0] in ('1', 'true', 'yes')
 
             if not os.path.exists(target_path):
-                self.send_json({"success": False, "error": f"File not found: {file_param}"}, status=404)
+                self.send_json({"success": False, "error": f"Path not found: {file_param}"}, status=404)
                 return
 
-            if not os.path.isfile(target_path) or os.path.isdir(target_path):
-                self.send_json({"success": False, "error": f"Target is not a regular file: {file_param}. Only regular files can be downloaded."}, status=400)
+            if os.path.isdir(target_path):
+                if not allow_zip:
+                    self.send_json({"success": False, "error": f"'{os.path.basename(target_path.rstrip(os.sep)) or target_path}' is a folder. Enable 'Allow folder download as .zip' in the download dialog to download this folder."}, status=400)
+                    return
+
+                try:
+                    folder_name = os.path.basename(target_path.rstrip(os.sep)) or "archive"
+                    safe_name = urllib.parse.quote(f"{folder_name}.zip")
+                    
+                    # Create temporary zip archive
+                    with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as tmp_zip:
+                        tmp_zip_path = tmp_zip.name
+
+                    with zipfile.ZipFile(tmp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                        base_parent = os.path.dirname(target_path) if os.path.dirname(target_path) != target_path else target_path
+                        for root, dirs, files in os.walk(target_path):
+                            for f in files:
+                                full_fp = os.path.join(root, f)
+                                if os.path.islink(full_fp):
+                                    continue
+                                rel_fp = os.path.relpath(full_fp, base_parent)
+                                try:
+                                    zf.write(full_fp, rel_fp)
+                                except Exception:
+                                    continue
+
+                    zip_size = os.path.getsize(tmp_zip_path)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/zip")
+                    self.send_header("Content-Length", str(zip_size))
+                    self.send_header("Content-Disposition", f'attachment; filename="{folder_name}.zip"; filename*=UTF-8\'\'{safe_name}')
+                    self.end_headers()
+
+                    with open(tmp_zip_path, 'rb') as f:
+                        while True:
+                            chunk = f.read(65536)
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                except Exception as e:
+                    pass
+                finally:
+                    if 'tmp_zip_path' in locals() and os.path.exists(tmp_zip_path):
+                        try:
+                            os.remove(tmp_zip_path)
+                        except Exception:
+                            pass
+                return
+
+            if not os.path.isfile(target_path):
+                self.send_json({"success": False, "error": f"Target is not a regular file: {file_param}"}, status=400)
                 return
 
             try:
