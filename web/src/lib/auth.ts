@@ -49,13 +49,25 @@ export function checkRateLimit(key: string, maxAttempts: number = 5, windowMs: n
   return true;
 }
 
-// Ensure secret is securely resolved or randomly generated in memory
+// Ensure secret is securely resolved from environment or configuration, never allowing weak defaults
 let fallbackJwtSecret: string | null = null;
+const INSECURE_SECRETS = new Set(["default-secret", "secret", "changeme", "123456", "admin"]);
+
 function getJwtSecret(): string {
-  const config = loadConfig();
-  if (config.auth?.jwtSecret && config.auth.jwtSecret !== "default-secret") {
-    return config.auth.jwtSecret;
+  // 1. Highest priority: explicit environment variable
+  const envSecret = process.env.JWT_SECRET?.trim();
+  if (envSecret && !INSECURE_SECRETS.has(envSecret.toLowerCase()) && envSecret.length >= 16) {
+    return envSecret;
   }
+
+  // 2. Next priority: configured secret in config.json
+  const config = loadConfig();
+  const cfgSecret = config.auth?.jwtSecret?.trim();
+  if (cfgSecret && !INSECURE_SECRETS.has(cfgSecret.toLowerCase()) && cfgSecret.length >= 16) {
+    return cfgSecret;
+  }
+
+  // 3. Fallback: generate high-entropy cryptographic secret for the process lifetime
   if (!fallbackJwtSecret) {
     fallbackJwtSecret = crypto.randomBytes(32).toString("hex");
   }
