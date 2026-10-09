@@ -1018,8 +1018,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               <span>⬒ Top & Bottom</span>
               <span class="text-[10px] text-slate-500 font-mono">Alt+H</span>
             </button>
+            <button onclick="setSplitMode('triple-left'); closeSplitMenu();" class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 flex items-center justify-between">
+              <span>⚿ 1 Left / 2 Right (3 Panes)</span>
+              <span class="text-[10px] text-slate-500 font-mono">Alt+3</span>
+            </button>
+            <button onclick="setSplitMode('triple-col'); closeSplitMenu();" class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 flex items-center justify-between">
+              <span>||| 3 Columns</span>
+              <span class="text-[10px] text-slate-500 font-mono">Alt+C</span>
+            </button>
             <button onclick="setSplitMode('grid'); closeSplitMenu();" class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 flex items-center justify-between">
-              <span>⊞ 2x2 Quad Grid</span>
+              <span>⊞ 2x2 Quad Grid (4 Panes)</span>
               <span class="text-[10px] text-slate-500 font-mono">Alt+G</span>
             </button>
           </div>
@@ -1627,12 +1635,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let activeTabId = null;
     let secondaryTabId = null; // for dual split view
     let gridTabIds = []; // [topLeft, topRight, bottomLeft, bottomRight] for 2x2 grid
-    let splitMode = 'none'; // 'none' | 'vertical' | 'horizontal' | 'grid'
+    let tripleTabIds = []; // [left/main, topRight, bottomRight] or [col1, col2, col3]
+    let splitMode = 'none'; // 'none' | 'vertical' | 'horizontal' | 'triple-left' | 'triple-col' | 'grid'
     let splitRatio = 0.5; // for dual split (50%)
-    let splitRatioX = 0.5; // for grid split (50% horizontal)
-    let splitRatioY = 0.5; // for grid split (50% vertical)
+    let splitRatioX = 0.5; // for grid & triple-left split (50% horizontal)
+    let splitRatioY = 0.5; // for grid & triple-left split (50% vertical)
+    let splitRatio3Col1 = 0.3333; // for 3-column split (first divider)
+    let splitRatio3Col2 = 0.6667; // for 3-column split (second divider)
     let isDraggingDivider = false;
-    let dragMode = null; // 'dual' | 'grid-v' | 'grid-h' | 'grid-cross'
+    let dragMode = null; // 'dual' | 'grid-v' | 'grid-h' | 'grid-cross' | 'triple-v' | 'triple-h' | 'col1' | 'col2'
     let tabSequence = 0;
 
     function getActiveTab() {
@@ -3724,7 +3735,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       mountEl.addEventListener('mousedown', () => {
         if (splitMode !== 'none' && activeTabId !== tabId) {
-          if (splitMode === 'grid') {
+          if (splitMode === 'grid' || splitMode === 'triple-left' || splitMode === 'triple-col') {
             activeTabId = tabId;
           } else {
             const temp = activeTabId;
@@ -3796,6 +3807,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           createNewTab(`pane-${nextIndex}`, null, false);
         }
         tabKeys = Object.keys(tabs);
+      } else if (mode === 'triple-left' || mode === 'triple-col') {
+        // Ensure at least 3 tabs exist for 3-pane split modes
+        while (Object.keys(tabs).length < 3) {
+          const nextIndex = Object.keys(tabs).length + 1;
+          createNewTab(`pane-${nextIndex}`, null, false);
+        }
+        tabKeys = Object.keys(tabs);
       } else if (mode !== 'none' && tabKeys.length < 2) {
         // Automatically create a second tab if user enters dual split mode with only 1 tab
         createNewTab('split-2', null, false);
@@ -3809,9 +3827,23 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (splitMode === 'grid') {
         if (splitIcon) splitIcon.textContent = '⊞';
         if (splitBtn) splitBtn.className = 'px-2 py-1 text-xs bg-orange-600/30 text-orange-300 border border-orange-500/50 rounded-lg transition font-mono flex items-center gap-1';
-        // Assign gridTabIds: keep activeTabId first, then pick 3 other tabs
         const others = tabKeys.filter(id => id !== activeTabId);
         gridTabIds = [activeTabId, others[0], others[1], others[2]].filter(Boolean);
+        tripleTabIds = [];
+        secondaryTabId = null;
+      } else if (splitMode === 'triple-left') {
+        if (splitIcon) splitIcon.textContent = '⚿';
+        if (splitBtn) splitBtn.className = 'px-2 py-1 text-xs bg-orange-600/30 text-orange-300 border border-orange-500/50 rounded-lg transition font-mono flex items-center gap-1';
+        const others = tabKeys.filter(id => id !== activeTabId);
+        tripleTabIds = [activeTabId, others[0], others[1]].filter(Boolean);
+        gridTabIds = [];
+        secondaryTabId = null;
+      } else if (splitMode === 'triple-col') {
+        if (splitIcon) splitIcon.textContent = '|||';
+        if (splitBtn) splitBtn.className = 'px-2 py-1 text-xs bg-orange-600/30 text-orange-300 border border-orange-500/50 rounded-lg transition font-mono flex items-center gap-1';
+        const others = tabKeys.filter(id => id !== activeTabId);
+        tripleTabIds = [activeTabId, others[0], others[1]].filter(Boolean);
+        gridTabIds = [];
         secondaryTabId = null;
       } else if (splitMode === 'vertical') {
         if (splitIcon) splitIcon.textContent = '◫';
@@ -3819,17 +3851,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const remaining = tabKeys.filter(id => id !== activeTabId);
         secondaryTabId = remaining[0] || null;
         gridTabIds = [];
+        tripleTabIds = [];
       } else if (splitMode === 'horizontal') {
         if (splitIcon) splitIcon.textContent = '⬒';
         if (splitBtn) splitBtn.className = 'px-2 py-1 text-xs bg-orange-600/30 text-orange-300 border border-orange-500/50 rounded-lg transition font-mono flex items-center gap-1';
         const remaining = tabKeys.filter(id => id !== activeTabId);
         secondaryTabId = remaining[0] || null;
         gridTabIds = [];
+        tripleTabIds = [];
       } else {
         if (splitIcon) splitIcon.textContent = '◫';
         if (splitBtn) splitBtn.className = 'px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1';
         secondaryTabId = null;
         gridTabIds = [];
+        tripleTabIds = [];
       }
 
       applySplitLayout();
@@ -3841,6 +3876,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const curIdx = gridTabIds.indexOf(activeTabId);
         const nextIdx = (curIdx + 1) % gridTabIds.length;
         activeTabId = gridTabIds[nextIdx];
+        applySplitLayout();
+        renderTabsList();
+        const cur = getActiveTab();
+        if (cur && cur.term) cur.term.focus();
+        return;
+      }
+      if ((splitMode === 'triple-left' || splitMode === 'triple-col') && tripleTabIds.length > 0) {
+        const curIdx = tripleTabIds.indexOf(activeTabId);
+        const nextIdx = (curIdx + 1) % tripleTabIds.length;
+        activeTabId = tripleTabIds[nextIdx];
         applySplitLayout();
         renderTabsList();
         const cur = getActiveTab();
@@ -3861,7 +3906,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function removeSplitDividers() {
-      ['split-divider', 'grid-divider-v', 'grid-divider-h', 'grid-divider-cross'].forEach(id => {
+      [
+        'split-divider',
+        'grid-divider-v', 'grid-divider-h', 'grid-divider-cross',
+        'triple-divider-v', 'triple-divider-h',
+        'triple-col-divider-1', 'triple-col-divider-2'
+      ].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.remove();
       });
@@ -3882,11 +3932,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         container.style.display = 'block';
         container.style.position = 'relative';
         container.style.overflow = 'hidden';
-
-        const pTopLeft = tabs[gridTabIds[0]];
-        const pTopRight = tabs[gridTabIds[1]];
-        const pBottomLeft = tabs[gridTabIds[2]];
-        const pBottomRight = tabs[gridTabIds[3]];
 
         const pctX = (splitRatioX * 100).toFixed(2);
         const pctY = (splitRatioY * 100).toFixed(2);
@@ -3984,6 +4029,180 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         return;
       }
 
+      // Triple Split: 1 Left (Full height) / 2 Right (Top & Bottom)
+      if (splitMode === 'triple-left') {
+        if (!tripleTabIds || tripleTabIds.length < 3 || tripleTabIds.some(id => !tabs[id])) {
+          const tabKeys = Object.keys(tabs);
+          const others = tabKeys.filter(id => id !== activeTabId);
+          tripleTabIds = [activeTabId, others[0], others[1]].filter(Boolean);
+        }
+
+        removeSplitDividers();
+        container.style.display = 'block';
+        container.style.position = 'relative';
+        container.style.overflow = 'hidden';
+
+        const pctX = (splitRatioX * 100).toFixed(2);
+        const pctY = (splitRatioY * 100).toFixed(2);
+        const invPctX = ((1 - splitRatioX) * 100).toFixed(2);
+        const invPctY = ((1 - splitRatioY) * 100).toFixed(2);
+
+        Object.keys(tabs).forEach(id => {
+          const t = tabs[id];
+          if (!t || !t.mountEl) return;
+          const isTriplePane = tripleTabIds.includes(id);
+          if (!isTriplePane) {
+            t.mountEl.classList.add('hidden');
+            t.mountEl.style.border = '';
+            t.mountEl.style.position = '';
+            return;
+          }
+
+          t.mountEl.classList.remove('hidden');
+          t.mountEl.style.position = 'absolute';
+          t.mountEl.style.boxSizing = 'border-box';
+          t.mountEl.style.overflow = 'hidden';
+
+          const isActive = (id === activeTabId);
+          t.mountEl.style.border = isActive
+            ? '2px solid rgba(249, 115, 22, 0.7)'
+            : '2px solid rgba(51, 65, 85, 0.4)';
+
+          if (id === tripleTabIds[0]) {
+            // Pane 1: Left column (full height)
+            t.mountEl.style.top = '0px';
+            t.mountEl.style.left = '0px';
+            t.mountEl.style.width = `calc(${pctX}% - 3px)`;
+            t.mountEl.style.height = '100%';
+            t.mountEl.style.right = '';
+            t.mountEl.style.bottom = '';
+          } else if (id === tripleTabIds[1]) {
+            // Pane 2: Right Top
+            t.mountEl.style.top = '0px';
+            t.mountEl.style.left = `calc(${pctX}% + 3px)`;
+            t.mountEl.style.width = `calc(${invPctX}% - 3px)`;
+            t.mountEl.style.height = `calc(${pctY}% - 3px)`;
+            t.mountEl.style.right = '';
+            t.mountEl.style.bottom = '';
+          } else if (id === tripleTabIds[2]) {
+            // Pane 3: Right Bottom
+            t.mountEl.style.top = `calc(${pctY}% + 3px)`;
+            t.mountEl.style.left = `calc(${pctX}% + 3px)`;
+            t.mountEl.style.width = `calc(${invPctX}% - 3px)`;
+            t.mountEl.style.height = `calc(${invPctY}% - 3px)`;
+            t.mountEl.style.right = '';
+            t.mountEl.style.bottom = '';
+          }
+        });
+
+        // Vertical divider between left pane and right panes
+        const divV = document.createElement('div');
+        divV.id = 'triple-divider-v';
+        divV.className = 'absolute top-0 bottom-0 w-1.5 bg-slate-800 hover:bg-orange-500 cursor-col-resize z-30 transition-colors select-none';
+        divV.style.left = `calc(${pctX}% - 3px)`;
+        container.appendChild(divV);
+
+        // Horizontal divider between top-right and bottom-right panes
+        const divH = document.createElement('div');
+        divH.id = 'triple-divider-h';
+        divH.className = 'absolute right-0 h-1.5 bg-slate-800 hover:bg-orange-500 cursor-row-resize z-30 transition-colors select-none';
+        divH.style.left = `calc(${pctX}% + 3px)`;
+        divH.style.top = `calc(${pctY}% - 3px)`;
+        container.appendChild(divH);
+
+        initTripleLeftDragging(divV, divH);
+
+        setTimeout(() => {
+          tripleTabIds.forEach(id => {
+            const t = tabs[id];
+            if (t && t.fitAddon) { t.fitAddon.fit(); sendResize(t); }
+          });
+          const cur = getActiveTab();
+          if (cur && cur.term) cur.term.focus();
+        }, 50);
+        return;
+      }
+
+      // Triple Split: 3 Equal/Resizable Columns (|||)
+      if (splitMode === 'triple-col') {
+        if (!tripleTabIds || tripleTabIds.length < 3 || tripleTabIds.some(id => !tabs[id])) {
+          const tabKeys = Object.keys(tabs);
+          const others = tabKeys.filter(id => id !== activeTabId);
+          tripleTabIds = [activeTabId, others[0], others[1]].filter(Boolean);
+        }
+
+        removeSplitDividers();
+        container.style.display = 'block';
+        container.style.position = 'relative';
+        container.style.overflow = 'hidden';
+
+        const c1Pct = (splitRatio3Col1 * 100).toFixed(2);
+        const c2Pct = (splitRatio3Col2 * 100).toFixed(2);
+        const w1 = `calc(${c1Pct}% - 3px)`;
+        const w2 = `calc(${c2Pct - c1Pct}% - 6px)`;
+        const w3 = `calc(${(100 - c2Pct).toFixed(2)}% - 3px)`;
+
+        Object.keys(tabs).forEach(id => {
+          const t = tabs[id];
+          if (!t || !t.mountEl) return;
+          const isTriplePane = tripleTabIds.includes(id);
+          if (!isTriplePane) {
+            t.mountEl.classList.add('hidden');
+            t.mountEl.style.border = '';
+            t.mountEl.style.position = '';
+            return;
+          }
+
+          t.mountEl.classList.remove('hidden');
+          t.mountEl.style.position = 'absolute';
+          t.mountEl.style.boxSizing = 'border-box';
+          t.mountEl.style.overflow = 'hidden';
+          t.mountEl.style.top = '0px';
+          t.mountEl.style.height = '100%';
+
+          const isActive = (id === activeTabId);
+          t.mountEl.style.border = isActive
+            ? '2px solid rgba(249, 115, 22, 0.7)'
+            : '2px solid rgba(51, 65, 85, 0.4)';
+
+          if (id === tripleTabIds[0]) {
+            t.mountEl.style.left = '0px';
+            t.mountEl.style.width = w1;
+          } else if (id === tripleTabIds[1]) {
+            t.mountEl.style.left = `calc(${c1Pct}% + 3px)`;
+            t.mountEl.style.width = w2;
+          } else if (id === tripleTabIds[2]) {
+            t.mountEl.style.left = `calc(${c2Pct}% + 3px)`;
+            t.mountEl.style.width = w3;
+          }
+        });
+
+        // 2 Vertical dividers between the 3 columns
+        const div1 = document.createElement('div');
+        div1.id = 'triple-col-divider-1';
+        div1.className = 'absolute top-0 bottom-0 w-1.5 bg-slate-800 hover:bg-orange-500 cursor-col-resize z-30 transition-colors select-none';
+        div1.style.left = `calc(${c1Pct}% - 3px)`;
+        container.appendChild(div1);
+
+        const div2 = document.createElement('div');
+        div2.id = 'triple-col-divider-2';
+        div2.className = 'absolute top-0 bottom-0 w-1.5 bg-slate-800 hover:bg-orange-500 cursor-col-resize z-30 transition-colors select-none';
+        div2.style.left = `calc(${c2Pct}% - 3px)`;
+        container.appendChild(div2);
+
+        initTripleColDragging(div1, div2);
+
+        setTimeout(() => {
+          tripleTabIds.forEach(id => {
+            const t = tabs[id];
+            if (t && t.fitAddon) { t.fitAddon.fit(); sendResize(t); }
+          });
+          const cur = getActiveTab();
+          if (cur && cur.term) cur.term.focus();
+        }, 50);
+        return;
+      }
+
       // Single mode or dual split mode
       removeSplitDividers();
 
@@ -4020,7 +4239,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         return;
       }
 
-      // Split Mode Active: Dual active interactive panes
+      // Dual Split Mode Active
       const primaryTab = tabs[activeTabId];
       const secondaryTab = tabs[secondaryTabId];
       if (!primaryTab || !secondaryTab) return;
@@ -4183,6 +4402,95 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       divCross.addEventListener('mousedown', (e) => startDrag(e, 'grid-cross'));
     }
 
+    function initTripleLeftDragging(divV, divH) {
+      const startDrag = (e, mode) => {
+        e.preventDefault();
+        isDraggingDivider = true;
+        dragMode = mode;
+        document.body.style.cursor = mode === 'triple-v' ? 'col-resize' : 'row-resize';
+        document.body.style.userSelect = 'none';
+
+        const onMouseMove = (moveEvent) => {
+          if (!isDraggingDivider) return;
+          const container = document.getElementById('terminal-container');
+          if (!container) return;
+          const rect = container.getBoundingClientRect();
+
+          if (dragMode === 'triple-v') {
+            const rx = (moveEvent.clientX - rect.left) / rect.width;
+            splitRatioX = Math.max(0.15, Math.min(0.85, rx));
+          } else if (dragMode === 'triple-h') {
+            const ry = (moveEvent.clientY - rect.top) / rect.height;
+            splitRatioY = Math.max(0.15, Math.min(0.85, ry));
+          }
+          applySplitLayout();
+        };
+
+        const onMouseUp = () => {
+          isDraggingDivider = false;
+          dragMode = null;
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+          window.removeEventListener('mousemove', onMouseMove);
+          window.removeEventListener('mouseup', onMouseUp);
+          tripleTabIds.forEach(id => {
+            const t = tabs[id];
+            if (t && t.fitAddon) { t.fitAddon.fit(); sendResize(t); }
+          });
+        };
+
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+      };
+
+      divV.addEventListener('mousedown', (e) => startDrag(e, 'triple-v'));
+      divH.addEventListener('mousedown', (e) => startDrag(e, 'triple-h'));
+    }
+
+    function initTripleColDragging(div1, div2) {
+      const startDrag = (e, mode) => {
+        e.preventDefault();
+        isDraggingDivider = true;
+        dragMode = mode;
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+
+        const onMouseMove = (moveEvent) => {
+          if (!isDraggingDivider) return;
+          const container = document.getElementById('terminal-container');
+          if (!container) return;
+          const rect = container.getBoundingClientRect();
+          const rx = (moveEvent.clientX - rect.left) / rect.width;
+
+          if (dragMode === 'col1') {
+            splitRatio3Col1 = Math.max(0.15, Math.min(splitRatio3Col2 - 0.1, rx));
+          } else if (dragMode === 'col2') {
+            splitRatio3Col2 = Math.max(splitRatio3Col1 + 0.1, Math.min(0.85, rx));
+          }
+          applySplitLayout();
+        };
+
+        const onMouseUp = () => {
+          isDraggingDivider = false;
+          dragMode = null;
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+          window.removeEventListener('mousemove', onMouseMove);
+          window.removeEventListener('mouseup', onMouseUp);
+          tripleTabIds.forEach(id => {
+            const t = tabs[id];
+            if (t && t.fitAddon) { t.fitAddon.fit(); sendResize(t); }
+          });
+        };
+
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+      };
+
+      div1.addEventListener('mousedown', (e) => startDrag(e, 'col1'));
+      div2.addEventListener('mousedown', (e) => startDrag(e, 'col2'));
+    }
+
     function switchTab(tabId) {
       if (!tabs[tabId]) return;
 
@@ -4194,6 +4502,25 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             gridTabIds[idxToReplace] = tabId;
           } else {
             gridTabIds[0] = tabId;
+          }
+        }
+        activeTabId = tabId;
+        const activeTab = tabs[activeTabId];
+        if (activeTab) activeTab.hasAlert = false;
+        applySplitLayout();
+        renderTabsList();
+        saveTabsState();
+        if (activeTab && activeTab.term) activeTab.term.focus();
+        return;
+      }
+
+      if (splitMode === 'triple-left' || splitMode === 'triple-col') {
+        if (!tripleTabIds.includes(tabId)) {
+          const idxToReplace = tripleTabIds.indexOf(activeTabId);
+          if (idxToReplace !== -1) {
+            tripleTabIds[idxToReplace] = tabId;
+          } else {
+            tripleTabIds[0] = tabId;
           }
         }
         activeTabId = tabId;
@@ -4294,8 +4621,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (splitMode === 'grid') {
         const remainingKeys = Object.keys(tabs);
         if (remainingKeys.length < 4) {
-          // If fewer than 4 tabs remain, fall back to side-by-side split
-          setSplitMode('vertical');
+          setSplitMode('triple-left');
           return;
         } else {
           gridTabIds = gridTabIds.filter(id => id !== tabId);
@@ -4303,6 +4629,24 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           if (unused) gridTabIds.push(unused);
           if (activeTabId === tabId) {
             activeTabId = gridTabIds[0];
+          }
+          applySplitLayout();
+          renderTabsList();
+          return;
+        }
+      }
+
+      if (splitMode === 'triple-left' || splitMode === 'triple-col') {
+        const remainingKeys = Object.keys(tabs);
+        if (remainingKeys.length < 3) {
+          setSplitMode('vertical');
+          return;
+        } else {
+          tripleTabIds = tripleTabIds.filter(id => id !== tabId);
+          const unused = remainingKeys.find(id => !tripleTabIds.includes(id));
+          if (unused) tripleTabIds.push(unused);
+          if (activeTabId === tabId) {
+            activeTabId = tripleTabIds[0];
           }
           applySplitLayout();
           renderTabsList();
@@ -4332,8 +4676,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const tab = tabs[tabId];
         tab.index = idx + 1;
         const isActive = tabId === activeTabId;
-        const isSecondary = splitMode !== 'grid' && splitMode !== 'none' && tabId === secondaryTabId;
+        const isSecondary = splitMode === 'vertical' || splitMode === 'horizontal' ? tabId === secondaryTabId : false;
         const gridPaneIdx = splitMode === 'grid' ? gridTabIds.indexOf(tabId) : -1;
+        const isTripleMode = splitMode === 'triple-left' || splitMode === 'triple-col';
+        const triplePaneIdx = isTripleMode ? tripleTabIds.indexOf(tabId) : -1;
         const statusDot = tab.connected ? 'bg-emerald-400' : 'bg-amber-400';
         const alertBadge = tab.hasAlert ? '<span class="animate-bounce text-xs">🔔</span>' : '';
         
@@ -4343,9 +4689,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             ? 'bg-orange-950 text-orange-400 border-orange-800'
             : 'bg-slate-800 text-slate-400 border-slate-700';
           splitBadge = `<span class="text-[9px] px-1 py-0.2 rounded font-sans border ${badgeClass}">Pane ${gridPaneIdx + 1}</span>`;
+        } else if (isTripleMode && triplePaneIdx !== -1) {
+          const badgeClass = isActive
+            ? 'bg-orange-950 text-orange-400 border-orange-800'
+            : 'bg-slate-800 text-slate-400 border-slate-700';
+          splitBadge = `<span class="text-[9px] px-1 py-0.2 rounded font-sans border ${badgeClass}">Pane ${triplePaneIdx + 1}</span>`;
         } else if (isSecondary) {
           splitBadge = '<span class="text-[9px] px-1 py-0.2 rounded bg-slate-800 text-slate-400 font-sans border border-slate-700">Pane 2</span>';
-        } else if (isActive && splitMode !== 'none' && splitMode !== 'grid') {
+        } else if (isActive && splitMode !== 'none' && splitMode !== 'grid' && !isTripleMode) {
           splitBadge = '<span class="text-[9px] px-1 py-0.2 rounded bg-orange-950 text-orange-400 font-sans border border-orange-800">Pane 1</span>';
         }
 
@@ -4358,7 +4709,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         let borderClass = 'bg-slate-950/70 text-slate-400 border-transparent hover:bg-slate-900/60 hover:text-slate-200';
         if (isActive) {
           borderClass = 'bg-slate-900 text-white border-orange-500 shadow-md font-semibold';
-        } else if (isSecondary || (splitMode === 'grid' && gridPaneIdx !== -1)) {
+        } else if (isSecondary || (splitMode === 'grid' && gridPaneIdx !== -1) || (isTripleMode && triplePaneIdx !== -1)) {
           borderClass = 'bg-slate-900/80 text-slate-200 border-slate-600 shadow-sm';
         }
 
@@ -4536,6 +4887,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           if (e.altKey && (e.key === 'h' || e.key === 'H')) {
             e.preventDefault();
             setSplitMode(splitMode === 'horizontal' ? 'none' : 'horizontal');
+            return false;
+          }
+
+          // Alt+3: Triple Split (1 Left / 2 Right)
+          if (e.altKey && e.key === '3') {
+            e.preventDefault();
+            setSplitMode(splitMode === 'triple-left' ? 'none' : 'triple-left');
+            return false;
+          }
+
+          // Alt+C: 3 Columns
+          if (e.altKey && (e.key === 'c' || e.key === 'C')) {
+            e.preventDefault();
+            setSplitMode(splitMode === 'triple-col' ? 'none' : 'triple-col');
             return false;
           }
 
@@ -4953,6 +5318,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (e.altKey && (e.key === 'h' || e.key === 'H')) {
           e.preventDefault();
           setSplitMode(splitMode === 'horizontal' ? 'none' : 'horizontal');
+          return;
+        }
+
+        // Alt+3: Toggle Triple Split (1 Left / 2 Right)
+        if (e.altKey && e.key === '3') {
+          e.preventDefault();
+          setSplitMode(splitMode === 'triple-left' ? 'none' : 'triple-left');
+          return;
+        }
+
+        // Alt+C: Toggle 3 Columns
+        if (e.altKey && (e.key === 'c' || e.key === 'C')) {
+          e.preventDefault();
+          setSplitMode(splitMode === 'triple-col' ? 'none' : 'triple-col');
           return;
         }
 
