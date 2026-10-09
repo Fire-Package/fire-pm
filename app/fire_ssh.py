@@ -1000,6 +1000,26 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <button onclick="clearTerm()" title="Clear Terminal Output" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">Clear</button>
         <button onclick="termFit()" title="Fit Terminal Window" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fit</button>
         <button onclick="toggleFullscreen()" title="Fullscreen mode (locks Ctrl+W from closing tab)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fullscreen</button>
+        <div class="relative hidden sm:inline-block">
+          <button id="split-btn" onclick="toggleSplitMenu()" title="Split View: Dual Interactive Tabs (Alt+V / Alt+H)" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1">
+            <span id="split-icon">◫</span>
+            <span id="split-label">Split</span>
+          </button>
+          <div id="split-menu" class="hidden absolute left-0 top-full mt-1.5 w-44 bg-slate-900 border border-slate-700/80 rounded-xl shadow-2xl p-1.5 z-50 text-xs font-sans space-y-1">
+            <button onclick="setSplitMode('none'); closeSplitMenu();" class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 flex items-center justify-between">
+              <span>⬛ Single Tab</span>
+              <span class="text-[10px] text-slate-500 font-mono">Alt+S</span>
+            </button>
+            <button onclick="setSplitMode('vertical'); closeSplitMenu();" class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 flex items-center justify-between">
+              <span>◫ Side-by-Side</span>
+              <span class="text-[10px] text-slate-500 font-mono">Alt+V</span>
+            </button>
+            <button onclick="setSplitMode('horizontal'); closeSplitMenu();" class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 flex items-center justify-between">
+              <span>⬒ Top & Bottom</span>
+              <span class="text-[10px] text-slate-500 font-mono">Alt+H</span>
+            </button>
+          </div>
+        </div>
         <button id="record-btn" onclick="toggleSessionRecording()" title="Record session to Asciinema (.cast) file" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono items-center gap-1">
           <span id="record-dot" class="w-2 h-2 rounded-full bg-rose-500"></span>
           <span id="record-text">Rec</span>
@@ -1601,10 +1621,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let latencyPingSent = 0, clientServerLatency = -1, serverTerminalLatency = -1, latencyInterval = null;
     let tabs = {}; // tabId -> tabObj
     let activeTabId = null;
+    let secondaryTabId = null; // for dual split view
+    let splitMode = 'none'; // 'none' | 'vertical' | 'horizontal'
+    let splitRatio = 0.5; // 50% / 50%
+    let isDraggingDivider = false;
     let tabSequence = 0;
 
     function getActiveTab() {
       return activeTabId ? tabs[activeTabId] : null;
+    }
+
+    function getSecondaryTab() {
+      return secondaryTabId ? tabs[secondaryTabId] : null;
     }
 
     Object.defineProperty(window, 'term', {
@@ -3686,6 +3714,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
       t.open(mountEl);
 
+      mountEl.addEventListener('mousedown', () => {
+        if (splitMode !== 'none' && activeTabId !== tabId) {
+          // Switch active keyboard focus to this pane
+          const temp = activeTabId;
+          activeTabId = tabId;
+          if (secondaryTabId === tabId) {
+            secondaryTabId = temp;
+          }
+          applySplitLayout();
+          renderTabsList();
+        }
+        if (!window.IS_READONLY && t.textarea) {
+          t.focus();
+        }
+      });
+
       mountEl.addEventListener('touchend', () => {
         if (!window.IS_READONLY && t.textarea) {
           if (document.activeElement !== t.textarea) {
@@ -3722,8 +3766,225 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       return tabObj;
     }
 
+    function toggleSplitMenu() {
+      const menu = document.getElementById('split-menu');
+      if (menu) menu.classList.toggle('hidden');
+    }
+
+    function closeSplitMenu() {
+      const menu = document.getElementById('split-menu');
+      if (menu) menu.classList.add('hidden');
+    }
+
+    function setSplitMode(mode) {
+      const tabKeys = Object.keys(tabs);
+      if (mode !== 'none' && tabKeys.length < 2) {
+        // Automatically create a second tab if user enters split mode with only 1 tab
+        createNewTab('split-2', null, false);
+      }
+
+      splitMode = mode;
+      const splitIcon = document.getElementById('split-icon');
+      const splitBtn = document.getElementById('split-btn');
+      
+      if (splitMode === 'vertical') {
+        if (splitIcon) splitIcon.textContent = '◫';
+        if (splitBtn) splitBtn.className = 'px-2 py-1 text-xs bg-orange-600/30 text-orange-300 border border-orange-500/50 rounded-lg transition font-mono flex items-center gap-1';
+        // Auto pick secondary tab if missing or identical
+        const remaining = tabKeys.filter(id => id !== activeTabId);
+        secondaryTabId = remaining[0] || null;
+      } else if (splitMode === 'horizontal') {
+        if (splitIcon) splitIcon.textContent = '⬒';
+        if (splitBtn) splitBtn.className = 'px-2 py-1 text-xs bg-orange-600/30 text-orange-300 border border-orange-500/50 rounded-lg transition font-mono flex items-center gap-1';
+        const remaining = tabKeys.filter(id => id !== activeTabId);
+        secondaryTabId = remaining[0] || null;
+      } else {
+        if (splitIcon) splitIcon.textContent = '◫';
+        if (splitBtn) splitBtn.className = 'px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1';
+        secondaryTabId = null;
+      }
+
+      applySplitLayout();
+      renderTabsList();
+    }
+
+    function cycleSplitFocus() {
+      if (splitMode === 'none' || !secondaryTabId) return;
+      const nextTabId = (activeTabId === secondaryTabId) ? Object.keys(tabs).find(id => id !== activeTabId) : secondaryTabId;
+      if (nextTabId) {
+        // Swap focus between primary and secondary
+        const temp = activeTabId;
+        activeTabId = nextTabId;
+        secondaryTabId = temp;
+        applySplitLayout();
+        renderTabsList();
+      }
+    }
+
+    function applySplitLayout() {
+      const container = document.getElementById('terminal-container');
+      if (!container) return;
+
+      let divider = document.getElementById('split-divider');
+
+      if (splitMode === 'none' || !secondaryTabId || !tabs[secondaryTabId]) {
+        if (divider) divider.remove();
+        container.style.display = 'block';
+        container.style.flexDirection = '';
+
+        Object.keys(tabs).forEach(id => {
+          const t = tabs[id];
+          if (t && t.mountEl) {
+            t.mountEl.style.width = '100%';
+            t.mountEl.style.height = '100%';
+            t.mountEl.style.position = '';
+            t.mountEl.style.flex = '';
+            t.mountEl.style.border = '';
+            if (id === activeTabId) {
+              t.mountEl.classList.remove('hidden');
+              setTimeout(() => {
+                if (t.fitAddon) t.fitAddon.fit();
+                sendResize(t);
+                if (t.term) t.term.focus();
+              }, 40);
+            } else {
+              t.mountEl.classList.add('hidden');
+            }
+          }
+        });
+        return;
+      }
+
+      // Split Mode Active: Dual active interactive panes
+      const primaryTab = tabs[activeTabId];
+      const secondaryTab = tabs[secondaryTabId];
+      if (!primaryTab || !secondaryTab) return;
+
+      container.style.display = 'flex';
+      container.style.flexDirection = splitMode === 'vertical' ? 'row' : 'column';
+
+      if (!divider) {
+        divider = document.createElement('div');
+        divider.id = 'split-divider';
+        container.appendChild(divider);
+        initSplitDividerDragging(divider);
+      }
+
+      if (splitMode === 'vertical') {
+        divider.className = 'w-1.5 h-full bg-slate-800 hover:bg-orange-500 cursor-col-resize shrink-0 transition-colors select-none z-20 flex items-center justify-center';
+        divider.innerHTML = '<div class="w-0.5 h-8 bg-slate-600 rounded"></div>';
+        divider.style.cursor = 'col-resize';
+      } else {
+        divider.className = 'w-full h-1.5 bg-slate-800 hover:bg-orange-500 cursor-row-resize shrink-0 transition-colors select-none z-20 flex items-center justify-center';
+        divider.innerHTML = '<div class="h-0.5 w-8 bg-slate-600 rounded"></div>';
+        divider.style.cursor = 'row-resize';
+      }
+
+      // Position primary and secondary panes
+      Object.keys(tabs).forEach(id => {
+        const t = tabs[id];
+        if (!t || !t.mountEl) return;
+
+        if (id === activeTabId) {
+          t.mountEl.classList.remove('hidden');
+          t.mountEl.style.border = '2px solid rgba(249, 115, 22, 0.4)'; // Orange active border
+          if (splitMode === 'vertical') {
+            t.mountEl.style.width = `calc(${splitRatio * 100}% - 3px)`;
+            t.mountEl.style.height = '100%';
+          } else {
+            t.mountEl.style.width = '100%';
+            t.mountEl.style.height = `calc(${splitRatio * 100}% - 3px)`;
+          }
+          container.insertBefore(t.mountEl, divider);
+        } else if (id === secondaryTabId) {
+          t.mountEl.classList.remove('hidden');
+          t.mountEl.style.border = '2px solid rgba(51, 65, 85, 0.4)'; // Slate inactive border
+          if (splitMode === 'vertical') {
+            t.mountEl.style.width = `calc(${(1 - splitRatio) * 100}% - 3px)`;
+            t.mountEl.style.height = '100%';
+          } else {
+            t.mountEl.style.width = '100%';
+            t.mountEl.style.height = `calc(${(1 - splitRatio) * 100}% - 3px)`;
+          }
+          if (divider.nextSibling !== t.mountEl) {
+            container.appendChild(t.mountEl);
+          }
+        } else {
+          t.mountEl.classList.add('hidden');
+          t.mountEl.style.border = '';
+        }
+      });
+
+      // Fit both active panes simultaneously
+      setTimeout(() => {
+        if (primaryTab.fitAddon) { primaryTab.fitAddon.fit(); sendResize(primaryTab); }
+        if (secondaryTab.fitAddon) { secondaryTab.fitAddon.fit(); sendResize(secondaryTab); }
+        if (primaryTab.term) primaryTab.term.focus();
+      }, 50);
+    }
+
+    function initSplitDividerDragging(divider) {
+      divider.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        isDraggingDivider = true;
+        document.body.style.cursor = splitMode === 'vertical' ? 'col-resize' : 'row-resize';
+        document.body.style.userSelect = 'none';
+
+        const onMouseMove = (moveEvent) => {
+          if (!isDraggingDivider) return;
+          const container = document.getElementById('terminal-container');
+          if (!container) return;
+          const rect = container.getBoundingClientRect();
+
+          let ratio = 0.5;
+          if (splitMode === 'vertical') {
+            ratio = (moveEvent.clientX - rect.left) / rect.width;
+          } else {
+            ratio = (moveEvent.clientY - rect.top) / rect.height;
+          }
+          // Clamp ratio between 20% and 80%
+          splitRatio = Math.max(0.2, Math.min(0.8, ratio));
+          applySplitLayout();
+        };
+
+        const onMouseUp = () => {
+          isDraggingDivider = false;
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+          window.removeEventListener('mousemove', onMouseMove);
+          window.removeEventListener('mouseup', onMouseUp);
+          // Refit terminals after drag ends
+          const p = getActiveTab();
+          const s = getSecondaryTab();
+          if (p && p.fitAddon) { p.fitAddon.fit(); sendResize(p); }
+          if (s && s.fitAddon) { s.fitAddon.fit(); sendResize(s); }
+        };
+
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+      });
+    }
+
     function switchTab(tabId) {
       if (!tabs[tabId]) return;
+
+      if (splitMode !== 'none') {
+        if (tabId === secondaryTabId) {
+          // Switch keyboard focus to secondary pane
+          const temp = activeTabId;
+          activeTabId = secondaryTabId;
+          secondaryTabId = temp;
+        } else {
+          activeTabId = tabId;
+        }
+        const activeTab = tabs[activeTabId];
+        activeTab.hasAlert = false;
+        applySplitLayout();
+        renderTabsList();
+        saveTabsState();
+        return;
+      }
+
       activeTabId = tabId;
       const activeTab = tabs[tabId];
       activeTab.hasAlert = false;
@@ -3814,23 +4075,29 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const tab = tabs[tabId];
         tab.index = idx + 1;
         const isActive = tabId === activeTabId;
+        const isSecondary = splitMode !== 'none' && tabId === secondaryTabId;
         const statusDot = tab.connected ? 'bg-emerald-400' : 'bg-amber-400';
         const alertBadge = tab.hasAlert ? '<span class="animate-bounce text-xs">🔔</span>' : '';
+        const splitBadge = isSecondary ? '<span class="text-[9px] px-1 py-0.2 rounded bg-slate-800 text-slate-400 font-sans border border-slate-700">Pane 2</span>' : (isActive && splitMode !== 'none' ? '<span class="text-[9px] px-1 py-0.2 rounded bg-orange-950 text-orange-400 font-sans border border-orange-800">Pane 1</span>' : '');
         const closeBtn = tabKeys.length > 1 ? `
           <button onclick="event.stopPropagation(); closeTab('${tabId}')" title="Close Tab (Alt+W)" class="opacity-40 group-hover:opacity-100 hover:text-rose-400 hover:bg-slate-800/80 p-0.5 rounded transition ml-0.5">
             <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>` : '';
 
         const safeTitle = escapeHtml(tab.title || 'bash');
+        let borderClass = 'bg-slate-950/70 text-slate-400 border-transparent hover:bg-slate-900/60 hover:text-slate-200';
+        if (isActive) {
+          borderClass = 'bg-slate-900 text-white border-orange-500 shadow-md font-semibold';
+        } else if (isSecondary) {
+          borderClass = 'bg-slate-900/80 text-slate-200 border-slate-600 shadow-sm';
+        }
+
         return `
-          <div onclick="switchTab('${tabId}')" ondblclick="event.stopPropagation(); promptRenameTab('${tabId}')" title="Click to switch, double-click to rename" class="group flex items-center gap-1.5 px-3 py-1 rounded-t-lg text-xs font-mono cursor-pointer transition select-none border-t-2 ${
-            isActive
-              ? 'bg-slate-900 text-white border-orange-500 shadow-md font-semibold'
-              : 'bg-slate-950/70 text-slate-400 border-transparent hover:bg-slate-900/60 hover:text-slate-200'
-          }">
+          <div onclick="switchTab('${tabId}')" ondblclick="event.stopPropagation(); promptRenameTab('${tabId}')" title="Click to switch, double-click to rename" class="group flex items-center gap-1.5 px-3 py-1 rounded-t-lg text-xs font-mono cursor-pointer transition select-none border-t-2 ${borderClass}">
             <span class="w-1.5 h-1.5 rounded-full ${statusDot} shrink-0"></span>
             ${alertBadge}
             <span class="truncate max-w-[100px] sm:max-w-[140px]">${tab.index}: ${safeTitle}</span>
+            ${splitBadge}
             ${closeBtn}
           </div>
         `;
@@ -4367,6 +4634,34 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           if (window.IS_READONLY) return;
           e.preventDefault();
           closeCurrentTab();
+          return;
+        }
+
+        // Alt+V: Toggle Vertical Side-by-Side Split
+        if (e.altKey && (e.key === 'v' || e.key === 'V')) {
+          e.preventDefault();
+          setSplitMode(splitMode === 'vertical' ? 'none' : 'vertical');
+          return;
+        }
+
+        // Alt+H: Toggle Horizontal Top-Bottom Split
+        if (e.altKey && (e.key === 'h' || e.key === 'H')) {
+          e.preventDefault();
+          setSplitMode(splitMode === 'horizontal' ? 'none' : 'horizontal');
+          return;
+        }
+
+        // Alt+S: Single mode (unsplit)
+        if (e.altKey && (e.key === 's' || e.key === 'S')) {
+          e.preventDefault();
+          setSplitMode('none');
+          return;
+        }
+
+        // Alt+O: Cycle focus between split panes
+        if (e.altKey && (e.key === 'o' || e.key === 'O')) {
+          e.preventDefault();
+          cycleSplitFocus();
           return;
         }
 
