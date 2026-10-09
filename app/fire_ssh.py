@@ -1553,6 +1553,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   </div>
 
   <script>
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
     let sessionToken = '';
     let latencyPingSent = 0, clientServerLatency = -1, serverTerminalLatency = -1, latencyInterval = null;
     let tabs = {}; // tabId -> tabObj
@@ -2709,12 +2719,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           const sizeStr = item.is_dir ? '' : `<span class="text-[10px] text-slate-500 font-mono">${formatBytes(item.size || 0)}</span>`;
           const isSelected = idx === this.selectedIndex;
           const activeClass = isSelected ? 'bg-orange-500/20 text-orange-200 border-l-2 border-orange-500' : 'text-slate-300 hover:bg-slate-900 border-l-2 border-transparent';
+          const safeName = escapeHtml(item.name || '');
 
           return `
             <div data-idx="${idx}" class="suggestion-item px-3 py-1.5 cursor-pointer flex items-center justify-between transition text-xs font-mono select-none ${activeClass}">
               <div class="flex items-center gap-2 truncate">
                 <span>${icon}</span>
-                <span class="truncate ${item.is_dir ? 'font-medium text-white' : ''}">${item.name}${item.is_dir ? '/' : ''}</span>
+                <span class="truncate ${item.is_dir ? 'font-medium text-white' : ''}">${safeName}${item.is_dir ? '/' : ''}</span>
               </div>
               ${sizeStr}
             </div>
@@ -2983,9 +2994,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       let totalSize = 0;
       listEl.innerHTML = pendingUploadFiles.map((file, idx) => {
         totalSize += file.size || 0;
+        const safeName = escapeHtml(file.name || 'unnamed');
         return `
           <div class="flex items-center justify-between px-2 py-1 bg-slate-900 rounded-lg text-slate-300">
-            <span class="truncate max-w-[280px]">${file.name}</span>
+            <span class="truncate max-w-[280px]">${safeName}</span>
             <div class="flex items-center gap-2 shrink-0">
               <span class="text-[10px] text-slate-500">${formatBytes(file.size || 0)}</span>
               <button type="button" onclick="removePendingFile(${idx})" class="text-slate-400 hover:text-red-400 transition text-xs">✕</button>
@@ -3241,11 +3253,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             else expText = `${(rem / 3600).toFixed(1)}h remaining`;
           }
           const fullUrl = `${window.location.origin}/?share=${encodeURIComponent(s.token)}`;
+          const safeLabel = escapeHtml(s.label || 'Shared Session');
           return `
             <div class="flex items-center justify-between p-2.5 rounded-lg bg-slate-950/60 border border-slate-800 gap-2 font-mono">
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-2">
-                  <span class="font-semibold text-slate-200 truncate">${s.label || 'Shared Session'}</span>
+                  <span class="font-semibold text-slate-200 truncate">${safeLabel}</span>
                   <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">${expText}</span>
                   ${s.active_viewers > 0 ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-sans">${s.active_viewers} live viewer(s)</span>` : ''}
                 </div>
@@ -3774,6 +3787,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>` : '';
 
+        const safeTitle = escapeHtml(tab.title || 'bash');
         return `
           <div onclick="switchTab('${tabId}')" ondblclick="event.stopPropagation(); promptRenameTab('${tabId}')" title="Click to switch, double-click to rename" class="group flex items-center gap-1.5 px-3 py-1 rounded-t-lg text-xs font-mono cursor-pointer transition select-none border-t-2 ${
             isActive
@@ -3782,7 +3796,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           }">
             <span class="w-1.5 h-1.5 rounded-full ${statusDot} shrink-0"></span>
             ${alertBadge}
-            <span class="truncate max-w-[100px] sm:max-w-[140px]">${tab.index}: ${tab.title || 'bash'}</span>
+            <span class="truncate max-w-[100px] sm:max-w-[140px]">${tab.index}: ${safeTitle}</span>
             ${closeBtn}
           </div>
         `;
