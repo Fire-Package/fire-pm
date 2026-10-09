@@ -87,11 +87,18 @@ export interface HealthCheckItem {
   message: string;
 }
 
+export interface CgroupsPressureMetrics {
+  supported: boolean;
+  some?: { avg10: number; avg60: number; avg300: number; total: number };
+  full?: { avg10: number; avg60: number; avg300: number; total: number };
+}
+
 export interface SystemHealthResponse {
   score: number;
   checks: HealthCheckItem[];
   passed: number;
   total: number;
+  cgroupsPressure?: CgroupsPressureMetrics;
 }
 
 export interface SystemInfoResponse {
