@@ -1018,6 +1018,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               <span>⬒ Top & Bottom</span>
               <span class="text-[10px] text-slate-500 font-mono">Alt+H</span>
             </button>
+            <button onclick="setSplitMode('grid'); closeSplitMenu();" class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 flex items-center justify-between">
+              <span>⊞ 2x2 Quad Grid</span>
+              <span class="text-[10px] text-slate-500 font-mono">Alt+G</span>
+            </button>
           </div>
         </div>
         <button id="record-btn" onclick="toggleSessionRecording()" title="Record session to Asciinema (.cast) file" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono items-center gap-1">
@@ -1622,9 +1626,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let tabs = {}; // tabId -> tabObj
     let activeTabId = null;
     let secondaryTabId = null; // for dual split view
-    let splitMode = 'none'; // 'none' | 'vertical' | 'horizontal'
-    let splitRatio = 0.5; // 50% / 50%
+    let gridTabIds = []; // [topLeft, topRight, bottomLeft, bottomRight] for 2x2 grid
+    let splitMode = 'none'; // 'none' | 'vertical' | 'horizontal' | 'grid'
+    let splitRatio = 0.5; // for dual split (50%)
+    let splitRatioX = 0.5; // for grid split (50% horizontal)
+    let splitRatioY = 0.5; // for grid split (50% vertical)
     let isDraggingDivider = false;
+    let dragMode = null; // 'dual' | 'grid-v' | 'grid-h' | 'grid-cross'
     let tabSequence = 0;
 
     function getActiveTab() {
@@ -3716,11 +3724,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       mountEl.addEventListener('mousedown', () => {
         if (splitMode !== 'none' && activeTabId !== tabId) {
-          // Switch active keyboard focus to this pane
-          const temp = activeTabId;
-          activeTabId = tabId;
-          if (secondaryTabId === tabId) {
-            secondaryTabId = temp;
+          if (splitMode === 'grid') {
+            activeTabId = tabId;
+          } else {
+            const temp = activeTabId;
+            activeTabId = tabId;
+            if (secondaryTabId === tabId) {
+              secondaryTabId = temp;
+            }
           }
           applySplitLayout();
           renderTabsList();
@@ -3777,31 +3788,48 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function setSplitMode(mode) {
-      const tabKeys = Object.keys(tabs);
-      if (mode !== 'none' && tabKeys.length < 2) {
-        // Automatically create a second tab if user enters split mode with only 1 tab
+      let tabKeys = Object.keys(tabs);
+      if (mode === 'grid') {
+        // Ensure at least 4 tabs exist for Quad Grid mode
+        while (Object.keys(tabs).length < 4) {
+          const nextIndex = Object.keys(tabs).length + 1;
+          createNewTab(`pane-${nextIndex}`, null, false);
+        }
+        tabKeys = Object.keys(tabs);
+      } else if (mode !== 'none' && tabKeys.length < 2) {
+        // Automatically create a second tab if user enters dual split mode with only 1 tab
         createNewTab('split-2', null, false);
+        tabKeys = Object.keys(tabs);
       }
 
       splitMode = mode;
       const splitIcon = document.getElementById('split-icon');
       const splitBtn = document.getElementById('split-btn');
       
-      if (splitMode === 'vertical') {
+      if (splitMode === 'grid') {
+        if (splitIcon) splitIcon.textContent = '⊞';
+        if (splitBtn) splitBtn.className = 'px-2 py-1 text-xs bg-orange-600/30 text-orange-300 border border-orange-500/50 rounded-lg transition font-mono flex items-center gap-1';
+        // Assign gridTabIds: keep activeTabId first, then pick 3 other tabs
+        const others = tabKeys.filter(id => id !== activeTabId);
+        gridTabIds = [activeTabId, others[0], others[1], others[2]].filter(Boolean);
+        secondaryTabId = null;
+      } else if (splitMode === 'vertical') {
         if (splitIcon) splitIcon.textContent = '◫';
         if (splitBtn) splitBtn.className = 'px-2 py-1 text-xs bg-orange-600/30 text-orange-300 border border-orange-500/50 rounded-lg transition font-mono flex items-center gap-1';
-        // Auto pick secondary tab if missing or identical
         const remaining = tabKeys.filter(id => id !== activeTabId);
         secondaryTabId = remaining[0] || null;
+        gridTabIds = [];
       } else if (splitMode === 'horizontal') {
         if (splitIcon) splitIcon.textContent = '⬒';
         if (splitBtn) splitBtn.className = 'px-2 py-1 text-xs bg-orange-600/30 text-orange-300 border border-orange-500/50 rounded-lg transition font-mono flex items-center gap-1';
         const remaining = tabKeys.filter(id => id !== activeTabId);
         secondaryTabId = remaining[0] || null;
+        gridTabIds = [];
       } else {
         if (splitIcon) splitIcon.textContent = '◫';
         if (splitBtn) splitBtn.className = 'px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1';
         secondaryTabId = null;
+        gridTabIds = [];
       }
 
       applySplitLayout();
@@ -3809,27 +3837,160 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function cycleSplitFocus() {
+      if (splitMode === 'grid' && gridTabIds.length > 0) {
+        const curIdx = gridTabIds.indexOf(activeTabId);
+        const nextIdx = (curIdx + 1) % gridTabIds.length;
+        activeTabId = gridTabIds[nextIdx];
+        applySplitLayout();
+        renderTabsList();
+        const cur = getActiveTab();
+        if (cur && cur.term) cur.term.focus();
+        return;
+      }
       if (splitMode === 'none' || !secondaryTabId) return;
       const nextTabId = (activeTabId === secondaryTabId) ? Object.keys(tabs).find(id => id !== activeTabId) : secondaryTabId;
       if (nextTabId) {
-        // Swap focus between primary and secondary
         const temp = activeTabId;
         activeTabId = nextTabId;
         secondaryTabId = temp;
         applySplitLayout();
         renderTabsList();
+        const cur = getActiveTab();
+        if (cur && cur.term) cur.term.focus();
       }
+    }
+
+    function removeSplitDividers() {
+      ['split-divider', 'grid-divider-v', 'grid-divider-h', 'grid-divider-cross'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.remove();
+      });
     }
 
     function applySplitLayout() {
       const container = document.getElementById('terminal-container');
       if (!container) return;
 
-      let divider = document.getElementById('split-divider');
+      if (splitMode === 'grid') {
+        if (!gridTabIds || gridTabIds.length < 4 || gridTabIds.some(id => !tabs[id])) {
+          const tabKeys = Object.keys(tabs);
+          const others = tabKeys.filter(id => id !== activeTabId);
+          gridTabIds = [activeTabId, others[0], others[1], others[2]].filter(Boolean);
+        }
+
+        removeSplitDividers();
+        container.style.display = 'block';
+        container.style.position = 'relative';
+        container.style.overflow = 'hidden';
+
+        const pTopLeft = tabs[gridTabIds[0]];
+        const pTopRight = tabs[gridTabIds[1]];
+        const pBottomLeft = tabs[gridTabIds[2]];
+        const pBottomRight = tabs[gridTabIds[3]];
+
+        const pctX = (splitRatioX * 100).toFixed(2);
+        const pctY = (splitRatioY * 100).toFixed(2);
+        const invPctX = ((1 - splitRatioX) * 100).toFixed(2);
+        const invPctY = ((1 - splitRatioY) * 100).toFixed(2);
+
+        Object.keys(tabs).forEach(id => {
+          const t = tabs[id];
+          if (!t || !t.mountEl) return;
+          const isGridPane = gridTabIds.includes(id);
+          if (!isGridPane) {
+            t.mountEl.classList.add('hidden');
+            t.mountEl.style.border = '';
+            t.mountEl.style.position = '';
+            return;
+          }
+
+          t.mountEl.classList.remove('hidden');
+          t.mountEl.style.position = 'absolute';
+          t.mountEl.style.boxSizing = 'border-box';
+          t.mountEl.style.overflow = 'hidden';
+
+          const isActive = (id === activeTabId);
+          t.mountEl.style.border = isActive
+            ? '2px solid rgba(249, 115, 22, 0.7)'
+            : '2px solid rgba(51, 65, 85, 0.4)';
+
+          if (id === gridTabIds[0]) {
+            // Top Left
+            t.mountEl.style.top = '0px';
+            t.mountEl.style.left = '0px';
+            t.mountEl.style.width = `calc(${pctX}% - 3px)`;
+            t.mountEl.style.height = `calc(${pctY}% - 3px)`;
+            t.mountEl.style.right = '';
+            t.mountEl.style.bottom = '';
+          } else if (id === gridTabIds[1]) {
+            // Top Right
+            t.mountEl.style.top = '0px';
+            t.mountEl.style.left = `calc(${pctX}% + 3px)`;
+            t.mountEl.style.width = `calc(${invPctX}% - 3px)`;
+            t.mountEl.style.height = `calc(${pctY}% - 3px)`;
+            t.mountEl.style.right = '';
+            t.mountEl.style.bottom = '';
+          } else if (id === gridTabIds[2]) {
+            // Bottom Left
+            t.mountEl.style.top = `calc(${pctY}% + 3px)`;
+            t.mountEl.style.left = '0px';
+            t.mountEl.style.width = `calc(${pctX}% - 3px)`;
+            t.mountEl.style.height = `calc(${invPctY}% - 3px)`;
+            t.mountEl.style.right = '';
+            t.mountEl.style.bottom = '';
+          } else if (id === gridTabIds[3]) {
+            // Bottom Right
+            t.mountEl.style.top = `calc(${pctY}% + 3px)`;
+            t.mountEl.style.left = `calc(${pctX}% + 3px)`;
+            t.mountEl.style.width = `calc(${invPctX}% - 3px)`;
+            t.mountEl.style.height = `calc(${invPctY}% - 3px)`;
+            t.mountEl.style.right = '';
+            t.mountEl.style.bottom = '';
+          }
+        });
+
+        // Create Grid Dividers: Vertical bar, Horizontal bar, and Center Crosshair Knot
+        const divV = document.createElement('div');
+        divV.id = 'grid-divider-v';
+        divV.className = 'absolute top-0 bottom-0 w-1.5 bg-slate-800 hover:bg-orange-500 cursor-col-resize z-30 transition-colors select-none';
+        divV.style.left = `calc(${pctX}% - 3px)`;
+        container.appendChild(divV);
+
+        const divH = document.createElement('div');
+        divH.id = 'grid-divider-h';
+        divH.className = 'absolute left-0 right-0 h-1.5 bg-slate-800 hover:bg-orange-500 cursor-row-resize z-30 transition-colors select-none';
+        divH.style.top = `calc(${pctY}% - 3px)`;
+        container.appendChild(divH);
+
+        const divCross = document.createElement('div');
+        divCross.id = 'grid-divider-cross';
+        divCross.className = 'absolute w-4 h-4 -ml-2 -mt-2 bg-slate-700 hover:bg-orange-500 border-2 border-slate-900 rounded-full cursor-move z-40 transition-colors select-none flex items-center justify-center shadow-lg';
+        divCross.title = 'Drag to resize all 4 panes in 2D';
+        divCross.style.left = `${pctX}%`;
+        divCross.style.top = `${pctY}%`;
+        divCross.innerHTML = '<div class="w-1 h-1 bg-white rounded-full"></div>';
+        container.appendChild(divCross);
+
+        initGridDividerDragging(divV, divH, divCross);
+
+        setTimeout(() => {
+          gridTabIds.forEach(id => {
+            const t = tabs[id];
+            if (t && t.fitAddon) { t.fitAddon.fit(); sendResize(t); }
+          });
+          const cur = getActiveTab();
+          if (cur && cur.term) cur.term.focus();
+        }, 50);
+        return;
+      }
+
+      // Single mode or dual split mode
+      removeSplitDividers();
 
       if (splitMode === 'none' || !secondaryTabId || !tabs[secondaryTabId]) {
-        if (divider) divider.remove();
         container.style.display = 'block';
+        container.style.position = '';
+        container.style.overflow = '';
         container.style.flexDirection = '';
 
         Object.keys(tabs).forEach(id => {
@@ -3840,6 +4001,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             t.mountEl.style.position = '';
             t.mountEl.style.flex = '';
             t.mountEl.style.border = '';
+            t.mountEl.style.top = '';
+            t.mountEl.style.left = '';
+            t.mountEl.style.right = '';
+            t.mountEl.style.bottom = '';
             if (id === activeTabId) {
               t.mountEl.classList.remove('hidden');
               setTimeout(() => {
@@ -3861,14 +4026,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (!primaryTab || !secondaryTab) return;
 
       container.style.display = 'flex';
+      container.style.position = '';
+      container.style.overflow = '';
       container.style.flexDirection = splitMode === 'vertical' ? 'row' : 'column';
 
-      if (!divider) {
-        divider = document.createElement('div');
-        divider.id = 'split-divider';
-        container.appendChild(divider);
-        initSplitDividerDragging(divider);
-      }
+      let divider = document.createElement('div');
+      divider.id = 'split-divider';
+      container.appendChild(divider);
+      initSplitDividerDragging(divider);
 
       if (splitMode === 'vertical') {
         divider.className = 'w-1.5 h-full bg-slate-800 hover:bg-orange-500 cursor-col-resize shrink-0 transition-colors select-none z-20 flex items-center justify-center';
@@ -3884,10 +4049,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       Object.keys(tabs).forEach(id => {
         const t = tabs[id];
         if (!t || !t.mountEl) return;
+        t.mountEl.style.position = '';
+        t.mountEl.style.top = '';
+        t.mountEl.style.left = '';
+        t.mountEl.style.right = '';
+        t.mountEl.style.bottom = '';
 
         if (id === activeTabId) {
           t.mountEl.classList.remove('hidden');
-          t.mountEl.style.border = '2px solid rgba(249, 115, 22, 0.4)'; // Orange active border
+          t.mountEl.style.border = '2px solid rgba(249, 115, 22, 0.4)';
           if (splitMode === 'vertical') {
             t.mountEl.style.width = `calc(${splitRatio * 100}% - 3px)`;
             t.mountEl.style.height = '100%';
@@ -3898,7 +4068,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           container.insertBefore(t.mountEl, divider);
         } else if (id === secondaryTabId) {
           t.mountEl.classList.remove('hidden');
-          t.mountEl.style.border = '2px solid rgba(51, 65, 85, 0.4)'; // Slate inactive border
+          t.mountEl.style.border = '2px solid rgba(51, 65, 85, 0.4)';
           if (splitMode === 'vertical') {
             t.mountEl.style.width = `calc(${(1 - splitRatio) * 100}% - 3px)`;
             t.mountEl.style.height = '100%';
@@ -3915,7 +4085,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
       });
 
-      // Fit both active panes simultaneously
       setTimeout(() => {
         if (primaryTab.fitAddon) { primaryTab.fitAddon.fit(); sendResize(primaryTab); }
         if (secondaryTab.fitAddon) { secondaryTab.fitAddon.fit(); sendResize(secondaryTab); }
@@ -3927,6 +4096,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       divider.addEventListener('mousedown', (e) => {
         e.preventDefault();
         isDraggingDivider = true;
+        dragMode = 'dual';
         document.body.style.cursor = splitMode === 'vertical' ? 'col-resize' : 'row-resize';
         document.body.style.userSelect = 'none';
 
@@ -3942,18 +4112,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           } else {
             ratio = (moveEvent.clientY - rect.top) / rect.height;
           }
-          // Clamp ratio between 20% and 80%
-          splitRatio = Math.max(0.2, Math.min(0.8, ratio));
+          splitRatio = Math.max(0.15, Math.min(0.85, ratio));
           applySplitLayout();
         };
 
         const onMouseUp = () => {
           isDraggingDivider = false;
+          dragMode = null;
           document.body.style.cursor = '';
           document.body.style.userSelect = '';
           window.removeEventListener('mousemove', onMouseMove);
           window.removeEventListener('mouseup', onMouseUp);
-          // Refit terminals after drag ends
           const p = getActiveTab();
           const s = getSecondaryTab();
           if (p && p.fitAddon) { p.fitAddon.fit(); sendResize(p); }
@@ -3965,8 +4134,77 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       });
     }
 
+    function initGridDividerDragging(divV, divH, divCross) {
+      const startDrag = (e, mode) => {
+        e.preventDefault();
+        isDraggingDivider = true;
+        dragMode = mode;
+        if (mode === 'grid-v') document.body.style.cursor = 'col-resize';
+        else if (mode === 'grid-h') document.body.style.cursor = 'row-resize';
+        else document.body.style.cursor = 'move';
+        document.body.style.userSelect = 'none';
+
+        const onMouseMove = (moveEvent) => {
+          if (!isDraggingDivider) return;
+          const container = document.getElementById('terminal-container');
+          if (!container) return;
+          const rect = container.getBoundingClientRect();
+
+          if (dragMode === 'grid-v' || dragMode === 'grid-cross') {
+            const rx = (moveEvent.clientX - rect.left) / rect.width;
+            splitRatioX = Math.max(0.15, Math.min(0.85, rx));
+          }
+          if (dragMode === 'grid-h' || dragMode === 'grid-cross') {
+            const ry = (moveEvent.clientY - rect.top) / rect.height;
+            splitRatioY = Math.max(0.15, Math.min(0.85, ry));
+          }
+          applySplitLayout();
+        };
+
+        const onMouseUp = () => {
+          isDraggingDivider = false;
+          dragMode = null;
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+          window.removeEventListener('mousemove', onMouseMove);
+          window.removeEventListener('mouseup', onMouseUp);
+          gridTabIds.forEach(id => {
+            const t = tabs[id];
+            if (t && t.fitAddon) { t.fitAddon.fit(); sendResize(t); }
+          });
+        };
+
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+      };
+
+      divV.addEventListener('mousedown', (e) => startDrag(e, 'grid-v'));
+      divH.addEventListener('mousedown', (e) => startDrag(e, 'grid-h'));
+      divCross.addEventListener('mousedown', (e) => startDrag(e, 'grid-cross'));
+    }
+
     function switchTab(tabId) {
       if (!tabs[tabId]) return;
+
+      if (splitMode === 'grid') {
+        if (!gridTabIds.includes(tabId)) {
+          // Replace inactive grid pane with this tab
+          const idxToReplace = gridTabIds.indexOf(activeTabId);
+          if (idxToReplace !== -1) {
+            gridTabIds[idxToReplace] = tabId;
+          } else {
+            gridTabIds[0] = tabId;
+          }
+        }
+        activeTabId = tabId;
+        const activeTab = tabs[activeTabId];
+        if (activeTab) activeTab.hasAlert = false;
+        applySplitLayout();
+        renderTabsList();
+        saveTabsState();
+        if (activeTab && activeTab.term) activeTab.term.focus();
+        return;
+      }
 
       if (splitMode !== 'none') {
         if (tabId === secondaryTabId) {
@@ -4053,6 +4291,25 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       delete tabs[tabId];
       saveTabsState();
 
+      if (splitMode === 'grid') {
+        const remainingKeys = Object.keys(tabs);
+        if (remainingKeys.length < 4) {
+          // If fewer than 4 tabs remain, fall back to side-by-side split
+          setSplitMode('vertical');
+          return;
+        } else {
+          gridTabIds = gridTabIds.filter(id => id !== tabId);
+          const unused = remainingKeys.find(id => !gridTabIds.includes(id));
+          if (unused) gridTabIds.push(unused);
+          if (activeTabId === tabId) {
+            activeTabId = gridTabIds[0];
+          }
+          applySplitLayout();
+          renderTabsList();
+          return;
+        }
+      }
+
       if (activeTabId === tabId) {
         const remaining = Object.keys(tabs);
         switchTab(remaining[remaining.length - 1]);
@@ -4075,10 +4332,23 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const tab = tabs[tabId];
         tab.index = idx + 1;
         const isActive = tabId === activeTabId;
-        const isSecondary = splitMode !== 'none' && tabId === secondaryTabId;
+        const isSecondary = splitMode !== 'grid' && splitMode !== 'none' && tabId === secondaryTabId;
+        const gridPaneIdx = splitMode === 'grid' ? gridTabIds.indexOf(tabId) : -1;
         const statusDot = tab.connected ? 'bg-emerald-400' : 'bg-amber-400';
         const alertBadge = tab.hasAlert ? '<span class="animate-bounce text-xs">🔔</span>' : '';
-        const splitBadge = isSecondary ? '<span class="text-[9px] px-1 py-0.2 rounded bg-slate-800 text-slate-400 font-sans border border-slate-700">Pane 2</span>' : (isActive && splitMode !== 'none' ? '<span class="text-[9px] px-1 py-0.2 rounded bg-orange-950 text-orange-400 font-sans border border-orange-800">Pane 1</span>' : '');
+        
+        let splitBadge = '';
+        if (splitMode === 'grid' && gridPaneIdx !== -1) {
+          const badgeClass = isActive
+            ? 'bg-orange-950 text-orange-400 border-orange-800'
+            : 'bg-slate-800 text-slate-400 border-slate-700';
+          splitBadge = `<span class="text-[9px] px-1 py-0.2 rounded font-sans border ${badgeClass}">Pane ${gridPaneIdx + 1}</span>`;
+        } else if (isSecondary) {
+          splitBadge = '<span class="text-[9px] px-1 py-0.2 rounded bg-slate-800 text-slate-400 font-sans border border-slate-700">Pane 2</span>';
+        } else if (isActive && splitMode !== 'none' && splitMode !== 'grid') {
+          splitBadge = '<span class="text-[9px] px-1 py-0.2 rounded bg-orange-950 text-orange-400 font-sans border border-orange-800">Pane 1</span>';
+        }
+
         const closeBtn = tabKeys.length > 1 ? `
           <button onclick="event.stopPropagation(); closeTab('${tabId}')" title="Close Tab (Alt+W)" class="opacity-40 group-hover:opacity-100 hover:text-rose-400 hover:bg-slate-800/80 p-0.5 rounded transition ml-0.5">
             <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -4088,7 +4358,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         let borderClass = 'bg-slate-950/70 text-slate-400 border-transparent hover:bg-slate-900/60 hover:text-slate-200';
         if (isActive) {
           borderClass = 'bg-slate-900 text-white border-orange-500 shadow-md font-semibold';
-        } else if (isSecondary) {
+        } else if (isSecondary || (splitMode === 'grid' && gridPaneIdx !== -1)) {
           borderClass = 'bg-slate-900/80 text-slate-200 border-slate-600 shadow-sm';
         }
 
@@ -4252,6 +4522,41 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             if (targetIdx < tabKeys.length) {
               switchTab(tabKeys[targetIdx]);
             }
+            return false;
+          }
+
+          // Alt+V: Vertical Split
+          if (e.altKey && (e.key === 'v' || e.key === 'V')) {
+            e.preventDefault();
+            setSplitMode(splitMode === 'vertical' ? 'none' : 'vertical');
+            return false;
+          }
+
+          // Alt+H: Horizontal Split
+          if (e.altKey && (e.key === 'h' || e.key === 'H')) {
+            e.preventDefault();
+            setSplitMode(splitMode === 'horizontal' ? 'none' : 'horizontal');
+            return false;
+          }
+
+          // Alt+G: 2x2 Quad Grid
+          if (e.altKey && (e.key === 'g' || e.key === 'G')) {
+            e.preventDefault();
+            setSplitMode(splitMode === 'grid' ? 'none' : 'grid');
+            return false;
+          }
+
+          // Alt+S: Single mode
+          if (e.altKey && (e.key === 's' || e.key === 'S')) {
+            e.preventDefault();
+            setSplitMode('none');
+            return false;
+          }
+
+          // Alt+O: Cycle split focus
+          if (e.altKey && (e.key === 'o' || e.key === 'O')) {
+            e.preventDefault();
+            cycleSplitFocus();
             return false;
           }
 
@@ -4648,6 +4953,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (e.altKey && (e.key === 'h' || e.key === 'H')) {
           e.preventDefault();
           setSplitMode(splitMode === 'horizontal' ? 'none' : 'horizontal');
+          return;
+        }
+
+        // Alt+G: Toggle 2x2 Quad Grid
+        if (e.altKey && (e.key === 'g' || e.key === 'G')) {
+          e.preventDefault();
+          setSplitMode(splitMode === 'grid' ? 'none' : 'grid');
           return;
         }
 
