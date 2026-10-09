@@ -369,9 +369,17 @@ class TerminalSession:
         winsize = struct.pack("HHHH", self.rows, self.cols, 0, 0)
         fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
 
-        shell = self.shell
-        if not os.path.exists(shell):
-            shell = '/bin/bash' if os.path.exists('/bin/bash') else '/bin/sh'
+        # Validate and sanitize shell path to prevent command injection
+        raw_shell = (self.shell or '/bin/bash').strip()
+        allowed_shells = {'/bin/bash', '/usr/bin/bash', '/bin/sh', '/usr/bin/sh', '/bin/dash', '/usr/bin/dash', '/bin/zsh', '/usr/bin/zsh'}
+        resolved_shell = os.path.realpath(raw_shell)
+        if resolved_shell in allowed_shells and os.path.exists(resolved_shell) and os.access(resolved_shell, os.X_OK):
+            shell = resolved_shell
+        elif os.path.exists('/bin/bash') and os.access('/bin/bash', os.X_OK):
+            shell = '/bin/bash'
+        else:
+            shell = '/bin/sh'
+        self.shell = shell
 
         pid = os.fork()
         if pid == 0:
