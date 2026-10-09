@@ -468,11 +468,11 @@ class AssetUploadHandler(BaseHTTPRequestHandler):
                 with open(target_path, 'wb') as f:
                     f.write(raw_bytes)
 
-                print(f"[Upload] Saved: {target_path} ({len(raw_bytes)} bytes)")
+                print(f"[Upload] Saved asset: {safe_name} ({len(raw_bytes)} bytes)")
                 self.send_json({"success": True, "filename": safe_name, "size": len(raw_bytes)})
                 return
-            except Exception as e:
-                self.send_json({"success": False, "error": str(e)}, status=500)
+            except Exception:
+                self.send_json({"success": False, "error": "Internal server error occurred while saving asset"}, status=500)
                 return
 
         elif parsed.path == '/api/delete':
