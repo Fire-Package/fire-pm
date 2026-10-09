@@ -1,12 +1,45 @@
+import fs from "fs";
 import os from "os";
 import { safeExec } from "../shell";
 import { loadConfig } from "../config";
-import { SystemHealthResponse, SystemInfoResponse } from "../types";
+import { SystemHealthResponse, SystemInfoResponse, CgroupsPressureMetrics } from "../types";
+
+function readMemoryPressure(): CgroupsPressureMetrics {
+  const paths = ["/sys/fs/cgroup/memory.pressure", "/proc/pressure/memory"];
+  for (const p of paths) {
+    try {
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, "utf-8");
+        const lines = raw.trim().split("\n");
+        const parseLine = (line: string) => {
+          const parts = line.split(" ");
+          const obj: any = {};
+          for (let i = 1; i < parts.length; i++) {
+            const [k, v] = parts[i].split("=");
+            if (k && v !== undefined) obj[k] = parseFloat(v);
+          }
+          return obj;
+        };
+        const someLine = lines.find((l) => l.startsWith("some"));
+        const fullLine = lines.find((l) => l.startsWith("full"));
+        return {
+          supported: true,
+          some: someLine ? parseLine(someLine) : undefined,
+          full: fullLine ? parseLine(fullLine) : undefined,
+        };
+      }
+    } catch {
+      // Ignore read errors
+    }
+  }
+  return { supported: false };
+}
 
 export class SystemService {
   static async getHealth(): Promise<SystemHealthResponse> {
     const config = loadConfig();
     const result = await safeExec(config.fire.cliBinary, ["doctor", "--json"]);
+    const cgroupsPressure = readMemoryPressure();
 
     if (result.code === 0 && result.stdout) {
       try {
@@ -18,6 +51,7 @@ export class SystemService {
           checks,
           passed,
           total: checks.length,
+          cgroupsPressure,
         };
       } catch (e) {
         console.error("Error parsing fire doctor --json:", e, result.stdout);
@@ -32,6 +66,7 @@ export class SystemService {
       ],
       passed: 1,
       total: 1,
+      cgroupsPressure,
     };
   }
 
