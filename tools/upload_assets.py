@@ -16,8 +16,27 @@ import urllib.parse
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
-ASSETS_DIR = os.path.join(PROJECT_ROOT, "assets")
+ASSETS_DIR = os.path.realpath(os.path.join(PROJECT_ROOT, "assets"))
 os.makedirs(ASSETS_DIR, exist_ok=True)
+
+
+def safe_asset_path(filename: str) -> str:
+    """Validate filename and ensure resolved path is strictly within ASSETS_DIR."""
+    if not filename:
+        raise ValueError("Filename is required")
+    # Reject directory traversal and separator attempts explicitly
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise ValueError("Directory traversal characters are not permitted")
+    base = os.path.basename(filename).strip()
+    sanitized = "".join(c for c in base if c.isalnum() or c in "._-")
+    # Reject empty, dot-only or traversal names
+    if not sanitized or sanitized in ('.', '..') or sanitized.startswith('.'):
+        raise ValueError("Invalid or unsafe filename")
+    full_path = os.path.realpath(os.path.join(ASSETS_DIR, sanitized))
+    if not (full_path.startswith(ASSETS_DIR + os.sep) or full_path == ASSETS_DIR):
+        raise ValueError("Path traversal detected")
+    return full_path
+
 
 HTML_PAGE = r"""<!DOCTYPE html>
 <html lang="en" class="h-full bg-slate-950 text-slate-100">
@@ -388,8 +407,12 @@ class AssetUploadHandler(BaseHTTPRequestHandler):
             return
 
         elif parsed.path.startswith('/assets/'):
-            filename = os.path.basename(urllib.parse.unquote(parsed.path[8:]))
-            filepath = os.path.join(ASSETS_DIR, filename)
+            try:
+                filepath = safe_asset_path(urllib.parse.unquote(parsed.path[8:]))
+                filename = os.path.basename(filepath)
+            except ValueError:
+                self.send_error(400, "Invalid asset path")
+                return
             if os.path.exists(filepath) and os.path.isfile(filepath):
                 ext = os.path.splitext(filename)[1].lower()
                 mime = {
@@ -428,15 +451,11 @@ class AssetUploadHandler(BaseHTTPRequestHandler):
             filename = payload.get('filename', '').strip()
             data_url = payload.get('data', '')
 
-            if not filename:
-                self.send_json({"success": False, "error": "Filename is required"}, status=400)
-                return
-
-            # Sanitize filename (alphanumeric, dash, underscore, dot)
-            filename = os.path.basename(filename)
-            filename = "".join(c for c in filename if c.isalnum() or c in "._-")
-            if not filename:
-                self.send_json({"success": False, "error": "Invalid filename characters"}, status=400)
+            try:
+                target_path = safe_asset_path(filename)
+                safe_name = os.path.basename(target_path)
+            except ValueError as e:
+                self.send_json({"success": False, "error": str(e)}, status=400)
                 return
 
             if not data_url or ',' not in data_url:
@@ -446,20 +465,23 @@ class AssetUploadHandler(BaseHTTPRequestHandler):
             try:
                 base64_data = data_url.split(',', 1)[1]
                 raw_bytes = base64.b64decode(base64_data)
-                target_path = os.path.join(ASSETS_DIR, filename)
                 with open(target_path, 'wb') as f:
                     f.write(raw_bytes)
 
                 print(f"[Upload] Saved: {target_path} ({len(raw_bytes)} bytes)")
-                self.send_json({"success": True, "filename": filename, "size": len(raw_bytes)})
+                self.send_json({"success": True, "filename": safe_name, "size": len(raw_bytes)})
                 return
             except Exception as e:
                 self.send_json({"success": False, "error": str(e)}, status=500)
                 return
 
         elif parsed.path == '/api/delete':
-            filename = os.path.basename(payload.get('filename', ''))
-            target_path = os.path.join(ASSETS_DIR, filename)
+            try:
+                target_path = safe_asset_path(payload.get('filename', ''))
+            except ValueError as e:
+                self.send_json({"success": False, "error": str(e)}, status=400)
+                return
+
             if os.path.exists(target_path):
                 os.remove(target_path)
                 self.send_json({"success": True})
