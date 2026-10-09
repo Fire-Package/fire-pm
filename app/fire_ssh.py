@@ -1000,6 +1000,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <button onclick="clearTerm()" title="Clear Terminal Output" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">Clear</button>
         <button onclick="termFit()" title="Fit Terminal Window" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fit</button>
         <button onclick="toggleFullscreen()" title="Fullscreen mode (locks Ctrl+W from closing tab)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fullscreen</button>
+        <button id="record-btn" onclick="toggleSessionRecording()" title="Record session to Asciinema (.cast) file" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono items-center gap-1">
+          <span id="record-dot" class="w-2 h-2 rounded-full bg-rose-500"></span>
+          <span id="record-text">Rec</span>
+        </button>
         <button onclick="copySelectionToClipboard(true)" title="Copy Selected Text (Ctrl+C / Cmd+C)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
@@ -4180,9 +4184,98 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       };
     }
 
+    // ==================== ASCIINEMA SESSION RECORDER ====================
+    let isRecordingSession = false;
+    let recordingStartTime = 0;
+    let recordedEvents = [];
+
+    function toggleSessionRecording() {
+      if (!isRecordingSession) {
+        startSessionRecording();
+      } else {
+        stopSessionRecording();
+      }
+    }
+
+    function startSessionRecording() {
+      const cur = getActiveTab();
+      isRecordingSession = true;
+      recordingStartTime = performance.now();
+      const cols = cur && cur.term ? cur.term.cols : 80;
+      const rows = cur && cur.term ? cur.term.rows : 24;
+
+      // Asciinema v2 header
+      const header = {
+        version: 2,
+        width: cols,
+        height: rows,
+        timestamp: Math.floor(Date.now() / 1000),
+        title: "Fire PM Session Recording",
+        env: { "TERM": "xterm-256color", "SHELL": "/bin/bash" }
+      };
+      recordedEvents = [JSON.stringify(header)];
+
+      const btn = document.getElementById('record-btn');
+      const dot = document.getElementById('record-dot');
+      const text = document.getElementById('record-text');
+      if (btn) btn.classList.add('bg-rose-950/80', 'border', 'border-rose-500/50', 'text-rose-200');
+      if (dot) dot.classList.add('animate-ping');
+      if (text) text.textContent = 'Recording...';
+      showToast('Recording started (Asciinema .cast format)');
+    }
+
+    function stopSessionRecording() {
+      if (!isRecordingSession) return;
+      isRecordingSession = false;
+
+      const btn = document.getElementById('record-btn');
+      const dot = document.getElementById('record-dot');
+      const text = document.getElementById('record-text');
+      if (btn) btn.classList.remove('bg-rose-950/80', 'border', 'border-rose-500/50', 'text-rose-200');
+      if (dot) dot.classList.remove('animate-ping');
+      if (text) text.textContent = 'Rec';
+
+      if (recordedEvents.length <= 1) {
+        showToast('No terminal output recorded.');
+        return;
+      }
+
+      const content = recordedEvents.join('\n') + '\n';
+      const blob = new Blob([content], { type: 'application/x-asciicast' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      a.href = url;
+      a.download = `fire-pm-session-${ts}.cast`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Recording saved as .cast file!');
+    }
+
+    function recordTerminalOutputChunk(data) {
+      if (!isRecordingSession) return;
+      const timeOffset = Math.max(0, (performance.now() - recordingStartTime) / 1000);
+      let textChunk = '';
+      if (typeof data === 'string') {
+        textChunk = data;
+      } else if (data instanceof Uint8Array || data instanceof ArrayBuffer) {
+        try {
+          textChunk = new TextDecoder('utf-8').decode(data);
+        } catch(e) {
+          textChunk = String.fromCharCode.apply(null, new Uint8Array(data));
+        }
+      }
+      if (textChunk) {
+        recordedEvents.push(JSON.stringify([parseFloat(timeOffset.toFixed(4)), 'o', textChunk]));
+      }
+    }
+
     function renderTabOutput(tab, data) {
       if (tab && tab.term) {
         tab.term.write(data);
+        recordTerminalOutputChunk(data);
       }
     }
 
