@@ -163,11 +163,41 @@ class SessionManager:
             if time.time() - info["created_at"] > SESSION_EXPIRY_SECONDS:
                 del self.sessions[token]
                 return False
+            # Enforce IP binding if client IP is supplied
+            if ip and info.get("ip") and info["ip"] != ip:
+                return False
             return True
 
     def revoke(self, token: str):
         with self.lock:
             self.sessions.pop(token, None)
+
+
+class SecurityEventManager:
+    """Maintains an in-memory buffer of recent security events for monitoring and SSE streaming."""
+    def __init__(self, max_events: int = 200):
+        self.lock = threading.Lock()
+        self.max_events = max_events
+        self.events = []
+
+    def record_event(self, event_type: str, severity: str, source_ip: str, details: str):
+        evt = {
+            "id": secrets.token_hex(8),
+            "type": event_type,
+            "severity": severity,
+            "source_ip": source_ip,
+            "details": details,
+            "timestamp": time.time()
+        }
+        with self.lock:
+            self.events.append(evt)
+            if len(self.events) > self.max_events:
+                self.events.pop(0)
+        return evt
+
+    def get_recent_events(self, limit: int = 50) -> list:
+        with self.lock:
+            return list(reversed(self.events[-limit:]))
 
 
 class ShareTokenManager:
@@ -4843,6 +4873,16 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             self.send_json({"status": "ok", "service": "fire-ssh"})
             return
 
+        elif parsed.path == '/api/security/events':
+            token = self.get_auth_token() or self.get_cookie_token()
+            ip = self.get_client_ip()
+            if not self.server.sessions.is_valid(token, ip):
+                self.send_json({"error": "Unauthorized"}, status=401)
+                return
+            events = self.server.security_events.get_recent_events(limit=50) if hasattr(self.server, 'security_events') else []
+            self.send_json({"events": events, "count": len(events)})
+            return
+
         elif parsed.path == '/' or parsed.path == '/index.html':
             query = urllib.parse.parse_qs(parsed.query)
             share_token = query.get('share', [None])[0]
@@ -5350,6 +5390,7 @@ def run_server(port: int, plain_password: str = None, salt_hex: str = None, hash
     server.sessions = SessionManager()
     server.terminals = TerminalSessionManager()
     server.shares = ShareTokenManager()
+    server.security_events = SecurityEventManager()
 
     def _shutdown_handler(signum, frame):
         try:
