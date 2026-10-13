@@ -619,7 +619,7 @@ load_active_tunnel_state() {
 
   # 2. Custom Nginx-based tunnel
   host="${TUNNEL_STATE_URL#https://}"
-  if [[ -n "$TUNNEL_BASE_DOMAIN" && "$host" =~ ^[a-f0-9]{8}${TUNNEL_HOST_SUFFIX}\.${TUNNEL_BASE_DOMAIN}$ ]]; then
+  if [[ -n "$TUNNEL_BASE_DOMAIN" && "$host" =~ ^[a-z0-9]{8,10}${TUNNEL_HOST_SUFFIX}\.${TUNNEL_BASE_DOMAIN}$ ]]; then
     mapped_port=$(awk -v h="$host" '$1 == h { gsub(/;/, "", $2); print $2; exit }' "$TUNNEL_NGINX_MAP" 2>/dev/null)
     if [[ "$mapped_port" == "$port" ]]; then
       return 0
@@ -646,17 +646,17 @@ tunnel_hash_from_url() {
   local url="$1"
   local host="${url#https://}"
 
-  if [[ "$host" =~ ^[a-f0-9]{8}${TUNNEL_HOST_SUFFIX}\.${TUNNEL_BASE_DOMAIN}$ ]]; then
+  if [[ "$host" =~ ^[a-z0-9]{8,10}${TUNNEL_HOST_SUFFIX}\.${TUNNEL_BASE_DOMAIN}$ ]]; then
     echo "${host%%${TUNNEL_HOST_SUFFIX}.${TUNNEL_BASE_DOMAIN}}"
     return 0
   fi
 
-  if [[ "$host" =~ ^[a-f0-9]{8}\.${TUNNEL_DOMAIN}$ ]]; then
+  if [[ "$host" =~ ^[a-z0-9]{8,10}\.${TUNNEL_DOMAIN}$ ]]; then
     echo "${host%%.*}"
     return 0
   fi
 
-  if [[ "$url" =~ ^https://${TUNNEL_DOMAIN}/[a-f0-9]{8}$ ]]; then
+  if [[ "$url" =~ ^https://${TUNNEL_DOMAIN}/[a-z0-9]{8,10}$ ]]; then
     echo "${url##*/}"
     return 0
   fi
@@ -676,9 +676,9 @@ nginx_map_get_hash_for_port() {
   key=$(nginx_map_key_for_port "$port")
   [[ -n "$key" ]] || return 1
 
-  if [[ "$key" =~ ^[a-f0-9]{8}${TUNNEL_HOST_SUFFIX}\.${TUNNEL_BASE_DOMAIN}$ ]]; then
+  if [[ "$key" =~ ^[a-z0-9]{8,10}${TUNNEL_HOST_SUFFIX}\.${TUNNEL_BASE_DOMAIN}$ ]]; then
     echo "${key%%${TUNNEL_HOST_SUFFIX}.${TUNNEL_BASE_DOMAIN}}"
-  elif [[ "$key" =~ ^[a-f0-9]{8}\.${TUNNEL_DOMAIN}$ ]]; then
+  elif [[ "$key" =~ ^[a-z0-9]{8,10}\.${TUNNEL_DOMAIN}$ ]]; then
     echo "${key%%.*}"
   else
     echo "$key"
@@ -697,9 +697,9 @@ nginx_map_add() {
 
   # Keep one live mapping per host/hash and per local port.
   sed -i "/^${key//./\\.} /d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
-  sed -i "/^[a-f0-9]\{8\}${TUNNEL_HOST_SUFFIX//./\\.}\\.${TUNNEL_BASE_DOMAIN//./\\.} ${port};$/d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
-  sed -i "/^[a-f0-9]\{8\}\\.${TUNNEL_DOMAIN//./\\.} ${port};$/d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
-  sed -i "/^[a-f0-9]\{8\} ${port};$/d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
+  sed -i "/^[a-z0-9]\{8,10\}${TUNNEL_HOST_SUFFIX//./\\.}\\.${TUNNEL_BASE_DOMAIN//./\\.} ${port};$/d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
+  sed -i "/^[a-z0-9]\{8,10\}\\.${TUNNEL_DOMAIN//./\\.} ${port};$/d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
+  sed -i "/^[a-z0-9]\{8,10\} ${port};$/d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
   echo "${key} ${port};" >> "$TUNNEL_NGINX_MAP"
 
   # Validate nginx configuration
@@ -2135,7 +2135,7 @@ server {
     listen [::]:80;
     listen 443 ssl;
     listen [::]:443 ssl;
-    server_name $TUNNEL_BASE_DOMAIN "~^[a-f0-9]{8}-tunnel\\.${domain_regex}\$";
+    server_name $TUNNEL_BASE_DOMAIN "~^[a-z0-9]{8,10}-tunnel\\.${domain_regex}\$";
 
     ssl_certificate $ssl_cert;
     ssl_certificate_key $ssl_key;
@@ -2183,9 +2183,12 @@ open_custom_tunnel() {
 
   ensure_nginx_custom_tunnel_config
 
-  # Generate 8-char hex hash
+  # Generate 10-char lowercase alphanumeric hash
   local hash
-  hash=$(openssl rand -hex 4 2>/dev/null || cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 8)
+  hash=$(tr -dc 'a-z0-9' < /dev/urandom 2>/dev/null | head -c 10)
+  if [[ ${#hash} -ne 10 ]]; then
+    hash=$(openssl rand -hex 5 2>/dev/null || cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 10)
+  fi
   local map_key
   map_key=$(tunnel_map_key_for_hash "$hash")
   local url

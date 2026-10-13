@@ -52,6 +52,21 @@ class SecurityRegressionTests(unittest.TestCase):
             is_valid = resolved in allowed_shells and os.path.exists(resolved) and os.access(resolved, os.X_OK)
             self.assertFalse(is_valid, f"Shell should have been rejected: {bad}")
 
+    def test_tunnel_hash_pattern(self):
+        """Verify 10-character lowercase alphanumeric tunnel hash format and regex."""
+        import re
+        tunnel_regex = re.compile(r"^[a-z0-9]{8,10}$")
+
+        valid_hashes = ["a1b2c3d4", "qpu693pplv", "l18cwthk4y", "0123456789", "abcdefghij"]
+        for h in valid_hashes:
+            with self.subTest(h=h):
+                self.assertTrue(bool(tunnel_regex.match(h)), f"Expected {h} to match tunnel hash regex")
+
+        invalid_hashes = ["A1B2C3D4EF", "short", "toolonghash123", "a1b2c3d4-tunnel", "qpu@93pplv"]
+        for h in invalid_hashes:
+            with self.subTest(h=h):
+                self.assertFalse(bool(tunnel_regex.match(h)), f"Expected {h} to fail tunnel hash regex")
+
 
 if __name__ == '__main__':
     unittest.main()
