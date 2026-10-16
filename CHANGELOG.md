@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 ## [Unreleased]
 
 ### Added
+* Streamlined custom domain tunnel setup for Cloudflare edge SSL proxying with automated real-IP extraction, atomic Nginx testing, and zero-certificate configuration.
 * Multi-device interactive terminal synchronization with fan-out WebSocket broadcast, scrollback replay, active viewport negotiation, dynamic mobile roaming, and real-time tab state synchronization ([#93](https://github.com/Fire-Package/fire-pm/issues/93), [#94](https://github.com/Fire-Package/fire-pm/pull/94)).
 
 - `[2026-10-03]{22:06:00} Web Terminal: Stop auto-generated terminal replies (DA1/DA2 like ^[[>0;276;0c, DSR, OSC color reports) from leaking onto the shell prompt by absorbing DA2/DA3 queries in xterm.js and dropping such replies in the client and PTY input path`
