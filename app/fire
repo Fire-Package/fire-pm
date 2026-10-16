@@ -2350,10 +2350,18 @@ PYEOF
 
   ensure_nginx_custom_tunnel_config
 
+  local detected_ip=""
+  detected_ip=$(curl -sS --max-time 2 https://api.ipify.org 2>/dev/null || curl -sS --max-time 2 https://icanhazip.com 2>/dev/null || ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+')
+
   success "Custom tunnel domain configured for ${CYAN}$clean_base${NC}"
   echo -e "  ${GREY}•${NC} Cloudflare DNS: In Cloudflare, add an ${BOLD}A record${NC}:"
   echo -e "      ${BOLD}Type:${NC} A"
-  echo -e "      ${BOLD}Name:${NC} *  ${GREY}(points *.${clean_base} -> server IP)${NC}"
+  echo -e "      ${BOLD}Name:${NC} *"
+  if [[ -n "$detected_ip" ]]; then
+    echo -e "      ${BOLD}IPv4 address:${NC} ${YELLOW}${detected_ip}${NC}  ${GREY}(your server IP)${NC}"
+  else
+    echo -e "      ${BOLD}IPv4 address:${NC} ${YELLOW}<your-server-ip>${NC}"
+  fi
   echo -e "      ${BOLD}Proxy status:${NC} Proxied (${YELLOW}☁️ ON${NC})"
   echo -e "  ${GREY}•${NC} Tunnels use 1-level subdomains (${CYAN}https://<hash>-tunnel.${clean_base}${NC}) covered 100% by Cloudflare's free Universal SSL."
   echo -e "  ${GREY}•${NC} Open tunnels anytime: ${YELLOW}fire tunnel open <port>${NC}\n"
