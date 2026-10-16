@@ -163,9 +163,9 @@ class SessionManager:
             if time.time() - info["created_at"] > SESSION_EXPIRY_SECONDS:
                 del self.sessions[token]
                 return False
-            # Enforce IP binding if client IP is supplied
-            if ip and info.get("ip") and info["ip"] != ip:
-                return False
+            # Allow client roaming across network changes while keeping IP recorded
+            if ip and info.get("ip") != ip:
+                info["ip"] = ip
             return True
 
     def revoke(self, token: str):
@@ -384,7 +384,7 @@ class TerminalSession:
         self.shell = shell or '/bin/bash'
         self.master_fd = None
         self.pid = None
-        self.sock = None
+        self.interactive_socks = set()
         self.readonly_socks = set()
         self.sock_lock = threading.Lock()
         self.output_buffer = bytearray()
@@ -401,6 +401,19 @@ class TerminalSession:
         self.active_cmd_name = ""
         self.last_reported_comm = ""
         self.start()
+
+    @property
+    def sock(self):
+        with self.sock_lock:
+            return next(iter(self.interactive_socks), None)
+
+    @sock.setter
+    def sock(self, value):
+        with self.sock_lock:
+            if value is None:
+                self.interactive_socks.clear()
+            else:
+                self.interactive_socks.add(value)
 
     def start(self):
         master_fd, slave_fd = pty.openpty()
@@ -460,11 +473,15 @@ class TerminalSession:
         self.reader_thread.start()
 
     def _broadcast_frame_unlocked(self, frame: bytes):
-        if self.sock:
+        dead_interactive = []
+        for s in list(self.interactive_socks):
             try:
-                self.sock.sendall(frame)
+                s.sendall(frame)
             except Exception:
-                self.sock = None
+                dead_interactive.append(s)
+        for s in dead_interactive:
+            self.interactive_socks.discard(s)
+
         dead_ro = []
         for ro in list(self.readonly_socks):
             try:
@@ -478,19 +495,7 @@ class TerminalSession:
         with self.sock_lock:
             payload = json.dumps(data).encode('utf-8')
             frame = ws_make_frame(payload, opcode=1)
-            if self.sock:
-                try:
-                    self.sock.sendall(frame)
-                except Exception:
-                    self.sock = None
-            dead_ro = []
-            for ro in list(self.readonly_socks):
-                try:
-                    ro.sendall(frame)
-                except Exception:
-                    dead_ro.append(ro)
-            for ro in dead_ro:
-                self.readonly_socks.discard(ro)
+            self._broadcast_frame_unlocked(frame)
 
     def _check_fg_process(self):
         if not self.master_fd or self.closed:
@@ -612,7 +617,7 @@ class TerminalSession:
 
     def attach_socket(self, sock):
         with self.sock_lock:
-            self.sock = sock
+            self.interactive_socks.add(sock)
             self.last_seen = time.time()
             with self.buffer_lock:
                 if self.output_buffer:
@@ -620,7 +625,7 @@ class TerminalSession:
                         frame = ws_make_frame(bytes(self.output_buffer), opcode=2)
                         sock.sendall(frame)
                     except Exception:
-                        self.sock = None
+                        self.interactive_socks.discard(sock)
 
     def attach_readonly_socket(self, sock):
         with self.sock_lock:
@@ -639,9 +644,11 @@ class TerminalSession:
 
     def detach_socket(self, sock=None):
         with self.sock_lock:
-            if sock is None or self.sock == sock:
-                self.sock = None
-                self.last_seen = time.time()
+            if sock:
+                self.interactive_socks.discard(sock)
+            elif sock is None:
+                self.interactive_socks.clear()
+            self.last_seen = time.time()
 
     @staticmethod
     def is_terminal_query_response(data: bytes) -> bool:
@@ -739,15 +746,17 @@ class TerminalSession:
     def close(self):
         self.closed = True
         with self.sock_lock:
-            if self.sock:
+            exit_frame = ws_make_frame(struct.pack("!H", 1000) + b"Process exited", opcode=8)
+            for s in list(self.interactive_socks):
                 try:
-                    self.sock.sendall(ws_make_frame(struct.pack("!H", 1000) + b"Process exited", opcode=8))
+                    s.sendall(exit_frame)
+                    s.close()
                 except Exception:
                     pass
-                self.sock = None
+            self.interactive_socks.clear()
             for ro in list(self.readonly_socks):
                 try:
-                    ro.sendall(ws_make_frame(struct.pack("!H", 1000) + b"Process exited", opcode=8))
+                    ro.sendall(exit_frame)
                     ro.close()
                 except Exception:
                     pass
@@ -781,33 +790,28 @@ class TerminalSessionManager:
         self.reaper_thread = threading.Thread(target=self._reaper_loop, daemon=True)
         self.reaper_thread.start()
 
-    def _make_key(self, token: str, tab_id: str = None) -> str:
-        if not token:
-            return ""
+    def _make_key(self, token: str = None, tab_id: str = None) -> str:
         if tab_id:
-            return f"{token}:{tab_id}"
-        return token
+            if ":" in tab_id:
+                return tab_id.split(":")[-1]
+            return tab_id
+        return "tab-1"
 
-    def get(self, token: str, tab_id: str = None):
+    def get(self, token: str = None, tab_id: str = None):
         key = self._make_key(token, tab_id)
         with self.lock:
-            if key and key in self.sessions:
-                sess = self.sessions[key]
-                if sess.is_alive():
-                    return sess
+            sess = self.sessions.get(key)
+            if sess and sess.is_alive():
+                return sess
             if not tab_id:
-                if token and token in self.sessions:
-                    sess = self.sessions[token]
+                for sess in self.sessions.values():
                     if sess.is_alive():
                         return sess
-                if token:
-                    for k, sess in self.sessions.items():
-                        if (k == token or k.startswith(f"{token}:")) and sess.is_alive():
-                            return sess
             return None
 
-    def get_or_create(self, token: str, tab_id: str = None, shell: str = None) -> TerminalSession:
+    def get_or_create(self, token: str = None, tab_id: str = None, shell: str = None) -> TerminalSession:
         key = self._make_key(token, tab_id)
+        created_new = False
         with self.lock:
             session = self.sessions.get(key)
             if session and session.is_alive():
@@ -816,9 +820,14 @@ class TerminalSessionManager:
                 session.close()
             session = TerminalSession(key, shell)
             self.sessions[key] = session
-            return session
+            created_new = True
 
-    def remove(self, token: str, tab_id: str = None):
+        if created_new:
+            self.broadcast_all({"type": "tabs_changed", "created": key})
+        return session
+
+    def remove(self, token: str = None, tab_id: str = None):
+        removed_key = None
         with self.lock:
             if tab_id:
                 key = self._make_key(token, tab_id)
@@ -827,37 +836,33 @@ class TerminalSessionManager:
                     session = self.sessions.pop(token, None)
                 if session:
                     session.close()
+                    removed_key = key
             else:
-                keys_to_remove = [k for k in self.sessions if k == token or k.startswith(f"{token}:")]
-                for k in keys_to_remove:
+                for k in list(self.sessions.keys()):
                     sess = self.sessions.pop(k, None)
                     if sess:
                         sess.close()
+                removed_key = "all"
+
+        if removed_key:
+            self.broadcast_all({"type": "tabs_changed", "removed": removed_key})
 
     def list_all(self) -> list:
         with self.lock:
             return [s for s in self.sessions.values() if s.is_alive()]
 
-    def list_tabs(self, token: str) -> list:
-        if not token:
-            return []
+    def list_tabs(self, token: str = None) -> list:
         with self.lock:
             results = []
-            prefix = f"{token}:"
-            for k, sess in self.sessions.items():
+            for tab_id, sess in self.sessions.items():
                 if not sess.is_alive():
                     continue
-                tab_id = None
-                if k == token:
-                    tab_id = "tab-1"
-                elif k.startswith(prefix):
-                    tab_id = k[len(prefix):]
-                if tab_id:
-                    results.append({
-                        "id": tab_id,
-                        "title": sess.active_cmd_name or sess.last_reported_comm or "bash",
-                        "cwd": sess.get_cwd()
-                    })
+                clean_id = tab_id.split(":")[-1] if ":" in tab_id else tab_id
+                results.append({
+                    "id": clean_id,
+                    "title": sess.active_cmd_name or sess.last_reported_comm or "bash",
+                    "cwd": sess.get_cwd()
+                })
 
             def tab_sort_key(item):
                 tid = item.get("id", "")
@@ -871,18 +876,18 @@ class TerminalSessionManager:
             results.sort(key=tab_sort_key)
             return results
 
+    def broadcast_all(self, data: dict):
+        try:
+            payload = json.dumps(data).encode("utf-8")
+            frame = ws_make_frame(payload, opcode=1)
+            with self.lock:
+                for sess in self.sessions.values():
+                    sess._broadcast_frame_unlocked(frame)
+        except Exception:
+            pass
+
     def migrate_token(self, old_token: str, new_token: str):
-        if not old_token or not new_token or old_token == new_token:
-            return
-        with self.lock:
-            keys_to_migrate = [k for k in self.sessions if k == old_token or k.startswith(f"{old_token}:")]
-            for k in keys_to_migrate:
-                sess = self.sessions.pop(k, None)
-                if sess and sess.is_alive():
-                    suffix = k[len(old_token):]
-                    new_key = f"{new_token}{suffix}"
-                    sess.session_id = new_key
-                    self.sessions[new_key] = sess
+        pass
 
     def _reaper_loop(self):
         while True:
@@ -901,7 +906,7 @@ class TerminalSessionManager:
                 for token, session in self.sessions.items():
                     if not session.is_alive():
                         to_delete.append(token)
-                    elif session.sock is None and (now - session.last_seen > DETACHED_SESSION_TTL):
+                    elif len(session.interactive_socks) == 0 and len(session.readonly_socks) == 0 and (now - session.last_seen > DETACHED_SESSION_TTL):
                         to_delete.append(token)
                 for token in to_delete:
                     sess = self.sessions.pop(token, None)
@@ -3740,6 +3745,58 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       initGlobalShortcuts();
       saveTabsState();
+      if (!window.tabSyncTimer && !window.IS_READONLY) {
+        window.tabSyncTimer = setInterval(syncServerTabs, 10000);
+      }
+    }
+
+    let isSyncingTabs = false;
+    async function syncServerTabs() {
+      if (window.IS_READONLY || isSyncingTabs) return;
+      isSyncingTabs = true;
+      try {
+        const res = await fetch('/api/tabs');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data || !Array.isArray(data.tabs)) return;
+
+        const serverTabs = data.tabs;
+        const serverTabIds = new Set(serverTabs.map(t => t.id));
+        const localTabIds = Object.keys(tabs);
+
+        // 1. Add any tabs that exist on the server but not locally
+        serverTabs.forEach(sTab => {
+          if (!tabs[sTab.id]) {
+            createNewTab(sTab.title || 'bash', sTab.id, false);
+          } else {
+            if (sTab.title && tabs[sTab.id].title !== sTab.title) {
+              tabs[sTab.id].title = sTab.title;
+            }
+          }
+        });
+
+        // 2. Remove any local tabs that no longer exist on the server
+        const now = Date.now();
+        localTabIds.forEach(localId => {
+          if (!serverTabIds.has(localId)) {
+            const localTab = tabs[localId];
+            if (localTab && localTab.createdAt && (now - localTab.createdAt < 4000)) {
+              return;
+            }
+            closeTab(localId, true);
+          }
+        });
+
+        if (Object.keys(tabs).length === 0) {
+          createNewTab('bash', 'tab-1', true);
+        } else {
+          renderTabsList();
+          saveTabsState();
+        }
+      } catch (e) {
+      } finally {
+        isSyncingTabs = false;
+      }
     }
 
     function createNewTab(initialTitle, explicitTabId, shouldSwitch = true) {
@@ -3754,6 +3811,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       } else {
         tabSequence++;
         tabId = 'tab-' + tabSequence;
+      }
+
+      if (tabs[tabId]) {
+        if (shouldSwitch) switchTab(tabId);
+        return tabs[tabId];
       }
       const tabIndex = Object.keys(tabs).length + 1;
       const title = initialTitle || (window.SESSION_TITLE && tabIndex === 1 ? window.SESSION_TITLE : 'bash');
@@ -3839,6 +3901,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
       });
 
+      mountEl.addEventListener('pointerdown', () => {
+        if (!window.IS_READONLY && t && fa) {
+          fa.fit();
+          sendResize(tabObj);
+        }
+      });
+
       mountEl.addEventListener('touchend', () => {
         if (!window.IS_READONLY && t.textarea) {
           if (document.activeElement !== t.textarea) {
@@ -3859,7 +3928,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         pingTimer: null,
         hasAlert: false,
         connected: false,
-        cwd: '/root'
+        cwd: '/root',
+        createdAt: Date.now(),
+        lastSentCols: null,
+        lastSentRows: null
       };
 
       tabs[tabId] = tabObj;
@@ -4657,6 +4729,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (activeTab.fitAddon) {
         setTimeout(() => {
           activeTab.fitAddon.fit();
+          activeTab.lastSentCols = null;
+          activeTab.lastSentRows = null;
           sendResize(activeTab);
         }, 30);
       }
@@ -4678,9 +4752,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       updateCwd();
     }
 
-    function closeTab(tabId) {
+    function closeTab(tabId, silent = false) {
       const tabKeys = Object.keys(tabs);
-      if (tabKeys.length <= 1) {
+      if (tabKeys.length <= 1 && !silent) {
         showToast('Cannot close the last open tab');
         return;
       }
@@ -4699,15 +4773,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         tab.socket = null;
       }
 
-      const closeUrl = `/api/tab_close?tab=${encodeURIComponent(tabId)}&token=${encodeURIComponent(sessionToken || '')}`;
-      if (navigator.sendBeacon) {
-        try {
-          navigator.sendBeacon(closeUrl);
-        } catch (e) {
+      if (!silent) {
+        const closeUrl = `/api/tab_close?tab=${encodeURIComponent(tabId)}&token=${encodeURIComponent(sessionToken || '')}`;
+        if (navigator.sendBeacon) {
+          try {
+            navigator.sendBeacon(closeUrl);
+          } catch (e) {
+            fetch(closeUrl, { method: 'POST', keepalive: true }).catch(() => {});
+          }
+        } else {
           fetch(closeUrl, { method: 'POST', keepalive: true }).catch(() => {});
         }
-      } else {
-        fetch(closeUrl, { method: 'POST', keepalive: true }).catch(() => {});
       }
 
       if (tab.mountEl && tab.mountEl.parentNode) {
@@ -4758,7 +4834,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       if (activeTabId === tabId) {
         const remaining = Object.keys(tabs);
-        switchTab(remaining[remaining.length - 1]);
+        if (remaining.length > 0) {
+          switchTab(remaining[remaining.length - 1]);
+        }
       } else {
         renderTabsList();
       }
@@ -5163,6 +5241,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (!window.IS_READONLY) {
         t.onData(data => {
           if (isTerminalQueryResponse(data)) return;
+          if (tab.fitAddon && tab.term) {
+            if (tab.lastSentCols !== tab.term.cols || tab.lastSentRows !== tab.term.rows) {
+              sendResize(tab);
+            }
+          }
           if (ctrlSticky && data.length > 0) {
             sendCtrlChar(data[0]);
             if (data.length > 1) {
@@ -5249,6 +5332,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             } else if (msg.type === 'session_closed') {
               handleSessionClosed(msg.message || msg.reason || "SSH session closed via 'fire ssh close'");
               return;
+            } else if (msg.type === 'tabs_changed') {
+              if (typeof syncServerTabs === 'function') {
+                syncServerTabs();
+              }
+            } else if (msg.type === 'pty_resize') {
+              if (msg.cols && msg.rows && tab.term) {
+                if (!document.hasFocus() || document.visibilityState === 'hidden') {
+                  tab.lastSentCols = msg.cols;
+                  tab.lastSentRows = msg.rows;
+                  if (tab.term.cols !== msg.cols || tab.term.rows !== msg.rows) {
+                    tab.term.resize(msg.cols, msg.rows);
+                  }
+                }
+              }
             } else if (msg.type === 'pong') {
               // pong
             } else if (msg.type === 'process_name') {
@@ -5447,9 +5544,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function sendResize(tab) {
-      if (tab && tab.socket && tab.socket.readyState === WebSocket.OPEN && tab.term) {
-        tab.socket.send(JSON.stringify({ type: 'resize', cols: tab.term.cols, rows: tab.term.rows }));
-      }
+      if (window.IS_READONLY) return;
+      if (document.visibilityState === 'hidden') return;
+      if (!tab || !tab.socket || tab.socket.readyState !== WebSocket.OPEN || !tab.term) return;
+      if (splitMode === 'none' && activeTabId !== tab.id) return;
+
+      if (tab.lastSentCols === tab.term.cols && tab.lastSentRows === tab.term.rows) return;
+      tab.lastSentCols = tab.term.cols;
+      tab.lastSentRows = tab.term.rows;
+
+      tab.socket.send(JSON.stringify({ type: 'resize', cols: tab.term.cols, rows: tab.term.rows }));
     }
 
     function termFit() {
@@ -5470,6 +5574,33 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       window.addEventListener('orientationchange', () => {
         setTimeout(() => updateViewportLayout(), 200);
+      });
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && !window.IS_READONLY) {
+          if (typeof syncServerTabs === 'function') {
+            syncServerTabs();
+          }
+          const cur = getActiveTab();
+          if (cur && cur.fitAddon && cur.term) {
+            cur.fitAddon.fit();
+            cur.lastSentCols = null;
+            cur.lastSentRows = null;
+            sendResize(cur);
+          }
+        }
+      });
+
+      window.addEventListener('focus', () => {
+        if (!window.IS_READONLY) {
+          const cur = getActiveTab();
+          if (cur && cur.fitAddon && cur.term) {
+            cur.fitAddon.fit();
+            cur.lastSentCols = null;
+            cur.lastSentRows = null;
+            sendResize(cur);
+          }
+        }
       });
 
       // Dismiss mobile actions menu when tapping outside
@@ -6528,7 +6659,6 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             if token:
                 self.server.shares.revoke_by_session(token)
                 self.server.sessions.revoke(token)
-                self.server.terminals.remove(token)
             proto = self.headers.get('X-Forwarded-Proto', '').lower()
             is_https = proto == 'https' or 'https' in self.headers.get('CF-Visitor', '')
             secure_attr = "; Secure" if is_https else ""
@@ -6608,6 +6738,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                             cols = int(msg.get('cols', 80))
                             rows = int(msg.get('rows', 24))
                             session.resize(cols, rows)
+                            session.send_ws_json({"type": "pty_resize", "cols": cols, "rows": rows})
                         elif mtype == 'ping':
                             sock.sendall(ws_make_frame(json.dumps({"type": "pong"}), opcode=1))
                         elif mtype == 'latency_ping':
@@ -6743,10 +6874,10 @@ def run_server(port: int, plain_password: str = None, salt_hex: str = None, hash
             with server.terminals.lock:
                 for sess in list(server.terminals.sessions.values()):
                     with sess.sock_lock:
-                        if sess.sock:
+                        for s in list(sess.interactive_socks):
                             try:
-                                sess.sock.sendall(msg_frame)
-                                sess.sock.sendall(close_frame)
+                                s.sendall(msg_frame)
+                                s.sendall(close_frame)
                             except Exception:
                                 pass
                         for ro in list(sess.readonly_socks):
