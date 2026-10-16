@@ -892,6 +892,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-webgl@0.16.0/lib/xterm-addon-webgl.js"></script>
   <style>
     .xterm { height: 100%; padding: 4px; }
     .xterm-viewport { background-color: #020617 !important; -webkit-overflow-scrolling: touch; }
@@ -3702,6 +3703,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         cursorStyle: isReadOnly ? 'underline' : 'bar',
         fontSize: currentFontSize,
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+        scrollback: 10000,
+        fastScrollModifier: 'alt',
+        smoothScrollDuration: 0,
         theme: {
           background: '#020617',
           foreground: '#f8fafc',
@@ -3732,6 +3736,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         t.loadAddon(new WebLinksAddon.WebLinksAddon());
       }
       t.open(mountEl);
+
+      // Hardware accelerated GPU rendering (with automatic canvas fallback)
+      if (typeof WebglAddon !== 'undefined' && WebglAddon.WebglAddon) {
+        try {
+          const webgl = new WebglAddon.WebglAddon();
+          webgl.onContextLoss(() => {
+            try { webgl.dispose(); } catch(e) {}
+          });
+          t.loadAddon(webgl);
+        } catch(e) {
+          // Fallback seamlessly to standard canvas renderer if WebGL unavailable
+        }
+      }
 
       mountEl.addEventListener('mousedown', () => {
         if (splitMode !== 'none' && activeTabId !== tabId) {
@@ -5578,6 +5595,13 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
+    def server_bind(self):
+        super().server_bind()
+        try:
+            self.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception:
+            pass
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.plain_password = None
@@ -6306,6 +6330,11 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
         """Bridges WebSocket client with a persistent TerminalSession."""
         sock = self.connection
         sock.setblocking(True)
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        except Exception:
+            pass
 
         target_shell = getattr(self.server, 'target_shell', None)
         session = self.server.terminals.get_or_create(token, tab_id, target_shell)
@@ -6375,6 +6404,11 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
         """Bridges a read-only viewer WebSocket with a TerminalSession."""
         sock = self.connection
         sock.setblocking(True)
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        except Exception:
+            pass
 
         session = self.server.terminals.get(token, tab_id)
         if not session:
