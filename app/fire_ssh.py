@@ -741,13 +741,13 @@ class TerminalSession:
         with self.sock_lock:
             if self.sock:
                 try:
-                    self.sock.sendall(ws_make_frame(b"", opcode=8))
+                    self.sock.sendall(ws_make_frame(struct.pack("!H", 1000) + b"Process exited", opcode=8))
                 except Exception:
                     pass
                 self.sock = None
             for ro in list(self.readonly_socks):
                 try:
-                    ro.sendall(ws_make_frame(b"", opcode=8))
+                    ro.sendall(ws_make_frame(struct.pack("!H", 1000) + b"Process exited", opcode=8))
                     ro.close()
                 except Exception:
                     pass
@@ -823,6 +823,8 @@ class TerminalSessionManager:
             if tab_id:
                 key = self._make_key(token, tab_id)
                 session = self.sessions.pop(key, None)
+                if not session and tab_id == "tab-1":
+                    session = self.sessions.pop(token, None)
                 if session:
                     session.close()
             else:
@@ -1767,6 +1769,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
         applySessionTitle();
         if (data.authenticated) {
+          if (data.token) {
+            sessionToken = data.token;
+          }
           showTerminal(data.tabs);
         }
       } catch (e) {
@@ -3652,21 +3657,23 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       let savedActiveTab = null;
 
       // 1. Server-reported tabs (passed from checkAuth/handleLogin or fetched via /api/tabs)
+      let serverTabs = [];
       if (Array.isArray(knownServerTabs) && knownServerTabs.length > 0) {
-        tabsToRestore = knownServerTabs.map(t => ({ id: t.id, title: t.title || 'bash' }));
+        serverTabs = knownServerTabs.map(t => ({ id: t.id, title: t.title || 'bash' }));
       } else if (!window.IS_READONLY) {
         try {
           const res = await fetch('/api/tabs');
           if (res.ok) {
             const data = await res.json();
             if (data && Array.isArray(data.tabs) && data.tabs.length > 0) {
-              tabsToRestore = data.tabs.map(t => ({ id: t.id, title: t.title || 'bash' }));
+              serverTabs = data.tabs.map(t => ({ id: t.id, title: t.title || 'bash' }));
             }
           }
         } catch (e) {}
       }
 
-      // 2. Cross-reference with localStorage for persistence across daemon restarts / reloads
+      // 2. Read client localStorage state
+      let storedList = [];
       if (!window.IS_READONLY) {
         try {
           savedActiveTab = localStorage.getItem('fire_ssh_active_tab');
@@ -3674,32 +3681,45 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           if (stored) {
             const parsed = JSON.parse(stored);
             if (Array.isArray(parsed) && parsed.length > 0) {
-              if (tabsToRestore.length === 0) {
-                tabsToRestore = parsed;
-              } else {
-                const existingIds = new Set(tabsToRestore.map(t => t.id));
-                parsed.forEach(t => {
-                  if (t && t.id && !existingIds.has(t.id)) {
-                    tabsToRestore.push(t);
-                    existingIds.add(t.id);
-                  }
-                });
-              }
+              storedList = parsed;
             }
           }
         } catch (e) {}
       }
 
-      // 3. Fallback: single tab if nothing to restore
+      // 3. Resolve tabs to restore:
+      if (serverTabs.length > 0) {
+        // Active server session: Server is the single source of truth for alive sessions.
+        // We preserve user-reordered tab sequence and custom renamed titles from storedList,
+        // but strictly drop any closed or dead tabs not currently reported by the server.
+        const serverTabMap = new Map();
+        serverTabs.forEach(t => serverTabMap.set(t.id, t));
+
+        if (storedList.length > 0) {
+          storedList.forEach(t => {
+            if (t && t.id && serverTabMap.has(t.id)) {
+              const sTab = serverTabMap.get(t.id);
+              tabsToRestore.push({
+                id: t.id,
+                title: t.title || sTab.title || 'bash'
+              });
+              serverTabMap.delete(t.id);
+            }
+          });
+        }
+        // Append any live server tabs that were not in storedList
+        serverTabMap.forEach(sTab => {
+          tabsToRestore.push(sTab);
+        });
+      } else if (!window.IS_READONLY && storedList.length > 0) {
+        // Fallback for daemon restart / cold start: restore previously saved tab layout
+        tabsToRestore = storedList;
+      }
+
+      // 4. Fallback: single tab if nothing to restore
       if (tabsToRestore.length === 0) {
         createNewTab('bash');
       } else {
-        tabsToRestore.sort((a, b) => {
-          const numA = parseInt((a.id || '').replace(/\D/g, ''), 10) || 0;
-          const numB = parseInt((b.id || '').replace(/\D/g, ''), 10) || 0;
-          return numA - numB;
-        });
-
         // Determine target active tab
         let targetActiveId = savedActiveTab;
         if (!targetActiveId || !tabsToRestore.some(t => t.id === targetActiveId)) {
@@ -4667,13 +4687,28 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const tab = tabs[tabId];
       if (!tab) return;
 
-      if (tab.pingTimer) clearInterval(tab.pingTimer);
-      if (tab.reconnectTimer) clearTimeout(tab.reconnectTimer);
+      tab.isClosed = true;
+      if (tab.pingTimer) { clearInterval(tab.pingTimer); tab.pingTimer = null; }
+      if (tab.reconnectTimer) { clearTimeout(tab.reconnectTimer); tab.reconnectTimer = null; }
       if (tab.socket) {
+        tab.socket.onopen = null;
+        tab.socket.onmessage = null;
+        tab.socket.onerror = null;
+        tab.socket.onclose = null;
         try { tab.socket.close(); } catch(e) {}
+        tab.socket = null;
       }
 
-      fetch(`/api/tab_close?tab=${encodeURIComponent(tabId)}`, { method: 'POST' }).catch(() => {});
+      const closeUrl = `/api/tab_close?tab=${encodeURIComponent(tabId)}&token=${encodeURIComponent(sessionToken || '')}`;
+      if (navigator.sendBeacon) {
+        try {
+          navigator.sendBeacon(closeUrl);
+        } catch (e) {
+          fetch(closeUrl, { method: 'POST', keepalive: true }).catch(() => {});
+        }
+      } else {
+        fetch(closeUrl, { method: 'POST', keepalive: true }).catch(() => {});
+      }
 
       if (tab.mountEl && tab.mountEl.parentNode) {
         tab.mountEl.parentNode.removeChild(tab.mountEl);
@@ -5252,11 +5287,26 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       };
 
       tab.socket.onclose = (event) => {
+        if (tab.isClosed || !tabs[tab.id]) {
+          return;
+        }
+
         tab.connected = false;
         renderTabsList();
 
         if (sessionClosed) {
           return;
+        }
+
+        if (event && event.reason === 'Process exited') {
+          if (Object.keys(tabs).length > 1) {
+            closeTab(tab.id);
+            showToast(`Tab ${tab.index || ''} closed (shell exited)`);
+            return;
+          } else {
+            handleSessionClosed(event.reason);
+            return;
+          }
         }
 
         if (event && (event.code === 1000 || event.code === 1001) && event.reason && (event.reason.includes('closed') || event.reason.includes('fire ssh'))) {
@@ -5290,7 +5340,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         tab.reconnectTimer = setTimeout(() => {
-          if (!sessionClosed && !document.getElementById('terminal-view').classList.contains('hidden')) {
+          if (!sessionClosed && !tab.isClosed && tabs[tab.id] && !document.getElementById('terminal-view').classList.contains('hidden')) {
             connectTabWebSocket(tab);
           }
         }, 1500);
@@ -5956,6 +6006,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             if auth:
                 token = self.get_auth_token()
                 data["tabs"] = self.server.terminals.list_tabs(token)
+                data["token"] = token
             self.send_json(data)
             return
 
