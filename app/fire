@@ -2300,6 +2300,11 @@ action_tunnel_setup() {
     exit 1
   fi
 
+  local clean_base="$input_domain"
+  clean_base="${clean_base#\*.}"
+  clean_base="${clean_base#tunnel.}"
+  clean_base="${clean_base#\*.}"
+
   # Cloudflare proxy handles SSL at edge. Prompt only if user wants custom SSL certificates
   if [[ -z "$input_cert" && -z "$input_key" ]]; then
     echo ""
@@ -2318,7 +2323,7 @@ action_tunnel_setup() {
   chmod 0700 /etc/fire-pm 2>/dev/null || true
   local config_file="/etc/fire-pm/config.json"
 
-  python3 - "$config_file" "$input_domain" "$input_cert" "$input_key" << 'PYEOF' 2>/dev/null || true
+  python3 - "$config_file" "$clean_base" "$input_cert" "$input_key" << 'PYEOF' 2>/dev/null || true
 import sys, json, os
 path, domain, cert, key = sys.argv[1:5]
 data = {}
@@ -2328,7 +2333,7 @@ if os.path.exists(path):
     except: pass
 data['tunnel'] = {
     'provider': 'custom',
-    'domain': domain,
+    'domain': f"tunnel.{domain}",
     'sslCert': cert,
     'sslKey': key
 }
@@ -2339,14 +2344,18 @@ with os.fdopen(fd, 'w') as f:
 os.chmod(path, 0o600)
 PYEOF
 
-  TUNNEL_BASE_DOMAIN="$input_domain"
-  TUNNEL_DOMAIN="tunnel.$input_domain"
+  TUNNEL_BASE_DOMAIN="$clean_base"
+  TUNNEL_DOMAIN="tunnel.$clean_base"
   TUNNEL_DEFAULT_PROVIDER="custom"
 
   ensure_nginx_custom_tunnel_config
 
-  success "Custom tunnel domain configured for ${CYAN}$input_domain${NC}"
-  echo -e "  ${GREY}•${NC} Cloudflare DNS: Ensure ${CYAN}*.$input_domain${NC} points to your server IP with Cloudflare proxy ${YELLOW}☁️ ON${NC}"
+  success "Custom tunnel domain configured for ${CYAN}$clean_base${NC}"
+  echo -e "  ${GREY}•${NC} Cloudflare DNS: In Cloudflare, add an ${BOLD}A record${NC}:"
+  echo -e "      ${BOLD}Type:${NC} A"
+  echo -e "      ${BOLD}Name:${NC} *  ${GREY}(points *.${clean_base} -> server IP)${NC}"
+  echo -e "      ${BOLD}Proxy status:${NC} Proxied (${YELLOW}☁️ ON${NC})"
+  echo -e "  ${GREY}•${NC} Tunnels use 1-level subdomains (${CYAN}https://<hash>-tunnel.${clean_base}${NC}) covered 100% by Cloudflare's free Universal SSL."
   echo -e "  ${GREY}•${NC} Open tunnels anytime: ${YELLOW}fire tunnel open <port>${NC}\n"
 }
 
