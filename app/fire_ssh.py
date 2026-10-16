@@ -1688,6 +1688,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let tabs = {}; // tabId -> tabObj
     let activeTabId = null;
     let secondaryTabId = null; // for dual split view
+    let dualTabIds = []; // [pane1, pane2] for dual split view (left/right or top/bottom)
     let gridTabIds = []; // [topLeft, topRight, bottomLeft, bottomRight] for 2x2 grid
     let tripleTabIds = []; // [left/main, topRight, bottomRight] or [col1, col2, col3]
     let splitMode = 'none'; // 'none' | 'vertical' | 'horizontal' | 'triple-left' | 'triple-col' | 'grid'
@@ -1705,7 +1706,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function getSecondaryTab() {
-      return secondaryTabId ? tabs[secondaryTabId] : null;
+      const id = (dualTabIds && dualTabIds.length > 1) ? dualTabIds[1] : secondaryTabId;
+      return id ? tabs[id] : null;
     }
 
     Object.defineProperty(window, 'term', {
@@ -3884,15 +3886,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       mountEl.addEventListener('mousedown', () => {
         if (splitMode !== 'none' && activeTabId !== tabId) {
-          if (splitMode === 'grid' || splitMode === 'triple-left' || splitMode === 'triple-col') {
-            activeTabId = tabId;
-          } else {
-            const temp = activeTabId;
-            activeTabId = tabId;
-            if (secondaryTabId === tabId) {
-              secondaryTabId = temp;
-            }
-          }
+          activeTabId = tabId;
           applySplitLayout();
           renderTabsList();
         }
@@ -3989,6 +3983,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const others = tabKeys.filter(id => id !== activeTabId);
         gridTabIds = [activeTabId, others[0], others[1], others[2]].filter(Boolean);
         tripleTabIds = [];
+        dualTabIds = [];
         secondaryTabId = null;
       } else if (splitMode === 'triple-left') {
         if (splitIcon) splitIcon.textContent = '⚿';
@@ -3996,6 +3991,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const others = tabKeys.filter(id => id !== activeTabId);
         tripleTabIds = [activeTabId, others[0], others[1]].filter(Boolean);
         gridTabIds = [];
+        dualTabIds = [];
         secondaryTabId = null;
       } else if (splitMode === 'triple-col') {
         if (splitIcon) splitIcon.textContent = '|||';
@@ -4003,24 +3999,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const others = tabKeys.filter(id => id !== activeTabId);
         tripleTabIds = [activeTabId, others[0], others[1]].filter(Boolean);
         gridTabIds = [];
+        dualTabIds = [];
         secondaryTabId = null;
-      } else if (splitMode === 'vertical') {
-        if (splitIcon) splitIcon.textContent = '◫';
+      } else if (splitMode === 'vertical' || splitMode === 'horizontal') {
+        if (splitIcon) splitIcon.textContent = splitMode === 'vertical' ? '◫' : '⬒';
         if (splitBtn) splitBtn.className = 'px-2 py-1 text-xs bg-orange-600/30 text-orange-300 border border-orange-500/50 rounded-lg transition font-mono flex items-center gap-1';
-        const remaining = tabKeys.filter(id => id !== activeTabId);
-        secondaryTabId = remaining[0] || null;
-        gridTabIds = [];
-        tripleTabIds = [];
-      } else if (splitMode === 'horizontal') {
-        if (splitIcon) splitIcon.textContent = '⬒';
-        if (splitBtn) splitBtn.className = 'px-2 py-1 text-xs bg-orange-600/30 text-orange-300 border border-orange-500/50 rounded-lg transition font-mono flex items-center gap-1';
-        const remaining = tabKeys.filter(id => id !== activeTabId);
-        secondaryTabId = remaining[0] || null;
+        if (!dualTabIds || dualTabIds.length < 2 || !tabs[dualTabIds[0]] || !tabs[dualTabIds[1]]) {
+          const remaining = tabKeys.filter(id => id !== activeTabId);
+          dualTabIds = [activeTabId, remaining[0] || null].filter(Boolean);
+        }
+        secondaryTabId = dualTabIds[1] || null;
         gridTabIds = [];
         tripleTabIds = [];
       } else {
         if (splitIcon) splitIcon.textContent = '◫';
         if (splitBtn) splitBtn.className = 'px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1';
+        dualTabIds = [];
         secondaryTabId = null;
         gridTabIds = [];
         tripleTabIds = [];
@@ -4051,16 +4045,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (cur && cur.term) cur.term.focus();
         return;
       }
-      if (splitMode === 'none' || !secondaryTabId) return;
-      const nextTabId = (activeTabId === secondaryTabId) ? Object.keys(tabs).find(id => id !== activeTabId) : secondaryTabId;
-      if (nextTabId) {
-        const temp = activeTabId;
-        activeTabId = nextTabId;
-        secondaryTabId = temp;
+      if ((splitMode === 'vertical' || splitMode === 'horizontal') && dualTabIds.length >= 2) {
+        const curIdx = dualTabIds.indexOf(activeTabId);
+        const nextIdx = curIdx === 0 ? 1 : 0;
+        activeTabId = dualTabIds[nextIdx];
         applySplitLayout();
         renderTabsList();
         const cur = getActiveTab();
         if (cur && cur.term) cur.term.focus();
+        return;
       }
     }
 
@@ -4365,7 +4358,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       // Single mode or dual split mode
       removeSplitDividers();
 
-      if (splitMode === 'none' || !secondaryTabId || !tabs[secondaryTabId]) {
+      if (splitMode === 'vertical' || splitMode === 'horizontal') {
+        const tabKeys = Object.keys(tabs);
+        if (tabKeys.length >= 2) {
+          dualTabIds = (dualTabIds || []).filter(id => tabs[id]);
+          if (dualTabIds.length < 2) {
+            if (!dualTabIds.includes(activeTabId) && tabs[activeTabId]) {
+              dualTabIds.unshift(activeTabId);
+            }
+            const others = tabKeys.filter(id => !dualTabIds.includes(id));
+            dualTabIds = [...dualTabIds, ...others].slice(0, 2);
+          }
+          secondaryTabId = dualTabIds[1] || null;
+        }
+      }
+
+      if (splitMode === 'none' || dualTabIds.length < 2 || !tabs[dualTabIds[0]] || !tabs[dualTabIds[1]]) {
         container.style.display = 'block';
         container.style.position = '';
         container.style.overflow = '';
@@ -4399,8 +4407,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
 
       // Dual Split Mode Active
-      const primaryTab = tabs[activeTabId];
-      const secondaryTab = tabs[secondaryTabId];
+      const primaryTab = tabs[dualTabIds[0]];
+      const secondaryTab = tabs[dualTabIds[1]];
       if (!primaryTab || !secondaryTab) return;
 
       container.style.display = 'flex';
@@ -4408,10 +4416,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       container.style.overflow = '';
       container.style.flexDirection = splitMode === 'vertical' ? 'row' : 'column';
 
-      let divider = document.createElement('div');
-      divider.id = 'split-divider';
-      container.appendChild(divider);
-      initSplitDividerDragging(divider);
+      let divider = document.getElementById('split-divider');
+      if (!divider) {
+        divider = document.createElement('div');
+        divider.id = 'split-divider';
+        container.appendChild(divider);
+        initSplitDividerDragging(divider);
+      }
 
       if (splitMode === 'vertical') {
         divider.className = 'w-1.5 h-full bg-slate-800 hover:bg-orange-500 cursor-col-resize shrink-0 transition-colors select-none z-20 flex items-center justify-center';
@@ -4433,9 +4444,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         t.mountEl.style.right = '';
         t.mountEl.style.bottom = '';
 
-        if (id === activeTabId) {
+        if (id === dualTabIds[0]) {
           t.mountEl.classList.remove('hidden');
-          t.mountEl.style.border = '2px solid rgba(249, 115, 22, 0.4)';
+          const isFocused = id === activeTabId;
+          t.mountEl.style.border = isFocused ? '2px solid rgba(249, 115, 22, 0.4)' : '2px solid rgba(51, 65, 85, 0.4)';
           if (splitMode === 'vertical') {
             t.mountEl.style.width = `calc(${splitRatio * 100}% - 3px)`;
             t.mountEl.style.height = '100%';
@@ -4444,9 +4456,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             t.mountEl.style.height = `calc(${splitRatio * 100}% - 3px)`;
           }
           container.insertBefore(t.mountEl, divider);
-        } else if (id === secondaryTabId) {
+        } else if (id === dualTabIds[1]) {
           t.mountEl.classList.remove('hidden');
-          t.mountEl.style.border = '2px solid rgba(51, 65, 85, 0.4)';
+          const isFocused = id === activeTabId;
+          t.mountEl.style.border = isFocused ? '2px solid rgba(249, 115, 22, 0.4)' : '2px solid rgba(51, 65, 85, 0.4)';
           if (splitMode === 'vertical') {
             t.mountEl.style.width = `calc(${(1 - splitRatio) * 100}% - 3px)`;
             t.mountEl.style.height = '100%';
@@ -4466,7 +4479,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       setTimeout(() => {
         if (primaryTab.fitAddon) { primaryTab.fitAddon.fit(); sendResize(primaryTab); }
         if (secondaryTab.fitAddon) { secondaryTab.fitAddon.fit(); sendResize(secondaryTab); }
-        if (primaryTab.term) primaryTab.term.focus();
+        const cur = getActiveTab();
+        if (cur && cur.term) cur.term.focus();
       }, 50);
     }
 
@@ -4692,20 +4706,23 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         return;
       }
 
-      if (splitMode !== 'none') {
-        if (tabId === secondaryTabId) {
-          // Switch keyboard focus to secondary pane
-          const temp = activeTabId;
-          activeTabId = secondaryTabId;
-          secondaryTabId = temp;
-        } else {
-          activeTabId = tabId;
+      if (splitMode === 'vertical' || splitMode === 'horizontal') {
+        if (!dualTabIds.includes(tabId)) {
+          const idxToReplace = dualTabIds.indexOf(activeTabId);
+          if (idxToReplace !== -1) {
+            dualTabIds[idxToReplace] = tabId;
+          } else {
+            dualTabIds[0] = tabId;
+          }
         }
+        activeTabId = tabId;
+        secondaryTabId = dualTabIds.find(id => id !== activeTabId) || null;
         const activeTab = tabs[activeTabId];
-        activeTab.hasAlert = false;
+        if (activeTab) activeTab.hasAlert = false;
         applySplitLayout();
         renderTabsList();
         saveTabsState();
+        if (activeTab && activeTab.term) activeTab.term.focus();
         return;
       }
 
@@ -4832,6 +4849,25 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
       }
 
+      if (splitMode === 'vertical' || splitMode === 'horizontal') {
+        const remainingKeys = Object.keys(tabs);
+        if (remainingKeys.length < 2) {
+          setSplitMode('none');
+          return;
+        } else {
+          dualTabIds = dualTabIds.filter(id => id !== tabId);
+          const unused = remainingKeys.find(id => !dualTabIds.includes(id));
+          if (unused) dualTabIds.push(unused);
+          if (activeTabId === tabId) {
+            activeTabId = dualTabIds[0];
+          }
+          secondaryTabId = dualTabIds[1] || null;
+          applySplitLayout();
+          renderTabsList();
+          return;
+        }
+      }
+
       if (activeTabId === tabId) {
         const remaining = Object.keys(tabs);
         if (remaining.length > 0) {
@@ -4948,7 +4984,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const tab = tabs[tabId];
         tab.index = idx + 1;
         const isActive = tabId === activeTabId;
-        const isSecondary = splitMode === 'vertical' || splitMode === 'horizontal' ? tabId === secondaryTabId : false;
+        const isDual = splitMode === 'vertical' || splitMode === 'horizontal';
+        const dualPaneIdx = isDual ? dualTabIds.indexOf(tabId) : -1;
         const gridPaneIdx = splitMode === 'grid' ? gridTabIds.indexOf(tabId) : -1;
         const isTripleMode = splitMode === 'triple-left' || splitMode === 'triple-col';
         const triplePaneIdx = isTripleMode ? tripleTabIds.indexOf(tabId) : -1;
@@ -4966,10 +5003,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             ? 'bg-orange-950 text-orange-400 border-orange-800'
             : 'bg-slate-800 text-slate-400 border-slate-700';
           splitBadge = `<span class="text-[9px] px-1 py-0.2 rounded font-sans border ${badgeClass}">Pane ${triplePaneIdx + 1}</span>`;
-        } else if (isSecondary) {
-          splitBadge = '<span class="text-[9px] px-1 py-0.2 rounded bg-slate-800 text-slate-400 font-sans border border-slate-700">Pane 2</span>';
-        } else if (isActive && splitMode !== 'none' && splitMode !== 'grid' && !isTripleMode) {
-          splitBadge = '<span class="text-[9px] px-1 py-0.2 rounded bg-orange-950 text-orange-400 font-sans border border-orange-800">Pane 1</span>';
+        } else if (isDual && dualPaneIdx !== -1) {
+          const badgeClass = isActive
+            ? 'bg-orange-950 text-orange-400 border-orange-800'
+            : 'bg-slate-800 text-slate-400 border-slate-700';
+          splitBadge = `<span class="text-[9px] px-1 py-0.2 rounded font-sans border ${badgeClass}">Pane ${dualPaneIdx + 1}</span>`;
         }
 
         const closeBtn = tabKeys.length > 1 ? `
@@ -4981,7 +5019,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         let borderClass = 'bg-slate-950/70 text-slate-400 border-transparent hover:bg-slate-900/60 hover:text-slate-200';
         if (isActive) {
           borderClass = 'bg-slate-900 text-white border-orange-500 shadow-md font-semibold';
-        } else if (isSecondary || (splitMode === 'grid' && gridPaneIdx !== -1) || (isTripleMode && triplePaneIdx !== -1)) {
+        } else if ((isDual && dualPaneIdx !== -1) || (splitMode === 'grid' && gridPaneIdx !== -1) || (isTripleMode && triplePaneIdx !== -1)) {
           borderClass = 'bg-slate-900/80 text-slate-200 border-slate-600 shadow-sm';
         }
 
