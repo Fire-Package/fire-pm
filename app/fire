@@ -2097,12 +2097,55 @@ ensure_nginx_custom_tunnel_config() {
   mkdir -p /etc/nginx/conf.d /etc/fire-pm/ssl
   touch "$TUNNEL_NGINX_MAP"
 
-  # If Nginx already tests ok, preserve existing configuration!
-  if nginx -t >/dev/null 2>&1; then
+  # Ensure tunnel_map.conf exists and defines the map if not already defined anywhere in Nginx
+  if ! grep -rq 'map \$host \$fire_tunnel_port' /etc/nginx/conf.d/ /etc/nginx/sites-enabled/ 2>/dev/null; then
+    cat > /etc/nginx/conf.d/tunnel_map.conf <<EOF
+map \$host \$fire_tunnel_port {
+    default "";
+    include $TUNNEL_NGINX_MAP;
+}
+EOF
+  fi
+
+  # Ensure Cloudflare Real-IP configuration exists
+  if [[ ! -f /etc/nginx/conf.d/cloudflare.conf ]]; then
+    cat > /etc/nginx/conf.d/cloudflare.conf <<'CFEOF'
+# Cloudflare Real IP configuration
+set_real_ip_from 173.245.48.0/20;
+set_real_ip_from 103.21.244.0/22;
+set_real_ip_from 103.22.200.0/22;
+set_real_ip_from 103.31.4.0/22;
+set_real_ip_from 141.101.64.0/18;
+set_real_ip_from 108.162.192.0/18;
+set_real_ip_from 190.93.240.0/20;
+set_real_ip_from 188.114.96.0/20;
+set_real_ip_from 197.234.240.0/22;
+set_real_ip_from 198.41.128.0/17;
+set_real_ip_from 162.158.0.0/15;
+set_real_ip_from 104.16.0.0/13;
+set_real_ip_from 104.24.0.0/14;
+set_real_ip_from 172.64.0.0/13;
+set_real_ip_from 131.0.72.0/22;
+set_real_ip_from 2400:cb00::/32;
+set_real_ip_from 2606:4700::/32;
+set_real_ip_from 2803:f800::/32;
+set_real_ip_from 2405:b500::/32;
+set_real_ip_from 2405:8100::/32;
+set_real_ip_from 2a06:98c0::/29;
+set_real_ip_from 2c0f:f248::/32;
+real_ip_header CF-Connecting-IP;
+real_ip_recursive on;
+CFEOF
+  fi
+
+  local domain_regex="${TUNNEL_BASE_DOMAIN//./\\.}"
+
+  # If an existing site configuration already handles this tunnel domain regex, preserve it!
+  if grep -rq "$domain_regex" /etc/nginx/sites-enabled/ 2>/dev/null; then
     return 0
   fi
 
-  local conf_file="/etc/nginx/conf.d/fire-tunnel.conf"
+  # SSL certificate handling: check for custom cert or auto-generate origin cert
   local ssl_cert="/etc/fire-pm/ssl/cert.pem"
   local ssl_key="/etc/fire-pm/ssl/key.pem"
 
@@ -2123,13 +2166,10 @@ ensure_nginx_custom_tunnel_config() {
     ssl_key="/etc/fire-pm/ssl/key.pem"
   fi
 
-  local domain_regex="${TUNNEL_BASE_DOMAIN//./\\.}"
-  cat > "$conf_file" <<EOF
-map \$host \$fire_tunnel_port {
-    default "";
-    include $TUNNEL_NGINX_MAP;
-}
+  local conf_file="/etc/nginx/conf.d/fire-tunnel.conf"
+  local tmp_conf="/etc/nginx/conf.d/fire-tunnel.conf.tmp"
 
+  cat > "$tmp_conf" <<EOF
 server {
     listen 80;
     listen [::]:80;
@@ -2139,6 +2179,8 @@ server {
 
     ssl_certificate $ssl_cert;
     ssl_certificate_key $ssl_key;
+
+    client_max_body_size 500M;
 
     location / {
         default_type text/html;
@@ -2167,8 +2209,16 @@ server {
 }
 EOF
 
-  # Clean up old locations that caused map or variable conflicts
-  rm -f /etc/nginx/sites-enabled/fire-tunnel.conf /etc/nginx/sites-available/fire-tunnel.conf /etc/nginx/tunnel_map.conf 2>/dev/null || true
+  # Atomic test: only replace real conf if nginx -t passes!
+  if nginx -t >/dev/null 2>&1; then
+    mv -f "$tmp_conf" "$conf_file"
+    systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null || true
+  else
+    rm -f "$tmp_conf"
+    warn "Nginx configuration test failed. Existing Nginx configuration was preserved."
+    return 1
+  fi
+
   return 0
 }
 
@@ -2220,18 +2270,49 @@ action_tunnel_setup() {
   echo -e "${GREY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
   echo ""
   echo -e "Configure your own domain for wildcard reverse-proxy tunnels."
-  echo -e "${GREY}Requirements: Wildcard DNS (*.yourdomain.com -> Server IP) and SSL certificate.${NC}"
+  echo -e "${GREY}Requirements: Point a wildcard DNS record (*.yourdomain.com) to this VPS IP on Cloudflare (Proxied ☁️).${NC}"
   echo ""
 
-  read -r -p "Enter your base domain (e.g. mydomain.com or tunnel.mydomain.com): " input_domain
+  local input_domain=""
+  local input_cert=""
+  local input_key=""
+
+  for arg in "${ARGS[@]}"; do
+    case "$arg" in
+      --domain=*)
+        input_domain="${arg#*=}"
+        ;;
+      --cert=*)
+        input_cert="${arg#*=}"
+        ;;
+      --key=*)
+        input_key="${arg#*=}"
+        ;;
+    esac
+  done
+
+  if [[ -z "$input_domain" ]]; then
+    read -r -p "Enter your base domain (e.g. mydomain.com or tunnel.mydomain.com): " input_domain
+  fi
   [[ -z "$input_domain" ]] && error "Domain cannot be empty." && exit 1
   if [[ ! "$input_domain" =~ ^[a-zA-Z0-9.-]+$ ]]; then
     error "Invalid domain name format."
     exit 1
   fi
 
-  read -r -p "Enter SSL Certificate path (fullchain.pem) [leave blank for automatic certificate]: " input_cert
-  read -r -p "Enter SSL Private Key path (privkey.pem) [leave blank for automatic certificate]: " input_key
+  # Cloudflare proxy handles SSL at edge. Prompt only if user wants custom SSL certificates
+  if [[ -z "$input_cert" && -z "$input_key" ]]; then
+    echo ""
+    echo -e "${GREEN}✔${NC} ${BOLD}Cloudflare Proxy Mode Enabled${NC}"
+    echo -e "  Cloudflare automatically terminates SSL and provides HTTPS at the edge."
+    echo -e "  No local certificate files (.pem) required."
+    echo ""
+    read -r -p "Do you want to provide custom SSL certificate files? [y/N]: " ask_custom_ssl
+    if [[ "$ask_custom_ssl" =~ ^[yY] ]]; then
+      read -r -p "Enter SSL Certificate path (fullchain.pem): " input_cert
+      read -r -p "Enter SSL Private Key path (privkey.pem): " input_key
+    fi
+  fi
 
   mkdir -p /etc/fire-pm /etc/nginx
   chmod 0700 /etc/fire-pm 2>/dev/null || true
@@ -2264,14 +2345,9 @@ PYEOF
 
   ensure_nginx_custom_tunnel_config
 
-  if command -v nginx &>/dev/null; then
-    if nginx -t >/dev/null 2>&1; then
-      systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null || true
-    fi
-  fi
-
   success "Custom tunnel domain configured for ${CYAN}$input_domain${NC}"
-  echo -e "  You can now open tunnels with: ${YELLOW}fire tunnel open <port>${NC}\n"
+  echo -e "  ${GREY}•${NC} Cloudflare DNS: Ensure ${CYAN}*.$input_domain${NC} points to your server IP with Cloudflare proxy ${YELLOW}☁️ ON${NC}"
+  echo -e "  ${GREY}•${NC} Open tunnels anytime: ${YELLOW}fire tunnel open <port>${NC}\n"
 }
 
 action_tunnel_open() {
