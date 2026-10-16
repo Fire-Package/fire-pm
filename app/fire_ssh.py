@@ -942,11 +942,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       touch-action: pan-x;
       scroll-behavior: smooth;
     }
-    /* Hide mobile accessory keypad bar on desktop / fine-pointer viewports */
-    @media (hover: hover) and (pointer: fine) {
-      #mobile-accessory-bar {
-        display: none !important;
-      }
+    /* Drag and drop tab reordering styles */
+    .tab-item {
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+    }
+    .tab-item.tab-dragging {
+      opacity: 0.45;
+      transform: scale(0.97);
+    }
+    .tab-item.tab-drag-over-left {
+      border-left: 2px solid #f97316 !important;
+    }
+    .tab-item.tab-drag-over-right {
+      border-right: 2px solid #f97316 !important;
     }
   </style>
 </head>
@@ -1227,6 +1238,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             </button>
 
             <div class="border-t border-slate-800 pt-1">
+              <div class="flex items-center justify-between px-2.5 py-1.5 text-slate-300">
+                <span class="flex items-center gap-1.5"><span>📑</span> Move Tab</span>
+                <div class="flex items-center space-x-1.5">
+                  <button onclick="if(activeTabId) moveTab(activeTabId, -1)" class="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 font-mono text-[11px]" title="Move Tab Left">◀ Left</button>
+                  <button onclick="if(activeTabId) moveTab(activeTabId, 1)" class="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 font-mono text-[11px]" title="Move Tab Right">Right ▶</button>
+                </div>
+              </div>
               <button onclick="promptUpdateTitle(); closeMobileActionsMenu()" class="w-full px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 rounded-lg flex items-center gap-2 transition">
                 <span>🏷️</span> <span>Rename Session</span>
               </button>
@@ -4715,6 +4733,98 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (activeTabId) closeTab(activeTabId);
     }
 
+    let draggedTabId = null;
+
+    function moveTab(tabId, direction) {
+      const keys = Object.keys(tabs);
+      const curIdx = keys.indexOf(tabId);
+      if (curIdx === -1) return;
+      const targetIdx = curIdx + direction;
+      if (targetIdx < 0 || targetIdx >= keys.length) return;
+
+      const newOrder = [...keys];
+      const [removed] = newOrder.splice(curIdx, 1);
+      newOrder.splice(targetIdx, 0, removed);
+
+      const reorderedTabs = {};
+      newOrder.forEach(id => {
+        reorderedTabs[id] = tabs[id];
+      });
+      tabs = reorderedTabs;
+
+      renderTabsList();
+      saveTabsState();
+      showToast(`Tab moved ${direction < 0 ? 'left' : 'right'}`);
+    }
+
+    function reorderTabTo(draggedId, targetId, placeAfter) {
+      if (!draggedId || !targetId || draggedId === targetId) return;
+      const keys = Object.keys(tabs);
+      const fromIdx = keys.indexOf(draggedId);
+      const toIdx = keys.indexOf(targetId);
+      if (fromIdx === -1 || toIdx === -1) return;
+
+      const newOrder = [...keys];
+      newOrder.splice(fromIdx, 1);
+      const insertIdx = newOrder.indexOf(targetId) + (placeAfter ? 1 : 0);
+      newOrder.splice(insertIdx, 0, draggedId);
+
+      const reorderedTabs = {};
+      newOrder.forEach(id => {
+        reorderedTabs[id] = tabs[id];
+      });
+      tabs = reorderedTabs;
+
+      renderTabsList();
+      saveTabsState();
+    }
+
+    function handleTabDragStart(e, tabId) {
+      draggedTabId = tabId;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', tabId);
+      const tabEl = e.currentTarget;
+      setTimeout(() => {
+        if (tabEl) tabEl.classList.add('tab-dragging');
+      }, 0);
+    }
+
+    function handleTabDragOver(e, tabId) {
+      if (!draggedTabId || draggedTabId === tabId) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const rect = e.currentTarget.getBoundingClientRect();
+      const midpoint = rect.left + rect.width / 2;
+      e.currentTarget.classList.remove('tab-drag-over-left', 'tab-drag-over-right');
+      if (e.clientX < midpoint) {
+        e.currentTarget.classList.add('tab-drag-over-left');
+      } else {
+        e.currentTarget.classList.add('tab-drag-over-right');
+      }
+    }
+
+    function handleTabDragLeave(e) {
+      e.currentTarget.classList.remove('tab-drag-over-left', 'tab-drag-over-right');
+    }
+
+    function handleTabDrop(e, targetId) {
+      e.preventDefault();
+      e.currentTarget.classList.remove('tab-drag-over-left', 'tab-drag-over-right');
+      if (!draggedTabId || draggedTabId === targetId) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const placeAfter = e.clientX >= (rect.left + rect.width / 2);
+      reorderTabTo(draggedTabId, targetId, placeAfter);
+      draggedTabId = null;
+    }
+
+    function handleTabDragEnd(e) {
+      e.currentTarget.classList.remove('tab-dragging', 'tab-drag-over-left', 'tab-drag-over-right');
+      document.querySelectorAll('.tab-item').forEach(el => {
+        el.classList.remove('tab-dragging', 'tab-drag-over-left', 'tab-drag-over-right');
+      });
+      draggedTabId = null;
+    }
+
     function renderTabsList() {
       const listEl = document.getElementById('tabs-list');
       if (!listEl) return;
@@ -4763,10 +4873,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         return `
-          <div onclick="switchTab('${tabId}')" ondblclick="event.stopPropagation(); promptRenameTab('${tabId}')" title="Click to switch, double-click to rename" class="group flex items-center gap-1.5 px-3 py-1 rounded-t-lg text-xs font-mono cursor-pointer transition select-none border-t-2 ${borderClass}">
+          <div onclick="switchTab('${tabId}')"
+               ondblclick="event.stopPropagation(); promptRenameTab('${tabId}')"
+               draggable="true"
+               ondragstart="handleTabDragStart(event, '${tabId}')"
+               ondragover="handleTabDragOver(event, '${tabId}')"
+               ondragleave="handleTabDragLeave(event)"
+               ondrop="handleTabDrop(event, '${tabId}')"
+               ondragend="handleTabDragEnd(event)"
+               data-tab-id="${tabId}"
+               title="Click to switch, drag to reorder, double-click to rename (Ctrl+Shift+←/→ to move)"
+               class="tab-item group flex items-center gap-1.5 px-3 py-1 rounded-t-lg text-xs font-mono cursor-pointer transition select-none border-t-2 ${borderClass}">
             <span class="w-1.5 h-1.5 rounded-full ${statusDot} shrink-0"></span>
             ${alertBadge}
-            <span class="truncate max-w-[100px] sm:max-w-[140px]">${tab.index}: ${safeTitle}</span>
+            <span class="truncate max-w-[100px] sm:max-w-[140px] pointer-events-none">${tab.index}: ${safeTitle}</span>
             ${splitBadge}
             ${closeBtn}
           </div>
@@ -4971,6 +5091,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           if (e.altKey && (e.key === 'o' || e.key === 'O')) {
             e.preventDefault();
             cycleSplitFocus();
+            return false;
+          }
+
+          // Ctrl+Shift+Left / Ctrl+Shift+Right or PageUp / PageDown: Move / Reorder Tab
+          if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'PageUp' || e.key === 'PageDown' || e.key === 'Left' || e.key === 'Right')) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (activeTabId) {
+              const isLeft = (e.key === 'ArrowLeft' || e.key === 'Left' || e.key === 'PageUp');
+              moveTab(activeTabId, isLeft ? -1 : 1);
+            }
             return false;
           }
 
@@ -5429,6 +5560,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               const next = (curIdx + 1) % tabKeys.length;
               switchTab(tabKeys[next]);
             }
+          }
+          return;
+        }
+
+        // Ctrl+Shift+Left / Ctrl+Shift+Right or Ctrl+Shift+PageUp / PageDown: Move / Reorder active tab
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'PageUp' || e.key === 'PageDown' || e.key === 'Left' || e.key === 'Right')) {
+          e.preventDefault();
+          if (activeTabId) {
+            const isLeft = (e.key === 'ArrowLeft' || e.key === 'Left' || e.key === 'PageUp');
+            moveTab(activeTabId, isLeft ? -1 : 1);
           }
           return;
         }
