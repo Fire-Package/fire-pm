@@ -343,12 +343,22 @@ def ws_read_frame(sock: socket.socket) -> tuple:
 
     data = bytearray()
     while len(data) < payload_len:
-        chunk = sock.recv(min(4096, payload_len - len(data)))
+        chunk = sock.recv(min(8192, payload_len - len(data)))
         if not chunk:
             break
         data.extend(chunk)
 
-    unmasked = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+    if not data:
+        return opcode, b""
+    if len(data) < 32:
+        unmasked = bytes(b ^ mask[i & 3] for i, b in enumerate(data))
+    else:
+        m0, m1, m2, m3 = mask[0], mask[1], mask[2], mask[3]
+        data[0::4] = bytes(b ^ m0 for b in data[0::4])
+        data[1::4] = bytes(b ^ m1 for b in data[1::4])
+        data[2::4] = bytes(b ^ m2 for b in data[2::4])
+        data[3::4] = bytes(b ^ m3 for b in data[3::4])
+        unmasked = bytes(data)
     return opcode, unmasked
 
 
@@ -545,6 +555,7 @@ class TerminalSession:
                 self.active_cmd_pgid = fg_pgid
 
     def _pty_reader_loop(self):
+        last_proc_check = 0.0
         while not self.closed:
             try:
                 if self.pid:
@@ -558,22 +569,39 @@ class TerminalSession:
                         break
 
                 rlist, _, _ = select.select([self.master_fd], [], [], 0.5)
-                self._check_fg_process()
+                now = time.time()
+                if now - last_proc_check >= 0.5:
+                    self._check_fg_process()
+                    last_proc_check = now
+
                 if not rlist:
                     continue
 
-                data = os.read(self.master_fd, 8192)
+                data = os.read(self.master_fd, 16384)
                 if not data:
                     self.closed = True
                     break
 
+                # Drain any immediate burst chunks from PTY buffer without re-selecting
+                burst_chunks = [data]
+                while True:
+                    try:
+                        extra = os.read(self.master_fd, 65536)
+                        if not extra:
+                            break
+                        burst_chunks.append(extra)
+                    except (BlockingIOError, InterruptedError):
+                        break
+
+                total_data = b"".join(burst_chunks) if len(burst_chunks) > 1 else data
+
                 with self.buffer_lock:
-                    self.output_buffer.extend(data)
+                    self.output_buffer.extend(total_data)
                     if len(self.output_buffer) > SCROLLBACK_BUFFER_SIZE:
                         self.output_buffer = self.output_buffer[-SCROLLBACK_BUFFER_SIZE:]
 
                 with self.sock_lock:
-                    frame = ws_make_frame(data, opcode=2)
+                    frame = ws_make_frame(total_data, opcode=2)
                     self._broadcast_frame_unlocked(frame)
             except (BlockingIOError, InterruptedError):
                 continue
@@ -1852,7 +1880,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const cur = getActiveTab();
       const s = cur && cur.socket ? cur.socket : socket;
       if (s && s.readyState === WebSocket.OPEN) {
-        s.send(JSON.stringify({ type: 'input', data }));
+        if (typeof data === 'string') {
+          s.send(new TextEncoder().encode(data));
+        } else {
+          s.send(data);
+        }
       }
     }
 
@@ -4992,7 +5024,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             return;
           }
           if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
-            tab.socket.send(JSON.stringify({ type: 'input', data }));
+            tab.socket.send(new TextEncoder().encode(data));
           }
         });
       }
