@@ -34,7 +34,8 @@ if [[ -z "$TUNNEL_BASE_DOMAIN" ]]; then
     [[ -f "$_conf" ]] || continue
     _nginx_dom=$(grep -E 'server_name\s+' "$_conf" 2>/dev/null | grep -oE '[a-zA-Z0-9-]+\.[a-zA-Z0-9.-]+' | grep -vE '^(127\.0\.0\.1|localhost)$' | head -1)
     if [[ -n "$_nginx_dom" ]]; then
-      _nginx_base="${_nginx_dom#tunnel.}"
+      _nginx_base="${_nginx_dom#*-tunnel.}"
+      _nginx_base="${_nginx_base#tunnel.}"
       TUNNEL_BASE_DOMAIN="$_nginx_base"
       TUNNEL_DOMAIN="tunnel.$_nginx_base"
       TUNNEL_DEFAULT_PROVIDER="custom"
@@ -2140,8 +2141,24 @@ CFEOF
 
   local domain_regex="${TUNNEL_BASE_DOMAIN//./\\.}"
 
-  # If an existing site configuration already handles this tunnel domain regex, preserve it!
-  if grep -rq "$domain_regex" /etc/nginx/sites-enabled/ 2>/dev/null; then
+  # Check if an existing site configuration already handles tunnels for this domain
+  local has_tunnel_conf=0
+  for _f in /etc/nginx/sites-enabled/* /etc/nginx/conf.d/*.conf; do
+    [[ -e "$_f" ]] || continue
+    [[ "$_f" == "/etc/nginx/conf.d/fire-tunnel.conf" || "$_f" == "/etc/nginx/conf.d/fire-tunnel.conf.tmp" || "$_f" == "/etc/nginx/conf.d/tunnel_map.conf" || "$_f" == "/etc/nginx/conf.d/cloudflare.conf" ]] && continue
+    if grep -q "fire_tunnel_port" "$_f" 2>/dev/null && grep -q "$TUNNEL_BASE_DOMAIN" "$_f" 2>/dev/null; then
+      has_tunnel_conf=1
+      break
+    fi
+  done
+
+  if [[ $has_tunnel_conf -eq 1 ]]; then
+    # An existing custom virtual host already handles tunnels for this domain!
+    # Remove any conflicting conf.d/fire-tunnel.conf so it does not collide with apex domain or SSL
+    if [[ -f /etc/nginx/conf.d/fire-tunnel.conf ]]; then
+      rm -f /etc/nginx/conf.d/fire-tunnel.conf
+      systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null || true
+    fi
     return 0
   fi
 
@@ -2175,7 +2192,7 @@ server {
     listen [::]:80;
     listen 443 ssl;
     listen [::]:443 ssl;
-    server_name $TUNNEL_BASE_DOMAIN "~^[a-z0-9]{8,10}-tunnel\\.${domain_regex}\$";
+    server_name "~^[a-z0-9]{8,10}-tunnel\\.${domain_regex}\$";
 
     ssl_certificate $ssl_cert;
     ssl_certificate_key $ssl_key;
