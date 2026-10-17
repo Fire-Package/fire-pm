@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 ## [Unreleased]
 
 ### Fixed
+* Isolate custom tunnel Nginx `server_name` strictly to `~^[a-z0-9]{8,10}-tunnel\.` subdomains to prevent hijacking apex domains or conflicting with existing virtual hosts ([#100](https://github.com/Fire-Package/fire-pm/issues/100), [#101](https://github.com/Fire-Package/fire-pm/pull/101)).
 * Prevent dual split terminal panes from physically flipping positions on screen when clicking panes or switching tabs ([#98](https://github.com/Fire-Package/fire-pm/issues/98), [#99](https://github.com/Fire-Package/fire-pm/pull/99)).
 
 ### Added
