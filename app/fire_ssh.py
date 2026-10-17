@@ -7004,6 +7004,7 @@ def main():
     p_start.add_argument("--hash", type=str, help="Hash hex for PBKDF2 verification")
     p_start.add_argument("--shell", type=str, help="Target shell executable")
     p_start.add_argument("--title", type=str, default="", help="Web terminal session title")
+    p_start.add_argument("--name", "-n", type=str, default="", help="Web terminal session name (alias for title)")
 
     p_hash = subparsers.add_parser("hash-password", help="Hash password using PBKDF2-HMAC-SHA256")
     p_hash.add_argument("password", type=str, help="Plaintext password to hash")
@@ -7039,7 +7040,8 @@ def main():
                 plain_pw = sys.stdin.readline().rstrip('\r\n')
             except Exception:
                 plain_pw = None
-        run_server(args.port, plain_password=plain_pw, salt_hex=args.salt, hash_hex=args.hash, shell=args.shell, title=getattr(args, "title", None))
+        session_title = args.title or getattr(args, "name", None) or None
+        run_server(args.port, plain_password=plain_pw, salt_hex=args.salt, hash_hex=args.hash, shell=args.shell, title=session_title)
 
     elif args.command == "title":
         import urllib.request

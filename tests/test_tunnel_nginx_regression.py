@@ -21,7 +21,8 @@ class TunnelNginxRegressionTests(unittest.TestCase):
         self.assertIsNotNone(match, "server_name directive should exist in template")
         server_name_value = match.group(1).strip()
         self.assertNotIn("{{TUNNEL_DOMAIN}}", server_name_value, "Template server_name must not include {{TUNNEL_DOMAIN}}")
-        self.assertIn("~^[a-z0-9]{8,10}-tunnel", server_name_value, "Template server_name must match hash-tunnel regex")
+        self.assertIn("-tunnel", server_name_value, "Template server_name must match tunnel subdomain regex")
+        self.assertIn("~^[a-z0-9][a-z0-9-]{1,62}-tunnel", server_name_value)
 
     def test_cli_ensure_nginx_config_excludes_apex_domain(self):
         """Verify app/fire does not include $TUNNEL_BASE_DOMAIN in server_name."""
@@ -30,22 +31,28 @@ class TunnelNginxRegressionTests(unittest.TestCase):
         self.assertIsNotNone(match, "ensure_nginx_custom_tunnel_config function should exist")
         fn_body = match.group(1)
         self.assertNotIn('server_name $TUNNEL_BASE_DOMAIN', fn_body, "CLI server_name must not include $TUNNEL_BASE_DOMAIN")
-        self.assertIn('server_name "~^[a-z0-9]{8,10}-tunnel', fn_body, "CLI server_name must match hash-tunnel regex")
+        self.assertIn('server_name "~^[a-z0-9][a-z0-9-]{1,62}-tunnel', fn_body, "CLI server_name must match tunnel subdomain regex")
 
     def test_tunnel_subdomain_regex_matching(self):
-        """Verify the Nginx server_name regex matches only hash-tunnel subdomains and rejects apex domains."""
+        """Verify the Nginx server_name regex matches hash-tunnel and custom named subdomains, while rejecting apex domains."""
         domain = "example.com"
         domain_regex = domain.replace(".", r"\.")
-        pattern = re.compile(rf"^[a-z0-9]{{8,10}}-tunnel\.{domain_regex}$")
+        pattern = re.compile(rf"^[a-z0-9][a-z0-9-]{{1,62}}-tunnel\.{domain_regex}$")
 
-        # Valid tunnel subdomains
+        # Valid random hashes
         self.assertTrue(pattern.match("18p89kn6cs-tunnel.example.com"))
         self.assertTrue(pattern.match("abcd1234-tunnel.example.com"))
 
-        # Must NOT match bare apex/base domain
+        # Valid custom named subdomains
+        self.assertTrue(pattern.match("api-tunnel.example.com"))
+        self.assertTrue(pattern.match("myapp-tunnel.example.com"))
+        self.assertTrue(pattern.match("web-service-1-tunnel.example.com"))
+
+        # Must NOT match bare apex/base domain or non-tunnel subdomains
         self.assertFalse(pattern.match("example.com"))
         self.assertFalse(pattern.match("www.example.com"))
         self.assertFalse(pattern.match("tunnel.example.com"))
+        self.assertFalse(pattern.match("api.example.com"))
         self.assertFalse(pattern.match("otherdomain.com"))
 
 

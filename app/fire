@@ -510,6 +510,7 @@ reset_tunnel_state() {
   TUNNEL_STATE_LOG_FILE=""
   TUNNEL_STATE_START_TS=""
   TUNNEL_STATE_PROVIDER=""
+  TUNNEL_STATE_NAME=""
 }
 
 read_tunnel_state() {
@@ -530,6 +531,7 @@ read_tunnel_state() {
       LOG_FILE) TUNNEL_STATE_LOG_FILE="$value" ;;
       START_TS) TUNNEL_STATE_START_TS="$value" ;;
       PROVIDER) TUNNEL_STATE_PROVIDER="$value" ;;
+      NAME) TUNNEL_STATE_NAME="$value" ;;
     esac
   done < "$state_file"
 
@@ -543,6 +545,7 @@ write_tunnel_state() {
   local log_file="$4"
   local start_ts="$5"
   local provider="${6:-quick}"
+  local name="${7:-}"
   local state_file
 
   ensure_tunnel_dir
@@ -557,6 +560,7 @@ URL=$url
 LOG_FILE=$log_file
 START_TS=$start_ts
 PROVIDER=$provider
+NAME=$name
 EOF
   chmod 600 "$state_file" 2>/dev/null || true
   if [[ -n "$log_file" && -f "$log_file" && ! -L "$log_file" ]]; then
@@ -620,7 +624,7 @@ load_active_tunnel_state() {
 
   # 2. Custom Nginx-based tunnel
   host="${TUNNEL_STATE_URL#https://}"
-  if [[ -n "$TUNNEL_BASE_DOMAIN" && "$host" =~ ^[a-z0-9]{8,10}${TUNNEL_HOST_SUFFIX}\.${TUNNEL_BASE_DOMAIN}$ ]]; then
+  if [[ -n "$TUNNEL_BASE_DOMAIN" && "$host" =~ ^[a-z0-9][a-z0-9-]{1,62}${TUNNEL_HOST_SUFFIX}\.${TUNNEL_BASE_DOMAIN}$ ]]; then
     mapped_port=$(awk -v h="$host" '$1 == h { gsub(/;/, "", $2); print $2; exit }' "$TUNNEL_NGINX_MAP" 2>/dev/null)
     if [[ "$mapped_port" == "$port" ]]; then
       return 0
@@ -647,17 +651,17 @@ tunnel_hash_from_url() {
   local url="$1"
   local host="${url#https://}"
 
-  if [[ "$host" =~ ^[a-z0-9]{8,10}${TUNNEL_HOST_SUFFIX}\.${TUNNEL_BASE_DOMAIN}$ ]]; then
+  if [[ "$host" =~ ^[a-z0-9][a-z0-9-]{1,62}${TUNNEL_HOST_SUFFIX}\.${TUNNEL_BASE_DOMAIN}$ ]]; then
     echo "${host%%${TUNNEL_HOST_SUFFIX}.${TUNNEL_BASE_DOMAIN}}"
     return 0
   fi
 
-  if [[ "$host" =~ ^[a-z0-9]{8,10}\.${TUNNEL_DOMAIN}$ ]]; then
+  if [[ "$host" =~ ^[a-z0-9][a-z0-9-]{1,62}\.${TUNNEL_DOMAIN}$ ]]; then
     echo "${host%%.*}"
     return 0
   fi
 
-  if [[ "$url" =~ ^https://${TUNNEL_DOMAIN}/[a-z0-9]{8,10}$ ]]; then
+  if [[ "$url" =~ ^https://${TUNNEL_DOMAIN}/[a-z0-9][a-z0-9-]{1,62}$ ]]; then
     echo "${url##*/}"
     return 0
   fi
@@ -677,9 +681,9 @@ nginx_map_get_hash_for_port() {
   key=$(nginx_map_key_for_port "$port")
   [[ -n "$key" ]] || return 1
 
-  if [[ "$key" =~ ^[a-z0-9]{8,10}${TUNNEL_HOST_SUFFIX}\.${TUNNEL_BASE_DOMAIN}$ ]]; then
+  if [[ "$key" =~ ^[a-z0-9][a-z0-9-]{1,62}${TUNNEL_HOST_SUFFIX}\.${TUNNEL_BASE_DOMAIN}$ ]]; then
     echo "${key%%${TUNNEL_HOST_SUFFIX}.${TUNNEL_BASE_DOMAIN}}"
-  elif [[ "$key" =~ ^[a-z0-9]{8,10}\.${TUNNEL_DOMAIN}$ ]]; then
+  elif [[ "$key" =~ ^[a-z0-9][a-z0-9-]{1,62}\.${TUNNEL_DOMAIN}$ ]]; then
     echo "${key%%.*}"
   else
     echo "$key"
@@ -698,9 +702,9 @@ nginx_map_add() {
 
   # Keep one live mapping per host/hash and per local port.
   sed -i "/^${key//./\\.} /d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
-  sed -i "/^[a-z0-9]\{8,10\}${TUNNEL_HOST_SUFFIX//./\\.}\\.${TUNNEL_BASE_DOMAIN//./\\.} ${port};$/d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
-  sed -i "/^[a-z0-9]\{8,10\}\\.${TUNNEL_DOMAIN//./\\.} ${port};$/d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
-  sed -i "/^[a-z0-9]\{8,10\} ${port};$/d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
+  sed -i "/^[a-z0-9-]\+${TUNNEL_HOST_SUFFIX//./\\.}\\.${TUNNEL_BASE_DOMAIN//./\\.} ${port};$/d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
+  sed -i "/^[a-z0-9-]\+\\.${TUNNEL_DOMAIN//./\\.} ${port};$/d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
+  sed -i "/^[a-z0-9-]\+ ${port};$/d" "$TUNNEL_NGINX_MAP" 2>/dev/null || true
   echo "${key} ${port};" >> "$TUNNEL_NGINX_MAP"
 
   # Validate nginx configuration
@@ -947,6 +951,18 @@ parse_args() {
       --name)
         NAME_OPT="$2"
         shift 2
+        ;;
+      --name=*)
+        NAME_OPT="${1#*=}"
+        shift
+        ;;
+      -n)
+        NAME_OPT="$2"
+        shift 2
+        ;;
+      -n=*)
+        NAME_OPT="${1#*=}"
+        shift
         ;;
       --interpreter)
         INTERPRETER_OPT="$2"
@@ -2029,6 +2045,7 @@ install_cloudflared() {
 open_quick_tunnel() {
   local port="$1"
   local start_ts="$2"
+  local custom_name="${3:-}"
 
   info "Starting zero-config Cloudflare Quick Tunnel for localhost:$port..."
 
@@ -2085,7 +2102,7 @@ open_quick_tunnel() {
   fi
 
   # Save state
-  write_tunnel_state "$port" "$tunnel_pid" "$url" "$log_file" "$start_ts" "quick"
+  write_tunnel_state "$port" "$tunnel_pid" "$url" "$log_file" "$start_ts" "quick" "$custom_name"
 
   success "Quick Tunnel established for ${CYAN}localhost:$port${NC}"
   echo -e "  ${ORANGE}🔗${NC} ${YELLOW}${BOLD}URL:${NC} ${CYAN}${BOLD}$url${NC}"
@@ -2192,7 +2209,7 @@ server {
     listen [::]:80;
     listen 443 ssl;
     listen [::]:443 ssl;
-    server_name "~^[a-z0-9]{8,10}-tunnel\\.${domain_regex}\$";
+    server_name "~^[a-z0-9][a-z0-9-]{1,62}-tunnel\\.${domain_regex}\$";
 
     ssl_certificate $ssl_cert;
     ssl_certificate_key $ssl_key;
@@ -2242,10 +2259,11 @@ EOF
 open_custom_tunnel() {
   local port="$1"
   local start_ts="$2"
+  local custom_name="${3:-}"
 
   if [[ -z "$TUNNEL_BASE_DOMAIN" ]]; then
     warn "No custom domain configured. Run 'fire tunnel setup' first or use '--provider quick'."
-    open_quick_tunnel "$port" "$start_ts"
+    open_quick_tunnel "$port" "$start_ts" "$custom_name"
     return
   fi
 
@@ -2256,12 +2274,33 @@ open_custom_tunnel() {
 
   ensure_nginx_custom_tunnel_config
 
-  # Generate 10-char lowercase alphanumeric hash
-  local hash
-  hash=$(tr -dc 'a-z0-9' < /dev/urandom 2>/dev/null | head -c 10)
-  if [[ ${#hash} -ne 10 ]]; then
-    hash=$(openssl rand -hex 5 2>/dev/null || cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 10)
+  local hash=""
+  if [[ -n "$custom_name" ]]; then
+    # Sanitize custom name: lowercase, replace underscores with hyphens, keep only alphanumeric and hyphens
+    hash=$(echo "$custom_name" | tr '[:upper:]' '[:lower:]' | tr '_' '-' | tr -cd 'a-z0-9-')
+    # Strip leading/trailing hyphens
+    hash="${hash#-}"
+    hash="${hash%-}"
+    if [[ -z "$hash" || ! "$hash" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]]; then
+      error "Invalid tunnel name: '$custom_name'. Name must start with a letter/number and contain only lowercase letters, numbers, and hyphens (max 63 chars)."
+      exit 1
+    fi
+    local map_key
+    map_key=$(tunnel_map_key_for_hash "$hash")
+    local existing_port
+    existing_port=$(awk -v h="$map_key" '$1 == h { gsub(/;/, "", $2); print $2; exit }' "$TUNNEL_NGINX_MAP" 2>/dev/null)
+    if [[ -n "$existing_port" && "$existing_port" != "$port" ]]; then
+      error "Tunnel name '$hash' ($map_key) is already active for port $existing_port. Close it first or choose a different name."
+      exit 1
+    fi
+  else
+    # Generate 10-char lowercase alphanumeric hash
+    hash=$(tr -dc 'a-z0-9' < /dev/urandom 2>/dev/null | head -c 10)
+    if [[ ${#hash} -ne 10 ]]; then
+      hash=$(openssl rand -hex 5 2>/dev/null || cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 10)
+    fi
   fi
+
   local map_key
   map_key=$(tunnel_map_key_for_hash "$hash")
   local url
@@ -2274,11 +2313,13 @@ open_custom_tunnel() {
   fi
 
   # Persist state (PID=0, managed by Nginx)
-  write_tunnel_state "$port" "0" "$url" "" "$start_ts" "custom"
+  write_tunnel_state "$port" "0" "$url" "" "$start_ts" "custom" "$hash"
 
   success "Custom Tunnel established for ${CYAN}localhost:$port${NC}"
   echo -e "  ${ORANGE}🔗${NC} ${YELLOW}${BOLD}URL:${NC} ${CYAN}${BOLD}$url${NC}"
-  echo -e "  ${GREY}🔑${NC} ${GREY}${BOLD}Hash:${NC} ${GREY}$hash${NC}  ${GREY}⚡${NC} ${GREY}${BOLD}Provider:${NC} ${GREY}Custom Nginx ($TUNNEL_BASE_DOMAIN)${NC}  ${GREY}🚫${NC} ${GREY}${BOLD}Close:${NC} ${GREY}fire tunnel close $port${NC}"
+  local name_label="Hash"
+  [[ -n "$custom_name" ]] && name_label="Name"
+  echo -e "  ${GREY}🏷️${NC}  ${GREY}${BOLD}${name_label}:${NC} ${YELLOW}$hash${NC}  ${GREY}⚡${NC} ${GREY}${BOLD}Provider:${NC} ${GREY}Custom Nginx ($TUNNEL_BASE_DOMAIN)${NC}  ${GREY}🚫${NC} ${GREY}${BOLD}Close:${NC} ${GREY}fire tunnel close $port${NC}"
   echo "$url"
 }
 
@@ -2387,9 +2428,16 @@ PYEOF
 action_tunnel_open() {
   local port=""
   local provider_opt=""
+  local custom_name=""
 
   for arg in "${ARGS[@]}"; do
     case "$arg" in
+      --name=*)
+        custom_name="${arg#*=}"
+        ;;
+      -n=*)
+        custom_name="${arg#*=}"
+        ;;
       --provider=*)
         provider_opt="${arg#*=}"
         ;;
@@ -2408,12 +2456,17 @@ action_tunnel_open() {
   done
 
   for ((i=0; i<${#ARGS[@]}; i++)); do
-    if [[ "${ARGS[i]}" == "--provider" && $((i+1)) -lt ${#ARGS[@]} ]]; then
+    local a="${ARGS[i]}"
+    if [[ "$a" == "--provider" && $((i+1)) -lt ${#ARGS[@]} ]]; then
       provider_opt="${ARGS[i+1]}"
+    elif [[ ("$a" == "--name" || "$a" == "-n") && $((i+1)) -lt ${#ARGS[@]} ]]; then
+      custom_name="${ARGS[i+1]}"
     fi
   done
 
-  [[ -z "$port" ]] && { error "Usage: fire tunnel open <port> [--provider quick|custom]"; exit 1; }
+  [[ -z "$custom_name" && -n "$NAME_OPT" ]] && custom_name="$NAME_OPT"
+
+  [[ -z "$port" ]] && { error "Usage: fire tunnel open <port> [--name <name>] [--provider quick|custom]"; exit 1; }
   validate_tunnel_port "$port" || { error "Invalid port: $port"; exit 1; }
   local_port_is_reachable "$port" || { error "Nothing is listening on localhost:$port"; exit 1; }
 
@@ -2444,10 +2497,10 @@ action_tunnel_open() {
 
   case "$chosen_provider" in
     custom|nginx)
-      open_custom_tunnel "$port" "$start_ts"
+      open_custom_tunnel "$port" "$start_ts" "$custom_name"
       ;;
     quick|cloudflare|*)
-      open_quick_tunnel "$port" "$start_ts"
+      open_quick_tunnel "$port" "$start_ts" "$custom_name"
       ;;
   esac
 }
@@ -2573,16 +2626,18 @@ action_tunnel_list() {
     fi
 
     local prov="${TUNNEL_STATE_PROVIDER:-quick}"
+    local tname="${TUNNEL_STATE_NAME:-$proc_name}"
     if [[ $json_mode -eq 1 ]]; then
-      json_tunnels+=("{\"port\":$port,\"pid\":${TUNNEL_STATE_PID:-0},\"provider\":\"$prov\",\"age\":\"$age\",\"status\":\"$raw_status\",\"hash\":\"$hash\",\"url\":\"$TUNNEL_STATE_URL\",\"name\":\"$proc_name\"}")
+      json_tunnels+=("{\"port\":$port,\"pid\":${TUNNEL_STATE_PID:-0},\"provider\":\"$prov\",\"age\":\"$age\",\"status\":\"$raw_status\",\"hash\":\"$hash\",\"url\":\"$TUNNEL_STATE_URL\",\"name\":\"$tname\"}")
     else
       if [[ $((total - 1)) -eq 0 ]]; then
         echo -e "\n  ${ORANGE}${BOLD}🔗 Active Fire Tunnels${NC}"
         echo -e "  ${GREY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        printf "  ${GREY}${BOLD}%-8s %-10s %-10s %-12s %s${NC}\n" "PORT" "AGE" "STATUS" "PROVIDER" "URL"
+        printf "  ${GREY}${BOLD}%-8s %-12s %-10s %-10s %-12s %s${NC}\n" "PORT" "NAME" "AGE" "STATUS" "PROVIDER" "URL"
       fi
-      printf "  ${YELLOW}%-8s${NC} ${ORANGE}%-10s${NC} ${status_color}%-10s${NC} ${GREY}%-12s${NC} %b\n" \
-        "$TUNNEL_STATE_PORT" "$age" "$status_label" "$prov" "$url"
+      local disp_name="${TUNNEL_STATE_NAME:-"-"}"
+      printf "  ${YELLOW}%-8s${NC} ${BOLD}%-12s${NC} ${ORANGE}%-10s${NC} ${status_color}%-10s${NC} ${GREY}%-12s${NC} %b\n" \
+        "$TUNNEL_STATE_PORT" "$disp_name" "$age" "$status_label" "$prov" "$url"
     fi
   done
 
@@ -2609,11 +2664,54 @@ action_tunnel_list() {
 }
 
 action_tunnel_close() {
-  local port="${1:-${ARGS[0]}}"
+  local target="${1:-${ARGS[0]}}"
+  local port="$target"
   local hash=""
   local map_key=""
 
-  validate_tunnel_port "$port" || { error "Usage: fire tunnel close <port>"; exit 1; }
+  if [[ -z "$target" ]]; then
+    error "Usage: fire tunnel close <port|name>"
+    exit 1
+  fi
+
+  # If target is not a numeric port, attempt to resolve by tunnel name or hash
+  if ! [[ "$target" =~ ^[0-9]+$ ]]; then
+    local matched_port=""
+    ensure_tunnel_dir
+    for f in "$TUNNEL_DIR"/*.env; do
+      [[ -f "$f" ]] || continue
+      local p
+      p=$(basename "$f" .env)
+      if read_tunnel_state "$p"; then
+        local thash
+        thash=$(tunnel_hash_from_url "$TUNNEL_STATE_URL" 2>/dev/null || echo "")
+        if [[ "$TUNNEL_STATE_NAME" == "$target" || "$thash" == "$target" ]]; then
+          matched_port="$p"
+          break
+        fi
+      fi
+    done
+
+    # Fallback: check Nginx map by hostname or hash
+    if [[ -z "$matched_port" && -f "$TUNNEL_NGINX_MAP" ]]; then
+      local test_key
+      test_key=$(tunnel_map_key_for_hash "$target")
+      matched_port=$(awk -v h="$test_key" -v t="$target" '
+        $1 == h || $1 ~ ("^" t "\\.") || $1 ~ ("^" t "-") {
+          gsub(/;/, "", $2); print $2; exit
+        }
+      ' "$TUNNEL_NGINX_MAP" 2>/dev/null)
+    fi
+
+    if [[ -n "$matched_port" ]]; then
+      port="$matched_port"
+    else
+      warn "No active tunnel found matching name '$target'"
+      return 1
+    fi
+  fi
+
+  validate_tunnel_port "$port" || { error "Invalid tunnel port: $port"; exit 1; }
 
   if read_tunnel_state "$port"; then
     # If running background quick tunnel PID
@@ -2652,16 +2750,18 @@ show_tunnel_help() {
   echo -e "  ${CYAN}${BOLD}Usage:${NC} fire tunnel ${YELLOW}<command>${NC} [options]"
   echo ""
   echo -e "  ${YELLOW}${BOLD}Commands:${NC}"
-  echo -e "    ${GREEN}open${NC}  ${YELLOW}<port>${NC} [--provider quick|custom]  ⚡ Open a public HTTPS tunnel for local port"
+  echo -e "    ${GREEN}open${NC}  ${YELLOW}<port>${NC} [--name <name>] [--provider quick|custom]  ⚡ Open a public HTTPS tunnel for local port"
   echo -e "    ${GREEN}list${NC} [--json]                                📋 List all active fire tunnels"
-  echo -e "    ${GREEN}close${NC} ${YELLOW}<port>${NC}                                 🚫 Close an active tunnel"
+  echo -e "    ${GREEN}close${NC} ${YELLOW}<port|name>${NC}                             🚫 Close an active tunnel by port or name"
   echo -e "    ${GREEN}setup${NC}                                        🛠 Configure custom self-hosted domain"
   echo ""
   echo -e "  ${YELLOW}${BOLD}Examples:${NC}"
   echo -e "    ${GREY}fire tunnel open 3000${NC}                   # Instant zero-config Quick Tunnel"
+  echo -e "    ${GREY}fire tunnel open 8080 --name myapp${NC}      # Custom named subdomain tunnel"
   echo -e "    ${GREY}fire tunnel open 8080 --provider custom${NC} # Self-hosted Nginx custom domain"
   echo -e "    ${GREY}fire tunnel list${NC}"
-  echo -e "    ${GREY}fire tunnel close 3000${NC}"
+  echo -e "    ${GREY}fire tunnel close myapp${NC}                 # Close tunnel by name"
+  echo -e "    ${GREY}fire tunnel close 3000${NC}                  # Close tunnel by port"
   echo -e "    ${GREY}fire tunnel setup${NC}"
   echo ""
 }
@@ -2805,6 +2905,8 @@ action_ssh_list() {
       pid=$(grep -o '"pid": *[0-9]*' "$state_file" | awk -F: '{print $2}' | tr -d ' ')
       url=$(grep -o '"url": *"[^"]*"' "$state_file" | awk -F'"' '{print $4}')
       title=$(grep -o '"title": *"[^"]*"' "$state_file" | awk -F'"' '{print $4}')
+      name=$(grep -o '"name": *"[^"]*"' "$state_file" | awk -F'"' '{print $4}')
+      [[ -z "$title" ]] && title="$name"
       created_at=$(grep -o '"created_at": *[0-9]*' "$state_file" | awk -F: '{print $2}' | tr -d ' ')
       
       age="-"
@@ -2817,7 +2919,7 @@ action_ssh_list() {
         if [[ $json_mode -eq 1 ]]; then
           local escaped_title
           escaped_title=$(printf '%s' "$title" | python3 -c 'import sys, json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo "\"$title\"")
-          json_sessions+=("{\"port\":$port,\"pid\":$pid,\"url\":\"${url:-http://localhost:$port}\",\"title\":$escaped_title,\"status\":\"ONLINE\",\"age\":\"$age\",\"createdAt\":${created_at:-0}}")
+          json_sessions+=("{\"port\":$port,\"pid\":$pid,\"url\":\"${url:-http://localhost:$port}\",\"title\":$escaped_title,\"name\":$escaped_title,\"status\":\"ONLINE\",\"age\":\"$age\",\"createdAt\":${created_at:-0}}")
         else
           local title_str=""
           if [[ -n "$title" ]]; then
@@ -2875,10 +2977,12 @@ action_ssh_close() {
   for sdir in "${state_dirs[@]}"; do
     for state_file in "$sdir"/*.json; do
       [[ -f "$state_file" ]] || continue
-      local port pid
+      local port pid title name
       port=$(basename "$state_file" .json)
+      title=$(grep -o '"title": *"[^"]*"' "$state_file" 2>/dev/null | awk -F'"' '{print $4}')
+      name=$(grep -o '"name": *"[^"]*"' "$state_file" 2>/dev/null | awk -F'"' '{print $4}')
       
-      if [[ -n "$target_port" && "$target_port" != "$port" && "$target_port" != "all" ]]; then
+      if [[ -n "$target_port" && "$target_port" != "$port" && "$target_port" != "$title" && "$target_port" != "$name" && "$target_port" != "all" ]]; then
         continue
       fi
 
@@ -2891,7 +2995,9 @@ action_ssh_close() {
       rm -f "$state_file"
       rm -f "$sdir/${port}.log"
       if [[ $json_mode -eq 0 ]]; then
-        success "Closed SSH web terminal on port ${CYAN}$port${NC}"
+        local disp_label="$port"
+        [[ -n "$title" ]] && disp_label="$port (name: $title)"
+        success "Closed SSH web terminal on port ${CYAN}$disp_label${NC}"
       fi
       closed=$((closed + 1))
     done
@@ -2904,7 +3010,7 @@ action_ssh_close() {
 
   if [[ $closed -eq 0 ]]; then
     if [[ -n "$target_port" && "$target_port" != "all" ]]; then
-      warn "No active SSH session found on port $target_port"
+      warn "No active SSH session found matching '$target_port'"
     else
       info "No active SSH sessions to close"
     fi
@@ -3036,6 +3142,15 @@ action_ssh_start() {
           i=$((i+1))
         fi
         ;;
+      --name=*|-n=*|--name=)
+        session_title="${a#*=}"
+        ;;
+      --name|-n)
+        if [[ $((i+1)) -lt ${#ARGS[@]} ]]; then
+          session_title="${ARGS[i+1]}"
+          i=$((i+1))
+        fi
+        ;;
       --password=*|-p=*|-password=*)
         password="${a#*=}"
         ;;
@@ -3080,6 +3195,8 @@ action_ssh_start() {
         ;;
     esac
   done
+
+  [[ -z "$session_title" && -n "$NAME_OPT" ]] && session_title="$NAME_OPT"
 
   local has_saved=0
   if [[ -f "/etc/fire-pm/ssh-auth.json" || -f "$HOME/.fire/ssh-auth.json" ]]; then
@@ -3192,10 +3309,10 @@ action_ssh_start() {
 
     case "$chosen_provider" in
       custom|nginx)
-        open_custom_tunnel "$port" "$start_ts"
+        open_custom_tunnel "$port" "$start_ts" "$session_title"
         ;;
       quick|cloudflare|*)
-        open_quick_tunnel "$port" "$start_ts"
+        open_quick_tunnel "$port" "$start_ts" "$session_title"
         ;;
     esac
 
@@ -3213,6 +3330,7 @@ action_ssh_start() {
   "pid": $server_pid,
   "url": "$public_url",
   "title": $title_json,
+  "name": $title_json,
   "created_at": $(date +%s)
 }
 JSONEOF
@@ -4160,11 +4278,11 @@ show_help() {
   echo "  save [path]      Save running process snapshot to dump.json (alias: dump)"
   echo "  restore [path]   Restore all processes from dump.json (alias: resurrect)"
   echo "  completion [sh]  Generate or install shell auto-completion (bash, zsh, fish)"
-  echo "  tunnel open <port>  Open a public HTTPS tunnel"
+  echo "  tunnel open <port> [--name <name>] Open a public HTTPS tunnel"
   echo "  tunnel list         List active tunnels"
-  echo "  tunnel close <port> Close a tunnel"
+  echo "  tunnel close <port|name> Close a tunnel"
   echo "  tunnel setup        Configure custom domain tunnels"
-  echo "  ssh [start|list|close|restart|password|title] Remote web terminal via secure tunnel (password protected)"
+  echo "  ssh [start|list|close|restart|password|title] [--name <name>] Remote web terminal via secure tunnel"
   echo ""
   echo "Examples:"
   echo "  fire start server.py --name api"
@@ -4175,13 +4293,11 @@ show_help() {
   echo "  fire unstartup api"
   echo "  fire save"
   echo "  fire restore"
-  echo "  fire tunnel open 3000"
-  echo "  fire ssh"
-  echo "  fire ssh --title \"Production\" --daemon"
-  echo "  fire ssh title \"Staging\""
-  echo "  fire ssh --password mysecret --daemon"
+  echo "  fire tunnel open 3000 --name api"
+  echo "  fire tunnel close api"
+  echo "  fire ssh --name \"Production\" --daemon"
+  echo "  fire ssh close \"Production\""
   echo "  fire ssh list"
-  echo "  fire ssh close"
   echo "  fire update --force"
 }
 
