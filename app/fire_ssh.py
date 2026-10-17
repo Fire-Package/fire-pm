@@ -3016,8 +3016,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     // Drag and Drop Event Listeners
+    function isFileDragEvent(e) {
+      if (typeof draggedTabId !== 'undefined' && draggedTabId) return false;
+      if (!e || !e.dataTransfer) return false;
+      const types = e.dataTransfer.types;
+      if (!types) return false;
+      for (let i = 0; i < types.length; i++) {
+        if (types[i] === 'Files' || types[i] === 'application/x-moz-file') {
+          return true;
+        }
+      }
+      return false;
+    }
+
     window.addEventListener('dragenter', (e) => {
       if (window.IS_READONLY) return;
+      if (!isFileDragEvent(e)) return;
       e.preventDefault();
       dragCounter++;
       if (dragCounter === 1) {
@@ -3028,11 +3042,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     });
 
     window.addEventListener('dragover', (e) => {
+      if (window.IS_READONLY) return;
+      if (!isFileDragEvent(e)) return;
       e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
     });
 
     window.addEventListener('dragleave', (e) => {
       if (window.IS_READONLY) return;
+      if (!isFileDragEvent(e)) return;
       e.preventDefault();
       dragCounter--;
       if (dragCounter <= 0) {
@@ -3044,6 +3062,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     window.addEventListener('drop', (e) => {
       if (window.IS_READONLY) return;
+      if (!isFileDragEvent(e)) {
+        dragCounter = 0;
+        const overlay = document.getElementById('drop-overlay');
+        if (overlay) overlay.classList.add('hidden');
+        return;
+      }
       e.preventDefault();
       dragCounter = 0;
       const overlay = document.getElementById('drop-overlay');
@@ -4931,6 +4955,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     function handleTabDragStart(e, tabId) {
       draggedTabId = tabId;
       e.dataTransfer.effectAllowed = 'move';
+      try {
+        e.dataTransfer.setData('application/x-fire-ssh-tab', tabId);
+      } catch (err) {}
       e.dataTransfer.setData('text/plain', tabId);
       const tabEl = e.currentTarget;
       setTimeout(() => {
@@ -4957,9 +4984,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function handleTabDrop(e, targetId) {
-      e.preventDefault();
       e.currentTarget.classList.remove('tab-drag-over-left', 'tab-drag-over-right');
-      if (!draggedTabId || draggedTabId === targetId) return;
+      if (!draggedTabId) {
+        // Not a tab reorder — this is an external file drop over the tab bar!
+        // Allow the event to bubble to the window drop handler so the file upload modal opens.
+        return;
+      }
+      e.preventDefault();
+      if (draggedTabId === targetId) {
+        draggedTabId = null;
+        return;
+      }
       const rect = e.currentTarget.getBoundingClientRect();
       const placeAfter = e.clientX >= (rect.left + rect.width / 2);
       reorderTabTo(draggedTabId, targetId, placeAfter);
@@ -4972,6 +5007,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         el.classList.remove('tab-dragging', 'tab-drag-over-left', 'tab-drag-over-right');
       });
       draggedTabId = null;
+      dragCounter = 0;
+      const overlay = document.getElementById('drop-overlay');
+      if (overlay) overlay.classList.add('hidden');
     }
 
     function renderTabsList() {
