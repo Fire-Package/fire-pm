@@ -171,12 +171,16 @@ fire limit my-api 512M 50%
 ### Logs & Diagnostics
 
 ```bash
-# Stream real-time logs from journalctl (default timeout: 180s)
+# Stream real-time logs from journalctl (default: 100 lines, 180s timeout)
 fire logs my-api
 
+# Custom initial lines (e.g. last 15 lines or 200 lines)
+fire logs my-api --lines 15
+fire logs my-api -n 50
+
 # Custom stream timeout (seconds or duration suffixes like 3m)
-fire logs my-api --timeout 60
-fire logs my-api -t 5m
+fire logs my-api --lines 15 --timeout 60
+fire logs my-api -n 25 -t 5m
 
 # Stream indefinitely without timeout
 fire logs my-api --timeout 0

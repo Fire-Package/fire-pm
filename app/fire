@@ -945,6 +945,7 @@ NO_STARTUP_OPT=0
 PASSTHROUGH_ARGS=()
 JSON_OPT=0
 TIMEOUT_OPT=""
+LINES_OPT=""
 
 parse_args() {
   while [[ $# -gt 0 ]]; do
@@ -957,13 +958,49 @@ parse_args() {
         NAME_OPT="${1#*=}"
         shift
         ;;
-      -n)
-        NAME_OPT="$2"
+      --lines)
+        LINES_OPT="$2"
         shift 2
         ;;
-      -n=*)
-        NAME_OPT="${1#*=}"
+      --lines=*)
+        LINES_OPT="${1#*=}"
         shift
+        ;;
+      -n)
+        if [[ "$CMD" == "logs" || "$CMD" == "log" ]]; then
+          LINES_OPT="$2"
+          shift 2
+        else
+          NAME_OPT="$2"
+          shift 2
+        fi
+        ;;
+      -n=*)
+        if [[ "$CMD" == "logs" || "$CMD" == "log" ]]; then
+          LINES_OPT="${1#*=}"
+          shift
+        else
+          NAME_OPT="${1#*=}"
+          shift
+        fi
+        ;;
+      -l)
+        if [[ "$CMD" == "logs" || "$CMD" == "log" ]]; then
+          LINES_OPT="$2"
+          shift 2
+        else
+          ARGS+=("$1")
+          shift
+        fi
+        ;;
+      -l=*)
+        if [[ "$CMD" == "logs" || "$CMD" == "log" ]]; then
+          LINES_OPT="${1#*=}"
+          shift
+        else
+          ARGS+=("$1")
+          shift
+        fi
         ;;
       --timeout)
         TIMEOUT_OPT="$2"
@@ -2021,6 +2058,12 @@ action_logs() {
     exit 1
   fi
 
+  local lines_val="${LINES_OPT:-100}"
+  if ! [[ "$lines_val" =~ ^[0-9]+$ ]] || [[ "$lines_val" -le 0 ]]; then
+    error "Invalid lines count: '$lines_val'. Must be a positive integer."
+    exit 1
+  fi
+
   local has_timeout=0
   if command -v timeout >/dev/null 2>&1; then
     has_timeout=1
@@ -2030,12 +2073,12 @@ action_logs() {
   if [[ -z "$resolved_target" ]]; then
     # Tail all fire logs
     if [[ $timeout_enabled -eq 1 && $has_timeout -eq 1 ]]; then
-      warn "Tailing logs for all fire services (timeout: ${timeout_display}, Ctrl+C to exit)..."
-      timeout "$timeout_val" journalctl -f | grep --line-buffered "${PREFIX}-"
+      warn "Tailing logs for all fire services (lines: $lines_val, timeout: ${timeout_display}, Ctrl+C to exit)..."
+      timeout "$timeout_val" journalctl -f -n "$lines_val" | grep --line-buffered "${PREFIX}-"
       exit_code="${PIPESTATUS[0]}"
     else
-      warn "Tailing logs for all fire services (Ctrl+C to exit)..."
-      journalctl -f | grep --line-buffered "${PREFIX}-"
+      warn "Tailing logs for all fire services (lines: $lines_val, Ctrl+C to exit)..."
+      journalctl -f -n "$lines_val" | grep --line-buffered "${PREFIX}-"
       exit_code="${PIPESTATUS[0]}"
     fi
   else
@@ -2045,12 +2088,12 @@ action_logs() {
       local display_name="${svc_name#$PREFIX-}"
       display_name="${display_name%.service}"
       if [[ $timeout_enabled -eq 1 && $has_timeout -eq 1 ]]; then
-        info "Tailing logs for $display_name (timeout: ${timeout_display}, Ctrl+C to exit)..."
-        timeout "$timeout_val" journalctl -u "$svc_name" -f -n 100
+        info "Tailing logs for $display_name (lines: $lines_val, timeout: ${timeout_display}, Ctrl+C to exit)..."
+        timeout "$timeout_val" journalctl -u "$svc_name" -f -n "$lines_val"
         exit_code=$?
       else
-        info "Tailing logs for $display_name (Ctrl+C to exit)..."
-        journalctl -u "$svc_name" -f -n 100
+        info "Tailing logs for $display_name (lines: $lines_val, Ctrl+C to exit)..."
+        journalctl -u "$svc_name" -f -n "$lines_val"
         exit_code=$?
       fi
     else
@@ -4087,7 +4130,7 @@ _fire_completions() {
       case "${COMP_WORDS[1]}" in
         stop|restart|delete|del|rm|info|show|live|logs|log|flush|clean-logs|startup|enable-boot|unstartup|disable-boot|limit)
           if [[ "${COMP_WORDS[1]}" =~ ^(logs|log)$ && "$cur" == -* ]]; then
-            COMPREPLY=( $(compgen -W "--timeout -t --no-timeout" -- "$cur") )
+            COMPREPLY=( $(compgen -W "--timeout -t --no-timeout --lines -n -l" -- "$cur") )
             return 0
           fi
           local svcs
@@ -4169,7 +4212,7 @@ _fire_completions() {
           ;;
         logs|log)
           if [[ "$cur" == -* ]]; then
-            COMPREPLY=( $(compgen -W "--timeout -t --no-timeout" -- "$cur") )
+            COMPREPLY=( $(compgen -W "--timeout -t --no-timeout --lines -n -l" -- "$cur") )
             return 0
           fi
           ;;
@@ -4239,6 +4282,7 @@ _fire() {
           _arguments -s \
             '(-t --timeout)'{-t,--timeout}'[Log stream timeout (default 180s, 0 for infinite)]:timeout:' \
             '--no-timeout[Disable timeout limit]' \
+            '(-n -l --lines)'{-n,-l,--lines}'[Number of lines to display (default 100)]:lines:' \
             '*:service:_fire_services'
           ;;
         tunnel)
@@ -4306,6 +4350,7 @@ end
 complete -c fire -f -n '__fish_seen_subcommand_from stop restart delete info live logs flush startup unstartup limit' -a '(__fire_services)'
 complete -c fire -n '__fish_seen_subcommand_from logs log' -l timeout -s t -r -d 'Timeout in seconds or duration (default: 180s, 0 for infinite)'
 complete -c fire -n '__fish_seen_subcommand_from logs log' -l no-timeout -d 'Disable timeout limit'
+complete -c fire -n '__fish_seen_subcommand_from logs log' -l lines -s n -s l -r -d 'Number of log lines to show (default: 100)'
 EOF
 }
 
@@ -4383,7 +4428,7 @@ show_help() {
   echo "  show <name|file> Alias for info"
   echo "  live <name>      Open live cockpit for a process"
   echo "  doctor           Run system health diagnostics"
-  echo "  logs [name] [-t|--timeout <sec>] Stream logs (default timeout: 180s, 0 for infinite)"
+  echo "  logs [name] [-n|--lines <num>] [-t|--timeout <sec>] Stream logs (default: 100 lines, 180s timeout)"
   echo "  flush [name|all] Flush accumulated service logs and journal"
   echo "  monit            Real-time monitoring dashboard"
   echo "  migrate          Migrate legacy fire services to new format"
@@ -4403,7 +4448,8 @@ show_help() {
   echo "  fire start server.py --name api"
   echo "  fire start app.js --env-file .env --no-startup"
   echo "  fire completion install"
-  echo "  fire logs api --timeout 60"
+  echo "  fire logs api --lines 15"
+  echo "  fire logs api --lines 50 --timeout 60"
   echo "  fire logs api --timeout 0"
   echo "  fire flush api"
   echo "  fire startup api"
