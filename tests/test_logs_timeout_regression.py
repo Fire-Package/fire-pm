@@ -160,16 +160,80 @@ class LogsTimeoutRegressionTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, f"Bash execution failed:\n{proc.stderr}\n{proc.stdout}")
 
     def test_cli_help_documents_timeout(self):
-        """Verify show_help displays the logs timeout option and 180s default."""
-        self.assertIn("logs [name] [-t|--timeout <sec>]", self.cli_content)
-        self.assertIn("default timeout: 180s", self.cli_content)
-        self.assertIn("fire logs api --timeout 60", self.cli_content)
+        """Verify show_help displays the logs timeout option and lines option."""
+        self.assertIn("logs [name] [-n|--lines <num>] [-t|--timeout <sec>]", self.cli_content)
+        self.assertIn("default: 100 lines, 180s timeout", self.cli_content)
+        self.assertIn("fire logs api --lines 15", self.cli_content)
         self.assertIn("fire logs api --timeout 0", self.cli_content)
 
     def test_shell_completions_include_timeout(self):
-        """Verify bash, zsh, and fish completions include --timeout and -t for logs."""
-        self.assertIn("--timeout -t --no-timeout", self.cli_content)
+        """Verify bash, zsh, and fish completions include --timeout, -t, and --lines for logs."""
+        self.assertIn("--timeout -t --no-timeout --lines -n -l", self.cli_content)
         self.assertIn("complete -c fire -n '__fish_seen_subcommand_from logs log' -l timeout", self.cli_content)
+        self.assertIn("complete -c fire -n '__fish_seen_subcommand_from logs log' -l lines", self.cli_content)
+
+    def test_parse_args_handles_lines_flags(self):
+        """Verify parse_args sets LINES_OPT for --lines, -n, and -l when CMD=logs."""
+        match = re.search(r'(LINES_OPT=""[\s\S]*?\nparse_args\(\)\s*\{[\s\S]*?\n\})', self.cli_content)
+        self.assertIsNotNone(match, "parse_args block should exist in app/fire")
+        fn_code = match.group(1)
+
+        bash_script = f"""
+        set -e
+        CMD="logs"
+        {fn_code}
+
+        # 1. --lines 15
+        LINES_OPT=""
+        ARGS=()
+        parse_args --lines 15
+        [[ "$LINES_OPT" == "15" ]]
+
+        # 2. --lines=20
+        LINES_OPT=""
+        ARGS=()
+        parse_args --lines=20
+        [[ "$LINES_OPT" == "20" ]]
+
+        # 3. -n 25 for CMD=logs
+        LINES_OPT=""
+        NAME_OPT=""
+        ARGS=()
+        parse_args -n 25
+        [[ "$LINES_OPT" == "25" ]]
+        [[ "$NAME_OPT" == "" ]]
+
+        # 4. -n=30 for CMD=logs
+        LINES_OPT=""
+        NAME_OPT=""
+        ARGS=()
+        parse_args -n=30
+        [[ "$LINES_OPT" == "30" ]]
+        [[ "$NAME_OPT" == "" ]]
+
+        # 5. -l 35 for CMD=logs
+        LINES_OPT=""
+        ARGS=()
+        parse_args -l 35
+        [[ "$LINES_OPT" == "35" ]]
+
+        # 6. -l=40 for CMD=logs
+        LINES_OPT=""
+        ARGS=()
+        parse_args -l=40
+        [[ "$LINES_OPT" == "40" ]]
+
+        # 7. -n when CMD=start sets NAME_OPT, NOT LINES_OPT
+        CMD="start"
+        LINES_OPT=""
+        NAME_OPT=""
+        ARGS=()
+        parse_args -n "my-app"
+        [[ "$NAME_OPT" == "my-app" ]]
+        [[ "$LINES_OPT" == "" ]]
+        """
+        proc = self._run_bash_snippet(bash_script)
+        self.assertEqual(proc.returncode, 0, f"Bash execution failed:\n{proc.stderr}\n{proc.stdout}")
 
 
 if __name__ == "__main__":
