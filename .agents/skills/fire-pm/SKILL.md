@@ -48,8 +48,10 @@ fire list --json   # Machine-readable JSON output
 # Inspect service details
 fire info <service_name>
 
-# View / tail real-time journalctl logs
+# View / tail real-time journalctl logs (default 180s timeout, custom -t <sec>, or --timeout 0 for infinite)
 fire logs <service_name>
+fire logs <service_name> --timeout 60
+fire logs <service_name> --timeout 0
 fire live <service_name>
 
 # Flush / clean accumulated service logs

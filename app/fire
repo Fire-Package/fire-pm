@@ -944,6 +944,7 @@ ENV_FILE=""
 NO_STARTUP_OPT=0
 PASSTHROUGH_ARGS=()
 JSON_OPT=0
+TIMEOUT_OPT=""
 
 parse_args() {
   while [[ $# -gt 0 ]]; do
@@ -962,6 +963,36 @@ parse_args() {
         ;;
       -n=*)
         NAME_OPT="${1#*=}"
+        shift
+        ;;
+      --timeout)
+        TIMEOUT_OPT="$2"
+        shift 2
+        ;;
+      --timeout=*)
+        TIMEOUT_OPT="${1#*=}"
+        shift
+        ;;
+      -t)
+        if [[ "$CMD" == "logs" || "$CMD" == "log" ]]; then
+          TIMEOUT_OPT="$2"
+          shift 2
+        else
+          ARGS+=("$1")
+          shift
+        fi
+        ;;
+      -t=*)
+        if [[ "$CMD" == "logs" || "$CMD" == "log" ]]; then
+          TIMEOUT_OPT="${1#*=}"
+          shift
+        else
+          ARGS+=("$1")
+          shift
+        fi
+        ;;
+      --no-timeout)
+        TIMEOUT_OPT="0"
         shift
         ;;
       --interpreter)
@@ -1955,17 +1986,83 @@ action_logs() {
     return
   fi
 
-  if [[ -z "$target" ]]; then
-    # Tail all fire logs
-    warn "Tailing logs for all fire services..."
-    journalctl -f | grep "${PREFIX}-"
-  else
-    local svc_name=$(resolve_service_name "$target")
-    if [[ -n "$svc_name" ]]; then
-        journalctl -u "$svc_name" -f -n 100
-    else
-        error "Process not found: $target"
+  local raw_timeout="${TIMEOUT_OPT}"
+  local resolved_target="$target"
+
+  # Check positional argument fallback if no timeout flag was set
+  if [[ -z "$raw_timeout" ]]; then
+    if [[ -n "$subtarget" && "$subtarget" =~ ^([0-9]+[smhd]?|none|inf|infinity)$ ]]; then
+      raw_timeout="$subtarget"
+    elif [[ -n "$target" && "$target" =~ ^([0-9]+[smhd]?|none|inf|infinity)$ ]]; then
+      local check_svc
+      check_svc=$(resolve_service_name "$target")
+      if [[ -z "$check_svc" ]]; then
+        raw_timeout="$target"
+        resolved_target=""
+      fi
     fi
+  fi
+
+  # Default timeout is 180s unless an argument was provided
+  local timeout_val="${raw_timeout:-180s}"
+  local timeout_enabled=1
+  local timeout_display=""
+
+  if [[ "$timeout_val" == "0" || "$timeout_val" == "0s" || "$timeout_val" == "none" || "$timeout_val" == "inf" || "$timeout_val" == "infinity" ]]; then
+    timeout_enabled=0
+    timeout_val="0"
+  elif [[ "$timeout_val" =~ ^[0-9]+$ ]]; then
+    timeout_display="${timeout_val}s"
+    timeout_val="${timeout_val}s"
+  elif [[ "$timeout_val" =~ ^[0-9]+[smhd]$ ]]; then
+    timeout_display="$timeout_val"
+  else
+    error "Invalid timeout: '$timeout_val'. Must be a duration (e.g. 180, 180s, 3m) or 0 to disable."
+    exit 1
+  fi
+
+  local has_timeout=0
+  if command -v timeout >/dev/null 2>&1; then
+    has_timeout=1
+  fi
+
+  local exit_code=0
+  if [[ -z "$resolved_target" ]]; then
+    # Tail all fire logs
+    if [[ $timeout_enabled -eq 1 && $has_timeout -eq 1 ]]; then
+      warn "Tailing logs for all fire services (timeout: ${timeout_display}, Ctrl+C to exit)..."
+      timeout "$timeout_val" journalctl -f | grep --line-buffered "${PREFIX}-"
+      exit_code="${PIPESTATUS[0]}"
+    else
+      warn "Tailing logs for all fire services (Ctrl+C to exit)..."
+      journalctl -f | grep --line-buffered "${PREFIX}-"
+      exit_code="${PIPESTATUS[0]}"
+    fi
+  else
+    local svc_name
+    svc_name=$(resolve_service_name "$resolved_target")
+    if [[ -n "$svc_name" ]]; then
+      local display_name="${svc_name#$PREFIX-}"
+      display_name="${display_name%.service}"
+      if [[ $timeout_enabled -eq 1 && $has_timeout -eq 1 ]]; then
+        info "Tailing logs for $display_name (timeout: ${timeout_display}, Ctrl+C to exit)..."
+        timeout "$timeout_val" journalctl -u "$svc_name" -f -n 100
+        exit_code=$?
+      else
+        info "Tailing logs for $display_name (Ctrl+C to exit)..."
+        journalctl -u "$svc_name" -f -n 100
+        exit_code=$?
+      fi
+    else
+      error "Process not found: $resolved_target"
+      exit 1
+    fi
+  fi
+
+  if [[ $timeout_enabled -eq 1 && $exit_code -eq 124 ]]; then
+    echo ""
+    info "Log stream closed after ${timeout_display} timeout. (Use --timeout 0 to stream indefinitely)"
+    return 0
   fi
 }
 
@@ -3989,6 +4086,10 @@ _fire_completions() {
     2)
       case "${COMP_WORDS[1]}" in
         stop|restart|delete|del|rm|info|show|live|logs|log|flush|clean-logs|startup|enable-boot|unstartup|disable-boot|limit)
+          if [[ "${COMP_WORDS[1]}" =~ ^(logs|log)$ && "$cur" == -* ]]; then
+            COMPREPLY=( $(compgen -W "--timeout -t --no-timeout" -- "$cur") )
+            return 0
+          fi
           local svcs
           svcs=$(_fire_services)
           if [[ "${COMP_WORDS[1]}" =~ ^(stop|restart|logs|log|flush|clean-logs|startup|enable-boot|unstartup|disable-boot)$ ]]; then
@@ -4066,6 +4167,12 @@ _fire_completions() {
             return 0
           fi
           ;;
+        logs|log)
+          if [[ "$cur" == -* ]]; then
+            COMPREPLY=( $(compgen -W "--timeout -t --no-timeout" -- "$cur") )
+            return 0
+          fi
+          ;;
       esac
       ;;
   esac
@@ -4125,8 +4232,14 @@ _fire() {
       ;;
     args)
       case $words[1] in
-        stop|restart|delete|info|show|live|logs|flush|startup|unstartup|limit)
+        stop|restart|delete|info|show|live|flush|startup|unstartup|limit)
           _fire_services
+          ;;
+        logs|log)
+          _arguments -s \
+            '(-t --timeout)'{-t,--timeout}'[Log stream timeout (default 180s, 0 for infinite)]:timeout:' \
+            '--no-timeout[Disable timeout limit]' \
+            '*:service:_fire_services'
           ;;
         tunnel)
           local -a subcmds
@@ -4191,6 +4304,8 @@ function __fire_services
 end
 
 complete -c fire -f -n '__fish_seen_subcommand_from stop restart delete info live logs flush startup unstartup limit' -a '(__fire_services)'
+complete -c fire -n '__fish_seen_subcommand_from logs log' -l timeout -s t -r -d 'Timeout in seconds or duration (default: 180s, 0 for infinite)'
+complete -c fire -n '__fish_seen_subcommand_from logs log' -l no-timeout -d 'Disable timeout limit'
 EOF
 }
 
@@ -4268,7 +4383,7 @@ show_help() {
   echo "  show <name|file> Alias for info"
   echo "  live <name>      Open live cockpit for a process"
   echo "  doctor           Run system health diagnostics"
-  echo "  logs [name]      Stream logs"
+  echo "  logs [name] [-t|--timeout <sec>] Stream logs (default timeout: 180s, 0 for infinite)"
   echo "  flush [name|all] Flush accumulated service logs and journal"
   echo "  monit            Real-time monitoring dashboard"
   echo "  migrate          Migrate legacy fire services to new format"
@@ -4288,6 +4403,8 @@ show_help() {
   echo "  fire start server.py --name api"
   echo "  fire start app.js --env-file .env --no-startup"
   echo "  fire completion install"
+  echo "  fire logs api --timeout 60"
+  echo "  fire logs api --timeout 0"
   echo "  fire flush api"
   echo "  fire startup api"
   echo "  fire unstartup api"
