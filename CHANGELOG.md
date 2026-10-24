@@ -14,6 +14,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 * Prevent dual split terminal panes from physically flipping positions on screen when clicking panes or switching tabs ([#98](https://github.com/Fire-Package/fire-pm/issues/98), [#99](https://github.com/Fire-Package/fire-pm/pull/99)).
 
 ### Added
+* Add default 180-second stream timeout to `fire logs` and `fire log`, supporting `--timeout <sec>`, `-t <sec>`, and `--no-timeout` (or `0`) flags alongside positional timeout arguments ([#106](https://github.com/Fire-Package/fire-pm/pull/106)).
 * Support `--name` and `-n` CLI argument for custom SSH session names/titles and custom tunnel subdomains (`https://<name>-tunnel.<domain>`), including session/tunnel table and JSON tracking, and close-by-name support for both commands ([#104](https://github.com/Fire-Package/fire-pm/issues/104), [#105](https://github.com/Fire-Package/fire-pm/pull/105)).
 * Streamlined custom domain tunnel setup for Cloudflare edge SSL proxying with automated real-IP extraction, atomic Nginx testing, and zero-certificate configuration.
 * Multi-device interactive terminal synchronization with fan-out WebSocket broadcast, scrollback replay, active viewport negotiation, dynamic mobile roaming, and real-time tab state synchronization ([#93](https://github.com/Fire-Package/fire-pm/issues/93), [#94](https://github.com/Fire-Package/fire-pm/pull/94)).
