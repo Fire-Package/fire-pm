@@ -3,6 +3,9 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
+import urllib.parse
+from unittest.mock import MagicMock
 import pytest
 
 # Add app directory to sys.path
@@ -10,11 +13,11 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "app"))
 
-from fire_ssh import HTML_TEMPLATE
+from fire_ssh import FireSSHServerHandler, HTML_TEMPLATE
 
 
 class TestFileHoverComponents:
-    """Verify HTML template structure and UI component presence for file hover quick actions."""
+    """Verify HTML template structure and UI component presence for file hover quick actions and content modal."""
 
     def test_hover_menu_dom_structure(self):
         # Container
@@ -28,21 +31,135 @@ class TestFileHoverComponents:
         assert 'id="file-hover-path"' in HTML_TEMPLATE
         assert 'id="file-hover-badge"' in HTML_TEMPLATE
 
-        # 4 Required Action buttons (+ View Image for images)
+        # Action buttons (Cat, Edit, Directory Open in Tab, View Image, Copy, Download)
         assert 'id="file-hover-btn-cat"' in HTML_TEMPLATE
         assert 'id="file-hover-btn-edit"' in HTML_TEMPLATE
+        assert 'id="file-hover-btn-dir"' in HTML_TEMPLATE
         assert 'id="file-hover-btn-img"' in HTML_TEMPLATE
         assert 'id="file-hover-btn-copy"' in HTML_TEMPLATE
         assert 'id="file-hover-btn-dl"' in HTML_TEMPLATE
 
+    def test_file_content_modal_dom_structure(self):
+        # In-tab file content modal dialog
+        assert 'id="file-content-modal"' in HTML_TEMPLATE
+        assert 'id="file-modal-icon"' in HTML_TEMPLATE
+        assert 'id="file-modal-title"' in HTML_TEMPLATE
+        assert 'id="file-modal-line-badge"' in HTML_TEMPLATE
+        assert 'id="file-modal-size-badge"' in HTML_TEMPLATE
+        assert 'id="file-modal-path"' in HTML_TEMPLATE
+
+        # Modal action buttons
+        assert 'id="file-modal-edit-btn"' in HTML_TEMPLATE
+        assert 'id="file-modal-tab-btn"' in HTML_TEMPLATE
+        assert 'id="file-modal-copy-label"' in HTML_TEMPLATE
+
+        # Viewport, line numbers, and pre code
+        assert 'id="file-modal-viewport"' in HTML_TEMPLATE
+        assert 'id="file-modal-spinner"' in HTML_TEMPLATE
+        assert 'id="file-modal-error"' in HTML_TEMPLATE
+        assert 'id="file-modal-line-numbers"' in HTML_TEMPLATE
+        assert 'id="file-modal-code-text"' in HTML_TEMPLATE
+
     def test_hover_menu_javascript_functions(self):
         assert 'function registerFileLinkProvider(' in HTML_TEMPLATE
         assert 'function getFileCategory(' in HTML_TEMPLATE
+        assert 'function cleanCandidatePath(' in HTML_TEMPLATE
         assert 'function isPathValidCandidate(' in HTML_TEMPLATE
         assert 'function quoteShellArg(' in HTML_TEMPLATE
         assert 'function openTabWithCommand(' in HTML_TEMPLATE
+        assert 'function fetchPathStat(' in HTML_TEMPLATE
         assert 'function showFileHoverMenu(' in HTML_TEMPLATE
         assert 'function hideFileHoverMenu(' in HTML_TEMPLATE
+        assert 'function openFileContentModal(' in HTML_TEMPLATE
+        assert 'function closeFileContentModal(' in HTML_TEMPLATE
+
+
+class TestFileStatEndpoint:
+    """Verify backend /api/stat endpoint functionality."""
+
+    def test_stat_regular_text_file(self):
+        handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.headers = {}
+        handler.is_authenticated = MagicMock(return_value=True)
+        handler.get_auth_token = MagicMock(return_value="valid-token")
+        handler.send_json = MagicMock()
+        handler.server = MagicMock()
+        handler.server.terminals.get.return_value = None
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as tmp:
+            tmp.write("line 1\nline 2\nline 3\nline 4\nline 5\n")
+            tmp_path = tmp.name
+
+        try:
+            handler.path = f"/api/stat?file={urllib.parse.quote(tmp_path)}"
+            handler.do_GET()
+
+            handler.send_json.assert_called_once()
+            call_args = handler.send_json.call_args[0][0]
+            assert call_args["success"] is True
+            assert call_args["exists"] is True
+            assert call_args["is_file"] is True
+            assert call_args["is_dir"] is False
+            assert call_args["is_text"] is True
+            assert call_args["lines"] == 5
+            assert call_args["size"] > 0
+            assert call_args["path"] == tmp_path
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_stat_directory(self):
+        handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.headers = {}
+        handler.is_authenticated = MagicMock(return_value=True)
+        handler.get_auth_token = MagicMock(return_value="valid-token")
+        handler.send_json = MagicMock()
+        handler.server = MagicMock()
+        handler.server.terminals.get.return_value = None
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            handler.path = f"/api/stat?file={urllib.parse.quote(tmp_dir)}"
+            handler.do_GET()
+
+            handler.send_json.assert_called_once()
+            call_args = handler.send_json.call_args[0][0]
+            assert call_args["success"] is True
+            assert call_args["exists"] is True
+            assert call_args["is_dir"] is True
+            assert call_args["is_file"] is False
+
+    def test_stat_nonexistent(self):
+        handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.headers = {}
+        handler.is_authenticated = MagicMock(return_value=True)
+        handler.get_auth_token = MagicMock(return_value="valid-token")
+        handler.send_json = MagicMock()
+        handler.server = MagicMock()
+        handler.server.terminals.get.return_value = None
+
+        handler.path = "/api/stat?file=/nonexistent_test_stat_999.xyz"
+        handler.do_GET()
+
+        handler.send_json.assert_called_once()
+        call_args = handler.send_json.call_args[0][0]
+        assert call_args["success"] is True
+        assert call_args["exists"] is False
+        assert call_args["is_dir"] is False
+        assert call_args["is_file"] is False
+
+    def test_stat_unauthorized(self):
+        handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.headers = {}
+        handler.is_authenticated = MagicMock(return_value=False)
+        handler.send_json = MagicMock()
+
+        handler.path = "/api/stat?file=/some/path"
+        handler.do_GET()
+        handler.send_json.assert_called_once_with({"success": False, "error": "Unauthorized session"}, status=401)
 
 
 class TestFileHoverLogicWithNode:
@@ -63,6 +180,12 @@ class TestFileHoverLogicWithNode:
         """
         proc = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True)
         return json.loads(proc.stdout.strip())
+
+    def test_clean_candidate_path(self):
+        assert self._eval_js("cleanCandidatePath('~/\"fire-package-pm\"')") == "~/fire-package-pm"
+        assert self._eval_js("cleanCandidatePath('\"./src/index.ts\"')") == "./src/index.ts"
+        assert self._eval_js("cleanCandidatePath(\"'app/main.py'\")") == "app/main.py"
+        assert self._eval_js("cleanCandidatePath('simple.txt')") == "simple.txt"
 
     def test_file_category_blocked_archives(self):
         archives = ["archive.zip", "bundle.tar", "data.tar.gz", "pkg.tgz", "archive.bz2", "rootfs.xz", "backup.7z", "disk.iso", "old.rar"]
@@ -140,6 +263,8 @@ class TestFileHoverLogicWithNode:
             "./src/index.ts",
             "../config.json",
             "~/.bashrc",
+            '~/"fire-package-pm"',
+            '"package.json"',
             "Dockerfile",
             "Makefile",
             "/var/log/syslog",
