@@ -3396,15 +3396,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         });
 
         const contentType = (res.headers.get('content-type') || '').toLowerCase();
+        const disp = res.headers.get('content-disposition');
 
-        // Intercept any non-2xx response or responses returning text/html or application/json error payloads
-        if (!res.ok || contentType.includes('application/json') || contentType.includes('text/html')) {
+        // Only handle as error if HTTP status is non-2xx
+        if (!res.ok) {
           let errMsg = `Download failed (HTTP ${res.status})`;
           try {
             if (contentType.includes('application/json')) {
               const data = await res.json();
               if (data && data.error) errMsg = data.error;
-            } else {
+            } else if (contentType.includes('text/html')) {
               const text = await res.text();
               const titleMatch = text.match(/<title>(.*?)<\/title>/i);
               const pMatch = text.match(/<p>(.*?)<\/p>/i);
@@ -3419,9 +3420,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           return;
         }
 
+        // Intercept unexpected SPA/HTML proxy fallback if Content-Disposition is missing
+        if (contentType.includes('text/html') && !disp) {
+          showDownloadModalError('Download failed: received HTML page instead of file');
+          return;
+        }
+
         // Successfully received file/archive stream
         let filename = '';
-        const disp = res.headers.get('content-disposition');
         if (disp) {
           const matchUtf8 = disp.match(/filename\*=UTF-8''([^;]+)/i);
           if (matchUtf8) {

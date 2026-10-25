@@ -123,3 +123,46 @@ class TestEndpointsAndTokens:
 
         handler.do_POST()
         handler.send_json.assert_called_once_with({"success": False, "error": "Unauthorized session"}, status=401)
+
+    def test_json_file_download_serves_attachment_headers(self):
+        handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.headers = {}
+        handler.is_authenticated = MagicMock(return_value=True)
+        handler.get_auth_token = MagicMock(return_value="valid-token")
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+        handler.wfile = MagicMock()
+
+        with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as tmp_json:
+            tmp_json.write(b'{"key": "value"}')
+            tmp_json_path = tmp_json.name
+
+        try:
+            handler.path = f"/api/download?file={urllib.parse.quote(tmp_json_path)}"
+            handler.server = MagicMock()
+            handler.server.terminals.get.return_value = None
+
+            handler.do_GET()
+
+            handler.send_response.assert_called_once_with(200)
+            headers_sent = [call[0] for call in handler.send_header.call_args_list]
+            header_keys = [h[0] for h in headers_sent]
+            assert "Content-Type" in header_keys
+            assert "Content-Disposition" in header_keys
+
+            content_type = next(h[1] for h in headers_sent if h[0] == "Content-Type")
+            content_disp = next(h[1] for h in headers_sent if h[0] == "Content-Disposition")
+            assert content_type == "application/json"
+            assert "attachment;" in content_disp
+        finally:
+            if os.path.exists(tmp_json_path):
+                os.remove(tmp_json_path)
+
+    def test_html_template_download_error_handling_structure(self):
+        from fire_ssh import HTML_TEMPLATE
+        assert "if (!res.ok)" in HTML_TEMPLATE
+        # Must not treat 200 OK with application/json as error
+        assert "if (!res.ok || contentType.includes('application/json'))" not in HTML_TEMPLATE
+
