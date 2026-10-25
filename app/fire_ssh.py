@@ -1760,7 +1760,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       </div>
 
       <!-- Main Code Viewport -->
-      <div id="file-modal-viewport" class="flex-1 relative overflow-auto p-4 bg-slate-950 font-mono text-xs sm:text-sm select-text text-slate-200 flex">
+      <div id="file-modal-viewport" class="flex-1 relative overflow-auto p-4 bg-slate-950 font-mono text-xs sm:text-sm select-text text-slate-200">
         <div id="file-modal-spinner" class="hidden absolute inset-0 flex items-center justify-center bg-slate-950/70 z-10 text-orange-400 text-sm select-none">
           <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 p-3.5 rounded-2xl shadow-xl">
             <span class="animate-spin text-base">⟳</span>
@@ -1775,9 +1775,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
 
         <!-- Code Container with line numbers and text -->
-        <div id="file-modal-code-wrap" class="w-full flex font-mono text-xs sm:text-sm leading-relaxed">
-          <div id="file-modal-line-numbers" class="select-none text-right pr-4 text-slate-600 font-mono shrink-0 border-r border-slate-800/80"></div>
-          <pre id="file-modal-code-text" class="flex-1 pl-4 overflow-x-auto m-0 whitespace-pre font-mono text-slate-200 select-text outline-none"></pre>
+        <div id="file-modal-code-wrap" class="min-w-full inline-flex font-mono text-xs sm:text-sm leading-6">
+          <div id="file-modal-line-numbers" class="select-none text-right pr-4 text-slate-500 font-mono shrink-0 border-r border-slate-800/80 whitespace-pre leading-6 min-w-[3.5rem] sticky left-0 bg-slate-950 z-10"></div>
+          <pre id="file-modal-code-text" class="flex-1 pl-4 m-0 whitespace-pre font-mono text-slate-200 select-text outline-none leading-6"></pre>
         </div>
       </div>
 
@@ -4217,8 +4217,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const text = await res.text();
         currentModalFileContent = text;
 
-        const lines = text.split('\n');
-        const lineCount = lines.length;
+        const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        const rawLines = normalized.split('\n');
+        const hasTrailingNewline = normalized.endsWith('\n');
+        const contentLines = (hasTrailingNewline && rawLines.length > 1) ? rawLines.slice(0, -1) : rawLines;
+        const lineCount = normalized.length === 0 ? 0 : contentLines.length;
         const byteSize = new Blob([text]).size;
 
         if (lineBadge) lineBadge.textContent = `${lineCount} line${lineCount === 1 ? '' : 's'}`;
@@ -4228,10 +4231,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         let lineNums = '';
         for (let i = 1; i <= lineCount; i++) {
-          lineNums += i + '\n';
+          lineNums += (i === 1 ? '' : '\n') + i;
         }
         if (lineNumEl) lineNumEl.textContent = lineNums;
-        if (codeTextEl) codeTextEl.textContent = text;
+        if (codeTextEl) {
+          codeTextEl.textContent = (hasTrailingNewline && rawLines.length > 1) ? normalized.slice(0, -1) : normalized;
+        }
       } catch (err) {
         if (errorEl) errorEl.classList.remove('hidden');
         if (errorMsg) errorMsg.textContent = err.message || 'Unable to load file content';
