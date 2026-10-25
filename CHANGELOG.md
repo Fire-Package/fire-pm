@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 ## [Unreleased]
 
 ### Fixed
+* Stream downloads natively via the browser and package folders only, removing client-side memory buffering, "Preparing..." delays, and preventing files from receiving a .zip extension ([#112](https://github.com/Fire-Package/fire-pm/issues/112), [#113](https://github.com/Fire-Package/fire-pm/pull/113)).
 * Allow JSON and HTML file downloads without triggering false-positive client-side error handling on HTTP 200 ([#110](https://github.com/Fire-Package/fire-pm/issues/110)).
 * Fix file path resolution (`~`, relative paths, and active shell CWD fallback) and eliminate unexpected HTML error file downloads in Fire SSH download and upload modals ([#108](https://github.com/Fire-Package/fire-pm/issues/108)).
 * Resolve conflict between tab reordering and drag-and-drop file upload overlay in Fire SSH, preventing internal tab dragging from triggering the upload overlay and allowing external files dropped over the tab bar to bubble to the file upload modal ([#102](https://github.com/Fire-Package/fire-pm/issues/102), [#103](https://github.com/Fire-Package/fire-pm/pull/103)).
