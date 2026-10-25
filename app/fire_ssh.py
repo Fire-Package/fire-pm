@@ -1599,6 +1599,104 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       </div>
     </div>
 
+    <!-- Terminal Image Hover Preview Card -->
+    <div id="image-hover-card" class="hidden fixed z-50 pointer-events-none p-1.5 bg-slate-950/95 border border-slate-700/80 rounded-xl shadow-2xl backdrop-blur-md transition-opacity duration-150 max-w-[240px]">
+      <div class="relative w-48 h-28 bg-slate-900/90 rounded-lg overflow-hidden flex items-center justify-center border border-slate-800">
+        <img id="image-hover-img" class="max-w-full max-h-full object-contain select-none" alt="Preview">
+        <div id="image-hover-spinner" class="absolute inset-0 flex items-center justify-center bg-slate-950/80 text-orange-400 text-xs">⟳ Loading...</div>
+      </div>
+      <div class="pt-1.5 px-1">
+        <div id="image-hover-name" class="text-[11px] font-mono text-white font-medium truncate"></div>
+        <div class="text-[10px] text-slate-400 flex items-center justify-between mt-0.5 font-mono">
+          <span id="image-hover-dims">-</span>
+          <span class="text-orange-400 font-semibold text-[9px] flex items-center gap-0.5">Click to view ↗</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Terminal Image Output Detected Toast Chip -->
+    <div id="image-output-chip" class="hidden fixed bottom-6 right-6 z-40 max-w-sm bg-slate-900/95 border border-orange-500/40 rounded-2xl shadow-2xl backdrop-blur-md p-3 flex items-center gap-3 transition-all duration-300 transform translate-y-2 select-none">
+      <div class="relative w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 overflow-hidden shrink-0 flex items-center justify-center cursor-pointer hover:opacity-80 transition" id="image-chip-thumb-container" title="Click to inspect image">
+        <img id="image-chip-img" class="max-w-full max-h-full object-contain" alt="Thumb">
+      </div>
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-1.5 text-[10px] font-semibold text-orange-400 uppercase tracking-wider">
+          <span>🖼️</span> Image Generated
+        </div>
+        <div id="image-chip-name" class="text-xs font-mono text-white truncate font-medium mt-0.5"></div>
+        <div class="text-[10px] text-slate-400 font-mono" id="image-chip-dims"></div>
+      </div>
+      <div class="flex items-center gap-1 shrink-0">
+        <button type="button" id="image-chip-view-btn" class="px-2.5 py-1 text-xs bg-orange-500 hover:bg-orange-600 text-white font-medium rounded-lg transition shadow">View</button>
+        <button type="button" onclick="dismissImageOutputChip()" class="p-1 text-slate-400 hover:text-white text-xs rounded-lg transition">✕</button>
+      </div>
+    </div>
+
+    <!-- Image Preview Lightbox Modal -->
+    <div id="image-preview-modal" class="hidden fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex flex-col justify-between font-sans select-none">
+      <!-- Top Bar -->
+      <div class="flex items-center justify-between px-4 py-3 bg-slate-950/80 border-b border-slate-800/80 shrink-0">
+        <div class="flex items-center gap-3 min-w-0">
+          <span class="text-lg">🖼️</span>
+          <div class="min-w-0">
+            <div id="image-modal-title" class="text-sm font-semibold text-white truncate font-mono">image.png</div>
+            <div id="image-modal-path" class="text-[11px] text-slate-400 font-mono truncate max-w-lg cursor-pointer hover:text-orange-300 transition" title="Click to copy path" onclick="copyModalImagePath()"></div>
+          </div>
+        </div>
+
+        <!-- Controls Toolbar -->
+        <div class="flex items-center gap-1.5 shrink-0">
+          <div class="flex items-center bg-slate-900/90 border border-slate-700/80 rounded-xl px-1.5 py-1 text-xs mr-2 font-mono text-slate-300">
+            <button type="button" onclick="zoomImagePreview(-0.25)" class="px-2 py-0.5 hover:bg-slate-800 rounded transition text-slate-200" title="Zoom Out (-)">−</button>
+            <span id="image-modal-zoom" class="px-2 min-w-[50px] text-center text-[11px] font-semibold text-orange-400">100%</span>
+            <button type="button" onclick="zoomImagePreview(0.25)" class="px-2 py-0.5 hover:bg-slate-800 rounded transition text-slate-200" title="Zoom In (+)">+</button>
+            <button type="button" onclick="resetImagePreviewZoom()" class="px-2 py-0.5 hover:bg-slate-800 rounded transition text-slate-400 hover:text-white" title="Reset Zoom (0)">1:1</button>
+            <button type="button" onclick="fitImagePreviewToScreen()" class="px-2 py-0.5 hover:bg-slate-800 rounded transition text-slate-400 hover:text-white" title="Fit to Screen">⊡</button>
+          </div>
+
+          <button type="button" onclick="copyModalImagePath()" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Copy Path">
+            <span>📋</span> <span class="hidden sm:inline">Copy Path</span>
+          </button>
+          <button type="button" onclick="downloadModalImage()" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Download">
+            <span>↓</span> <span class="hidden sm:inline">Download</span>
+          </button>
+          <button type="button" onclick="openModalImageInNewTab()" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Open In New Tab">
+            <span>↗</span>
+          </button>
+          <button type="button" onclick="closeImagePreviewModal()" class="ml-2 p-1.5 px-2 bg-slate-800 hover:bg-red-500/20 hover:text-red-400 rounded-xl text-slate-400 hover:border-red-500/30 border border-slate-700 text-sm transition" title="Close (Escape)">✕</button>
+        </div>
+      </div>
+
+      <!-- Main Viewer Viewport -->
+      <div id="image-modal-viewport" class="flex-1 relative overflow-hidden flex items-center justify-center p-4 cursor-grab active:cursor-grabbing bg-slate-950/50" style="background-image: radial-gradient(#1e293b 1px, transparent 1px); background-size: 24px 24px;">
+        <div id="image-modal-spinner" class="hidden absolute inset-0 flex items-center justify-center bg-slate-950/60 z-10 text-orange-400 text-sm">
+          <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 p-3 rounded-2xl shadow-xl">
+            <span class="animate-spin text-base">⟳</span>
+            <span>Loading image...</span>
+          </div>
+        </div>
+        <div id="image-modal-error" class="hidden absolute inset-0 flex items-center justify-center bg-slate-950/80 z-10 text-red-400 text-xs">
+          <div class="bg-slate-900 border border-red-500/30 p-4 rounded-2xl shadow-xl max-w-sm text-center">
+            <div class="text-2xl mb-1">⚠️</div>
+            <div id="image-modal-error-msg" class="text-slate-300">Unable to load image preview</div>
+          </div>
+        </div>
+        <img id="image-modal-img" class="max-w-none transition-transform duration-75 select-none rounded shadow-2xl" alt="Preview" draggable="false">
+      </div>
+
+      <!-- Bottom Status Bar -->
+      <div class="px-4 py-2 bg-slate-950/90 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400 font-mono shrink-0">
+        <div class="flex items-center gap-4">
+          <span id="image-modal-meta-dims">Dimensions: --</span>
+          <span id="image-modal-meta-size">Size: --</span>
+          <span id="image-modal-meta-type">Type: --</span>
+        </div>
+        <div class="text-[11px] text-slate-500 hidden md:block">
+          Use mouse wheel to zoom, drag to pan, <kbd class="px-1 py-0.5 bg-slate-800 rounded text-slate-400">Esc</kbd> to exit
+        </div>
+      </div>
+    </div>
+
     <!-- Custom Right-Click Context Menu -->
     <div id="term-context-menu" class="hidden fixed z-50 bg-slate-900/95 backdrop-blur-sm border border-slate-800 rounded-xl shadow-2xl shadow-black/60 py-1 min-w-[170px] text-xs select-none">
       <button onclick="copySelectionToClipboard(true); hideContextMenu();" class="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-between">
@@ -3552,6 +3650,383 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (ctxCloseTab) ctxCloseTab.classList.add('hidden');
     }
 
+    // ==================== TERMINAL IMAGE PREVIEW & LIGHTBOX ====================
+    let currentPreviewPath = '';
+    let currentPreviewTabId = '';
+    let imageZoom = 1.0;
+    let imagePanX = 0;
+    let imagePanY = 0;
+    let isPanningImage = false;
+    let panStartX = 0;
+    let panStartY = 0;
+    let hoverHideTimeout = null;
+    let imageChipTimer = null;
+    const recentDetectedImages = new Set();
+
+    function buildImageUrl(path, tabId, isDownload = false) {
+      const endpoint = isDownload ? '/api/download' : '/api/preview';
+      const fileParam = `file=${encodeURIComponent(path)}`;
+      const tabParam = (tabId || activeTabId) ? `tab=${encodeURIComponent(tabId || activeTabId)}` : '';
+      const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+      const qs = [fileParam, tabParam, tokenParam].filter(Boolean).join('&');
+      return `${endpoint}?${qs}`;
+    }
+
+    function registerImageLinkProvider(term, tabId) {
+      if (!term || typeof term.registerLinkProvider !== 'function') return;
+
+      term.registerLinkProvider({
+        provideLinks(bufferLineNumber, callback) {
+          const line = term.buffer.active.getLine(bufferLineNumber - 1);
+          if (!line) {
+            callback(undefined);
+            return;
+          }
+          const lineText = line.translateToString(true);
+          if (!lineText) {
+            callback(undefined);
+            return;
+          }
+
+          const regex = /(?:^|[\s"'`(\[<])((?:[~.A-Za-z0-9_-]*\/)?(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.(?:png|jpe?g|gif|webp|svg|bmp|ico))(?=[\s"'`()\[\]<>{},;:!?.]|$)/gi;
+          const links = [];
+          let match;
+
+          while ((match = regex.exec(lineText)) !== null) {
+            const fullMatch = match[0];
+            const imgPath = match[1];
+            const startOffset = match.index + fullMatch.indexOf(imgPath);
+            const endOffset = startOffset + imgPath.length;
+
+            links.push({
+              range: {
+                start: { x: startOffset + 1, y: bufferLineNumber },
+                end: { x: endOffset, y: bufferLineNumber }
+              },
+              text: imgPath,
+              activate: (e, text) => {
+                openImagePreviewModal(text, tabId);
+              },
+              hover: (e, text) => {
+                showImageHoverCard(e, text, tabId);
+              },
+              leave: () => {
+                hideImageHoverCard();
+              }
+            });
+          }
+
+          callback(links.length > 0 ? links : undefined);
+        }
+      });
+    }
+
+    function showImageHoverCard(event, path, tabId) {
+      clearTimeout(hoverHideTimeout);
+      const card = document.getElementById('image-hover-card');
+      const img = document.getElementById('image-hover-img');
+      const spinner = document.getElementById('image-hover-spinner');
+      const nameEl = document.getElementById('image-hover-name');
+      const dimsEl = document.getElementById('image-hover-dims');
+      if (!card || !img) return;
+
+      const fileName = path.split('/').pop() || path;
+      if (nameEl) nameEl.textContent = fileName;
+      if (dimsEl) dimsEl.textContent = 'Loading...';
+      if (spinner) spinner.classList.remove('hidden');
+
+      const previewUrl = buildImageUrl(path, tabId);
+      img.onload = () => {
+        if (spinner) spinner.classList.add('hidden');
+        if (dimsEl) dimsEl.textContent = `${img.naturalWidth} × ${img.naturalHeight}px`;
+      };
+      img.onerror = () => {
+        if (spinner) spinner.classList.add('hidden');
+        if (dimsEl) dimsEl.textContent = 'Not found';
+      };
+      img.src = previewUrl;
+
+      const posX = Math.min(event.clientX + 14, window.innerWidth - 250);
+      let posY = event.clientY + 14;
+      if (posY + 160 > window.innerHeight) {
+        posY = Math.max(10, event.clientY - 170);
+      }
+      card.style.left = `${posX}px`;
+      card.style.top = `${posY}px`;
+      card.classList.remove('hidden');
+    }
+
+    function hideImageHoverCard() {
+      hoverHideTimeout = setTimeout(() => {
+        const card = document.getElementById('image-hover-card');
+        if (card) card.classList.add('hidden');
+      }, 120);
+    }
+
+    function openImagePreviewModal(path, tabId) {
+      if (!path) return;
+      hideImageHoverCard();
+      dismissImageOutputChip();
+
+      currentPreviewPath = path;
+      currentPreviewTabId = tabId || activeTabId;
+
+      const modal = document.getElementById('image-preview-modal');
+      const img = document.getElementById('image-modal-img');
+      const spinner = document.getElementById('image-modal-spinner');
+      const errBox = document.getElementById('image-modal-error');
+      const titleEl = document.getElementById('image-modal-title');
+      const pathEl = document.getElementById('image-modal-path');
+      const metaDims = document.getElementById('image-modal-meta-dims');
+      const metaSize = document.getElementById('image-modal-meta-size');
+      const metaType = document.getElementById('image-modal-meta-type');
+
+      const fileName = path.split('/').pop() || path;
+      const ext = fileName.split('.').pop() || 'image';
+
+      if (titleEl) titleEl.textContent = fileName;
+      if (pathEl) pathEl.textContent = path;
+      if (metaType) metaType.textContent = `Type: ${ext.toUpperCase()}`;
+      if (metaDims) metaDims.textContent = 'Dimensions: loading...';
+      if (metaSize) metaSize.textContent = 'Size: ...';
+
+      imageZoom = 1.0;
+      imagePanX = 0;
+      imagePanY = 0;
+      updateImageTransform();
+
+      if (errBox) errBox.classList.add('hidden');
+      if (spinner) spinner.classList.remove('hidden');
+      if (modal) modal.classList.remove('hidden');
+
+      const previewUrl = buildImageUrl(path, currentPreviewTabId);
+
+      fetch(previewUrl, { method: 'HEAD' }).then(r => {
+        if (r.ok) {
+          const len = r.headers.get('content-length');
+          if (len && metaSize) {
+            metaSize.textContent = `Size: ${formatBytes(parseInt(len, 10))}`;
+          }
+        }
+      }).catch(() => {});
+
+      img.onload = () => {
+        if (spinner) spinner.classList.add('hidden');
+        if (metaDims) {
+          metaDims.textContent = `Dimensions: ${img.naturalWidth} × ${img.naturalHeight}px`;
+        }
+        const vp = document.getElementById('image-modal-viewport');
+        if (vp && (img.naturalWidth > vp.clientWidth * 0.9 || img.naturalHeight > vp.clientHeight * 0.9)) {
+          fitImagePreviewToScreen();
+        }
+      };
+
+      img.onerror = () => {
+        if (spinner) spinner.classList.add('hidden');
+        if (errBox) {
+          const errMsg = document.getElementById('image-modal-error-msg');
+          if (errMsg) errMsg.textContent = `Could not load image: "${path}" (file not found or access denied)`;
+          errBox.classList.remove('hidden');
+        }
+      };
+
+      img.src = previewUrl;
+    }
+
+    function closeImagePreviewModal() {
+      const modal = document.getElementById('image-preview-modal');
+      const img = document.getElementById('image-modal-img');
+      if (modal) modal.classList.add('hidden');
+      if (img) img.src = '';
+      currentPreviewPath = '';
+    }
+
+    function updateImageTransform() {
+      const img = document.getElementById('image-modal-img');
+      const zoomEl = document.getElementById('image-modal-zoom');
+      if (img) {
+        img.style.transform = `translate(${imagePanX}px, ${imagePanY}px) scale(${imageZoom})`;
+      }
+      if (zoomEl) {
+        zoomEl.textContent = `${Math.round(imageZoom * 100)}%`;
+      }
+    }
+
+    function zoomImagePreview(delta) {
+      imageZoom = Math.min(8.0, Math.max(0.1, imageZoom + delta));
+      updateImageTransform();
+    }
+
+    function resetImagePreviewZoom() {
+      imageZoom = 1.0;
+      imagePanX = 0;
+      imagePanY = 0;
+      updateImageTransform();
+    }
+
+    function fitImagePreviewToScreen() {
+      const vp = document.getElementById('image-modal-viewport');
+      const img = document.getElementById('image-modal-img');
+      if (!vp || !img || !img.naturalWidth || !img.naturalHeight) return;
+      const pad = 48;
+      const scaleX = (vp.clientWidth - pad) / img.naturalWidth;
+      const scaleY = (vp.clientHeight - pad) / img.naturalHeight;
+      imageZoom = Math.min(1.0, Math.min(scaleX, scaleY));
+      imagePanX = 0;
+      imagePanY = 0;
+      updateImageTransform();
+    }
+
+    function copyModalImagePath() {
+      if (!currentPreviewPath) return;
+      navigator.clipboard.writeText(currentPreviewPath).then(() => {
+        showToast('Path copied to clipboard!');
+      }).catch(() => {
+        showToast(currentPreviewPath);
+      });
+    }
+
+    function downloadModalImage() {
+      if (!currentPreviewPath) return;
+      const dlUrl = buildImageUrl(currentPreviewPath, currentPreviewTabId, true);
+      const a = document.createElement('a');
+      a.href = dlUrl;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast('Download started');
+    }
+
+    function openModalImageInNewTab() {
+      if (!currentPreviewPath) return;
+      const previewUrl = buildImageUrl(currentPreviewPath, currentPreviewTabId, false);
+      window.open(previewUrl, '_blank');
+    }
+
+    function showImageOutputChip(path, tabId) {
+      const chip = document.getElementById('image-output-chip');
+      const img = document.getElementById('image-chip-img');
+      const nameEl = document.getElementById('image-chip-name');
+      const dimsEl = document.getElementById('image-chip-dims');
+      const viewBtn = document.getElementById('image-chip-view-btn');
+      const thumbBox = document.getElementById('image-chip-thumb-container');
+      if (!chip || !img) return;
+
+      clearTimeout(imageChipTimer);
+
+      const fileName = path.split('/').pop() || path;
+      if (nameEl) nameEl.textContent = fileName;
+      if (dimsEl) dimsEl.textContent = 'Image output detected';
+
+      const previewUrl = buildImageUrl(path, tabId);
+      img.onload = () => {
+        if (dimsEl) dimsEl.textContent = `${img.naturalWidth} × ${img.naturalHeight}px`;
+      };
+      img.onerror = () => {
+        chip.classList.add('hidden');
+      };
+      img.src = previewUrl;
+
+      const openAction = () => openImagePreviewModal(path, tabId);
+      if (viewBtn) viewBtn.onclick = openAction;
+      if (thumbBox) thumbBox.onclick = openAction;
+
+      chip.classList.remove('hidden');
+      imageChipTimer = setTimeout(() => {
+        dismissImageOutputChip();
+      }, 8000);
+    }
+
+    function dismissImageOutputChip() {
+      clearTimeout(imageChipTimer);
+      const chip = document.getElementById('image-output-chip');
+      if (chip) chip.classList.add('hidden');
+    }
+
+    function detectImageOutputInChunk(tab, data) {
+      if (!data) return;
+      let text = '';
+      if (typeof data === 'string') {
+        text = data;
+      } else if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+        try {
+          text = new TextDecoder().decode(data);
+        } catch(e) { return; }
+      }
+      if (!text || text.length < 5) return;
+      const clean = text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+      const regex = /(?:^|[\s"'`(\[<])((?:[~.A-Za-z0-9_-]*\/)?(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.(?:png|jpe?g|gif|webp|svg|bmp|ico))(?=[\s"'`()\[\]<>{},;:!?.]|$)/gi;
+      let match;
+      while ((match = regex.exec(clean)) !== null) {
+        const imgPath = match[1];
+        if (recentDetectedImages.has(imgPath)) continue;
+        recentDetectedImages.add(imgPath);
+        if (recentDetectedImages.size > 100) {
+          const first = recentDetectedImages.values().next().value;
+          recentDetectedImages.delete(first);
+        }
+        showImageOutputChip(imgPath, tab ? tab.id : activeTabId);
+        break;
+      }
+    }
+
+    function setupImageViewerInteractions() {
+      const vp = document.getElementById('image-modal-viewport');
+      if (!vp) return;
+
+      vp.addEventListener('mousedown', (e) => {
+        if (e.target.closest('button')) return;
+        isPanningImage = true;
+        panStartX = e.clientX - imagePanX;
+        panStartY = e.clientY - imagePanY;
+        vp.classList.add('cursor-grabbing');
+        vp.classList.remove('cursor-grab');
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!isPanningImage) return;
+        imagePanX = e.clientX - panStartX;
+        imagePanY = e.clientY - panStartY;
+        updateImageTransform();
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (isPanningImage) {
+          isPanningImage = false;
+          if (vp) {
+            vp.classList.remove('cursor-grabbing');
+            vp.classList.add('cursor-grab');
+          }
+        }
+      });
+
+      vp.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.15 : 0.85;
+        imageZoom = Math.min(8.0, Math.max(0.1, imageZoom * factor));
+        updateImageTransform();
+      }, { passive: false });
+
+      window.addEventListener('keydown', (e) => {
+        const modal = document.getElementById('image-preview-modal');
+        if (!modal || modal.classList.contains('hidden')) return;
+
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          closeImagePreviewModal();
+        } else if (e.key === '+' || e.key === '=') {
+          e.preventDefault();
+          zoomImagePreview(0.25);
+        } else if (e.key === '-' || e.key === '_') {
+          e.preventDefault();
+          zoomImagePreview(-0.25);
+        } else if (e.key === '0') {
+          e.preventDefault();
+          resetImagePreviewZoom();
+        }
+      });
+    }
+
     function renderServerOutput(raw) {
       const cur = getActiveTab();
       if (cur) {
@@ -3912,6 +4387,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         t.loadAddon(new WebLinksAddon.WebLinksAddon());
       }
       t.open(mountEl);
+      if (typeof registerImageLinkProvider === 'function') {
+        registerImageLinkProvider(t, tabId);
+      }
 
       // Hardware accelerated GPU rendering (with automatic canvas fallback)
       if (typeof WebglAddon !== 'undefined' && WebglAddon.WebglAddon) {
@@ -5634,6 +6112,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (tab && tab.term) {
         tab.term.write(data);
         recordTerminalOutputChunk(data);
+        if (typeof detectImageOutputInChunk === 'function') {
+          detectImageOutputInChunk(tab, data);
+        }
       }
     }
 
@@ -5659,6 +6140,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function initGlobalShortcuts() {
+      if (typeof setupImageViewerInteractions === 'function') {
+        setupImageViewerInteractions();
+      }
       window.addEventListener('resize', () => updateViewportLayout());
 
       if (window.visualViewport) {
@@ -6104,7 +6588,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         parsed = urllib.parse.urlparse(self.path)
         norm_path = parsed.path.rstrip('/') or '/'
-        if norm_path == '/api/download':
+        if norm_path in ('/api/download', '/api/preview', '/api/view'):
             if not self.is_authenticated():
                 self.send_response(401)
                 self.send_header("Content-Type", "application/json")
@@ -6157,7 +6641,8 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(file_size))
                 self.send_header("Access-Control-Expose-Headers", "Content-Disposition")
-                self.send_header("Content-Disposition", f'attachment; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
+                disposition_type = "inline" if (norm_path in ('/api/preview', '/api/view') or query.get('inline', ['0'])[0] in ('1', 'true', 'yes')) else "attachment"
+                self.send_header("Content-Disposition", f'{disposition_type}; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
                 self.end_headers()
             except Exception:
                 self.send_response(500)
@@ -6340,7 +6825,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             self.send_json({"success": True, "dir": target_dir, "cwd": cwd, "items": items[:250]})
             return
 
-        elif parsed.path.rstrip('/') == '/api/download':
+        elif parsed.path.rstrip('/') in ('/api/download', '/api/preview', '/api/view'):
             if not self.is_authenticated():
                 self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
                 return
@@ -6439,7 +6924,8 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(file_size))
                 self.send_header("Access-Control-Expose-Headers", "Content-Disposition")
                 safe_name = urllib.parse.quote(filename)
-                self.send_header("Content-Disposition", f'attachment; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
+                disposition_type = "inline" if (parsed.path.rstrip('/') in ('/api/preview', '/api/view') or query.get('inline', ['0'])[0] in ('1', 'true', 'yes')) else "attachment"
+                self.send_header("Content-Disposition", f'{disposition_type}; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
                 self.end_headers()
 
                 with open(target_path, 'rb') as f:
