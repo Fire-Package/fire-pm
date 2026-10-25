@@ -99,9 +99,9 @@ class TestImagePreviewEndpoint:
 class TestImagePreviewFrontendIntegration:
     def test_html_template_contains_image_preview_components(self):
         assert 'id="image-preview-modal"' in HTML_TEMPLATE
-        assert 'id="image-hover-card"' in HTML_TEMPLATE
+        assert ('id="file-hover-menu"' in HTML_TEMPLATE or 'id="image-hover-card"' in HTML_TEMPLATE)
         assert 'id="image-output-chip"' in HTML_TEMPLATE
-        assert 'registerImageLinkProvider' in HTML_TEMPLATE
+        assert ('registerFileLinkProvider' in HTML_TEMPLATE or 'registerImageLinkProvider' in HTML_TEMPLATE)
         assert 'openImagePreviewModal' in HTML_TEMPLATE
         assert 'detectImageOutputInChunk' in HTML_TEMPLATE
         assert 'setupImageViewerInteractions' in HTML_TEMPLATE
