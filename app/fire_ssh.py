@@ -1420,18 +1420,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             </p>
           </div>
 
-          <!-- Download Directory as Zip Toggle (Off by default) -->
-          <div class="pt-1 pb-1">
-            <label class="flex items-center justify-between p-2.5 bg-slate-950/70 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition">
-              <div class="flex items-center gap-2">
-                <span class="text-sm">🗜️</span>
-                <div>
-                  <span class="text-xs text-slate-200 font-medium block">Allow folder download as .zip</span>
-                  <span class="text-[10px] text-slate-400 block">Package entire directory into a zip archive on the fly</span>
-                </div>
-              </div>
-              <input type="checkbox" id="download-zip-toggle" class="w-4 h-4 rounded text-orange-500 bg-slate-900 border-slate-700 focus:ring-orange-500 focus:ring-offset-slate-900 cursor-pointer">
-            </label>
+          <!-- Download Folder Information Hint -->
+          <div class="pt-0.5 pb-0.5">
+            <div class="flex items-center gap-2 p-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-slate-400 text-xs">
+              <span class="text-sm">📦</span>
+              <span class="text-[11px] leading-tight">Folders are automatically packaged as <code class="text-orange-300 font-mono">.zip</code> archives. Files are downloaded directly.</span>
+            </div>
           </div>
 
           <!-- Error Alert Banner -->
@@ -3306,10 +3300,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       await updateCwd();
       const modal = document.getElementById('download-modal');
       const input = document.getElementById('download-path-input');
-      const zipToggle = document.getElementById('download-zip-toggle');
       const errorBanner = document.getElementById('download-error-banner');
       if (modal) modal.classList.remove('hidden');
-      if (zipToggle) zipToggle.checked = false; // Off by default
       if (errorBanner) errorBanner.classList.add('hidden');
 
       if (!downloadAutoComp) {
@@ -3319,15 +3311,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           spinnerEl: document.getElementById('download-spinner'),
           countBadgeEl: document.getElementById('download-count-badge'),
           filterType: 'all',
-          onSelect: (item) => {
+          onSelect: () => {
             const errorBanner = document.getElementById('download-error-banner');
             if (errorBanner) errorBanner.classList.add('hidden');
-            const zipToggle = document.getElementById('download-zip-toggle');
-            if (item && item.is_dir && zipToggle) {
-              zipToggle.checked = true;
-            } else if (item && !item.is_dir && zipToggle) {
-              zipToggle.checked = false;
-            }
           }
         });
       }
@@ -3362,107 +3348,53 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     async function handleDownloadSubmit(e) {
       e.preventDefault();
       const input = document.getElementById('download-path-input');
-      const zipToggle = document.getElementById('download-zip-toggle');
       const submitBtn = document.getElementById('download-submit-btn');
-      const submitLabel = document.getElementById('download-submit-label');
       const errorBanner = document.getElementById('download-error-banner');
       if (!input) return;
       const val = input.value.trim();
       if (!val) return;
 
       if (errorBanner) errorBanner.classList.add('hidden');
-      const isZip = zipToggle && zipToggle.checked;
       const tabParam = activeTabId ? `tab=${encodeURIComponent(activeTabId)}` : '';
-      const zipParam = isZip ? 'zip=1' : '';
       const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
       const fileParam = `file=${encodeURIComponent(val)}`;
-      const qs = [fileParam, zipParam, tabParam, tokenParam].filter(Boolean).join('&');
+      const qs = [fileParam, tabParam, tokenParam].filter(Boolean).join('&');
       const dlUrl = `/api/download?${qs}`;
 
       if (submitBtn) {
         submitBtn.disabled = true;
         submitBtn.classList.add('opacity-75');
       }
-      if (submitLabel) {
-        submitLabel.textContent = 'Preparing...';
-      }
 
       try {
-        const res = await fetch(dlUrl, {
-          method: 'GET',
-          headers: {
-            'Accept': isZip ? 'application/zip, */*' : '*/*'
-          }
-        });
+        // Fast preflight check (~10ms) to ensure file/directory exists and auth is valid
+        const res = await fetch(dlUrl, { method: 'HEAD' });
 
-        const contentType = (res.headers.get('content-type') || '').toLowerCase();
-        const disp = res.headers.get('content-disposition');
-
-        // Only handle as error if HTTP status is non-2xx
         if (!res.ok) {
           let errMsg = `Download failed (HTTP ${res.status})`;
           try {
-            if (contentType.includes('application/json')) {
-              const data = await res.json();
-              if (data && data.error) errMsg = data.error;
-            } else if (contentType.includes('text/html')) {
-              const text = await res.text();
-              const titleMatch = text.match(/<title>(.*?)<\/title>/i);
-              const pMatch = text.match(/<p>(.*?)<\/p>/i);
-              if (titleMatch && titleMatch[1]) {
-                errMsg = titleMatch[1] + (pMatch && pMatch[1] ? `: ${pMatch[1]}` : '');
-              } else if (text.length > 0 && text.length < 200) {
-                errMsg = text.trim();
-              }
-            }
+            const errRes = await fetch(dlUrl, { method: 'GET' });
+            const data = await errRes.json();
+            if (data && data.error) errMsg = data.error;
           } catch(e) {}
           showDownloadModalError(errMsg);
           return;
         }
 
-        // Intercept unexpected SPA/HTML proxy fallback if Content-Disposition is missing
-        if (contentType.includes('text/html') && !disp) {
-          showDownloadModalError('Download failed: received HTML page instead of file');
-          return;
-        }
-
-        // Successfully received file/archive stream
-        let filename = '';
-        if (disp) {
-          const matchUtf8 = disp.match(/filename\*=UTF-8''([^;]+)/i);
-          if (matchUtf8) {
-            filename = decodeURIComponent(matchUtf8[1]);
-          } else {
-            const matchStd = disp.match(/filename="?([^";]+)"?/i);
-            if (matchStd) filename = matchStd[1];
-          }
-        }
-        if (!filename) {
-          const cleanName = val.replace(/\/+$/, '').split('/').pop() || 'download';
-          filename = isZip ? `${cleanName}.zip` : cleanName;
-        }
-
-        const blob = await res.blob();
-        const blobUrl = URL.createObjectURL(blob);
+        // Verified valid: close modal immediately and trigger native browser streaming
+        closeDownloadModal();
         const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = filename;
+        a.href = dlUrl;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
-
-        closeDownloadModal();
-        showToast(`Downloaded ${filename} (${formatBytes(blob.size)})`);
+        showToast('Download started');
       } catch(err) {
         showDownloadModalError(`Download error: ${err.message || 'connection failed'}`);
       } finally {
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.classList.remove('opacity-75');
-        }
-        if (submitLabel) {
-          submitLabel.textContent = 'Download';
         }
       }
     }
@@ -6190,7 +6122,6 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
             target_path = resolve_fs_path(cwd, file_param)
-            allow_zip = query.get('zip', ['0'])[0] in ('1', 'true', 'yes')
 
             if not os.path.exists(target_path):
                 self.send_response(404)
@@ -6199,17 +6130,13 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 return
 
             if os.path.isdir(target_path):
-                if not allow_zip:
-                    self.send_response(400)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    return
-                # Allow directory zip download
+                # Folders are automatically packaged and served as .zip archives
                 folder_name = os.path.basename(target_path.rstrip(os.sep)) or "archive"
                 clean_name = folder_name.replace('"', '\\"')
                 safe_name = urllib.parse.quote(f"{folder_name}.zip")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/zip")
+                self.send_header("Access-Control-Expose-Headers", "Content-Disposition")
                 self.send_header("Content-Disposition", f'attachment; filename="{clean_name}.zip"; filename*=UTF-8\'\'{safe_name}')
                 self.end_headers()
                 return
@@ -6229,6 +6156,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(file_size))
+                self.send_header("Access-Control-Expose-Headers", "Content-Disposition")
                 self.send_header("Content-Disposition", f'attachment; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
                 self.end_headers()
             except Exception:
@@ -6430,17 +6358,12 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 return
 
             target_path = resolve_fs_path(cwd, file_param)
-            allow_zip = query.get('zip', ['0'])[0] in ('1', 'true', 'yes')
 
             if not os.path.exists(target_path):
                 self.send_json({"success": False, "error": f"Path not found: {file_param}"}, status=404)
                 return
 
             if os.path.isdir(target_path):
-                if not allow_zip:
-                    self.send_json({"success": False, "error": f"'{os.path.basename(target_path.rstrip(os.sep)) or target_path}' is a folder. Enable 'Allow folder download as .zip' in the download dialog to download this folder."}, status=400)
-                    return
-
                 tmp_zip_path = None
                 try:
                     folder_name = os.path.basename(target_path.rstrip(os.sep)) or "archive"
@@ -6478,6 +6401,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                     self.send_response(200)
                     self.send_header("Content-Type", "application/zip")
                     self.send_header("Content-Length", str(zip_size))
+                    self.send_header("Access-Control-Expose-Headers", "Content-Disposition")
                     self.send_header("Content-Disposition", f'attachment; filename="{clean_name}.zip"; filename*=UTF-8\'\'{safe_name}')
                     self.end_headers()
 
@@ -6513,6 +6437,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(file_size))
+                self.send_header("Access-Control-Expose-Headers", "Content-Disposition")
                 safe_name = urllib.parse.quote(filename)
                 self.send_header("Content-Disposition", f'attachment; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
                 self.end_headers()
