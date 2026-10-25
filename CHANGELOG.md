@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 ## [Unreleased]
 
 ### Fixed
+* Fix file path resolution (`~`, relative paths, and active shell CWD fallback) and eliminate unexpected HTML error file downloads in Fire SSH download and upload modals ([#108](https://github.com/Fire-Package/fire-pm/issues/108)).
 * Resolve conflict between tab reordering and drag-and-drop file upload overlay in Fire SSH, preventing internal tab dragging from triggering the upload overlay and allowing external files dropped over the tab bar to bubble to the file upload modal ([#102](https://github.com/Fire-Package/fire-pm/issues/102), [#103](https://github.com/Fire-Package/fire-pm/pull/103)).
 * Isolate custom tunnel Nginx `server_name` strictly to `~^[a-z0-9]{8,10}-tunnel\.` subdomains to prevent hijacking apex domains or conflicting with existing virtual hosts ([#100](https://github.com/Fire-Package/fire-pm/issues/100), [#101](https://github.com/Fire-Package/fire-pm/pull/101)).
 * Prevent dual split terminal panes from physically flipping positions on screen when clicking panes or switching tabs ([#98](https://github.com/Fire-Package/fire-pm/issues/98), [#99](https://github.com/Fire-Package/fire-pm/pull/99)).
