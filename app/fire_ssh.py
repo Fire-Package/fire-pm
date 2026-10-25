@@ -375,6 +375,19 @@ def ws_make_frame(payload: bytes, opcode: int = 1) -> bytes:
     return header + payload
 
 
+def resolve_fs_path(base_dir: str, target: str) -> str:
+    """Safely resolves an absolute or relative path, expanding ~ and handling path normalization."""
+    if not base_dir:
+        base_dir = os.environ.get("HOME", "/root")
+    if not target or not str(target).strip():
+        return os.path.realpath(os.path.expanduser(base_dir))
+    target = str(target).strip()
+    expanded = os.path.expanduser(target)
+    if os.path.isabs(expanded):
+        return os.path.realpath(expanded)
+    return os.path.realpath(os.path.join(base_dir, expanded))
+
+
 # ==================== PERSISTENT TERMINAL ENGINE ====================
 
 class TerminalSession:
@@ -803,10 +816,10 @@ class TerminalSessionManager:
             sess = self.sessions.get(key)
             if sess and sess.is_alive():
                 return sess
-            if not tab_id:
-                for sess in self.sessions.values():
-                    if sess.is_alive():
-                        return sess
+            # Fallback to any alive session if specific tab wasn't found or has terminated
+            for s in self.sessions.values():
+                if s.is_alive():
+                    return s
             return None
 
     def get_or_create(self, token: str = None, tab_id: str = None, shell: str = None) -> TerminalSession:
@@ -2718,8 +2731,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
 
       try {
-        const tabParam = activeTabId ? `&tab=${encodeURIComponent(activeTabId)}` : '';
-        const res = await fetch(`/api/suggest?dir=${encodeURIComponent(dirPath)}&type=${encodeURIComponent(filterType)}${tabParam}`);
+        const tabParam = activeTabId ? `tab=${encodeURIComponent(activeTabId)}` : '';
+        const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+        const dirParam = `dir=${encodeURIComponent(dirPath)}`;
+        const typeParam = `type=${encodeURIComponent(filterType)}`;
+        const qs = [dirParam, typeParam, tabParam, tokenParam].filter(Boolean).join('&');
+        const res = await fetch(`/api/suggest?${qs}`);
         if (res.ok) {
           const data = await res.json();
           if (data && data.success && Array.isArray(data.items)) {
@@ -2766,11 +2783,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (!raw) {
           return { parentDir: currentCwd, baseName: '', isAbsolute: false };
         }
+        const isAbs = raw.startsWith('/') || raw.startsWith('~');
         if (raw === '/' || raw === '~') {
           return { parentDir: raw, baseName: '', isAbsolute: true };
         }
         if (raw.endsWith('/')) {
-          return { parentDir: raw.slice(0, -1) || '/', baseName: '', isAbsolute: raw.startsWith('/') };
+          return { parentDir: raw.slice(0, -1) || '/', baseName: '', isAbsolute: isAbs };
         }
         const lastSlash = raw.lastIndexOf('/');
         if (lastSlash === -1) {
@@ -2778,7 +2796,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
         const parent = raw.slice(0, lastSlash) || '/';
         const base = raw.slice(lastSlash + 1);
-        return { parentDir: parent, baseName: base, isAbsolute: raw.startsWith('/') };
+        return { parentDir: parent, baseName: base, isAbsolute: isAbs };
       }
 
       async handleFocus() {
@@ -2965,6 +2983,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           if (isVisible && this.selectedIndex >= 0 && this.items.length > 0) {
             const item = this.items[this.selectedIndex];
             if (item.is_dir) {
+              const currentVal = this.inputEl.value.trim().replace(/\/+$/, '');
+              if (currentVal.endsWith(item.name) && this.filterType === 'dir_only') {
+                this.hide();
+                return;
+              }
               e.preventDefault();
               this.selectItem(this.selectedIndex);
               return;
@@ -2990,8 +3013,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     async function updateCwd() {
       try {
-        const tabParam = activeTabId ? `?tab=${encodeURIComponent(activeTabId)}` : '';
-        const res = await fetch(`/api/cwd${tabParam}`);
+        const tabParam = activeTabId ? `tab=${encodeURIComponent(activeTabId)}` : '';
+        const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+        const qs = [tabParam, tokenParam].filter(Boolean).join('&');
+        const res = await fetch(`/api/cwd${qs ? '?' + qs : ''}`);
         if (res.ok) {
           const data = await res.json();
           if (data && data.cwd) {
@@ -3211,8 +3236,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         try {
           await new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
-            const tabParam = activeTabId ? `&tab=${encodeURIComponent(activeTabId)}` : '';
-            const url = `/api/upload?name=${encodeURIComponent(file.name)}&dest=${encodeURIComponent(destDirectory)}${tabParam}`;
+            const tabParam = activeTabId ? `tab=${encodeURIComponent(activeTabId)}` : '';
+            const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+            const nameParam = `name=${encodeURIComponent(file.name)}`;
+            const destParam = `dest=${encodeURIComponent(destDirectory)}`;
+            const qs = [nameParam, destParam, tabParam, tokenParam].filter(Boolean).join('&');
+            const url = `/api/upload?${qs}`;
             xhr.open('POST', url, true);
 
             xhr.upload.onprogress = (evt) => {
@@ -3230,11 +3259,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 showToast(`Uploaded ${file.name} to ${destDirectory}`);
                 resolve();
               } else {
-                let errMsg = 'Upload failed';
+                let errMsg = `Upload failed (${xhr.status})`;
                 try {
                   const res = JSON.parse(xhr.responseText);
                   if (res && res.error) errMsg = res.error;
-                } catch(e) {}
+                } catch(e) {
+                  const titleMatch = xhr.responseText.match(/<title>(.*?)<\/title>/i);
+                  if (titleMatch && titleMatch[1]) errMsg = titleMatch[1];
+                  else if (xhr.responseText.length > 0 && xhr.responseText.length < 150) errMsg = xhr.responseText.trim();
+                }
                 showToast(`Upload failed: ${errMsg}`);
                 reject(new Error(errMsg));
               }
@@ -3289,6 +3322,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           onSelect: (item) => {
             const errorBanner = document.getElementById('download-error-banner');
             if (errorBanner) errorBanner.classList.add('hidden');
+            const zipToggle = document.getElementById('download-zip-toggle');
+            if (item && item.is_dir && zipToggle) {
+              zipToggle.checked = true;
+            } else if (item && !item.is_dir && zipToggle) {
+              zipToggle.checked = false;
+            }
           }
         });
       }
@@ -3325,6 +3364,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const input = document.getElementById('download-path-input');
       const zipToggle = document.getElementById('download-zip-toggle');
       const submitBtn = document.getElementById('download-submit-btn');
+      const submitLabel = document.getElementById('download-submit-label');
       const errorBanner = document.getElementById('download-error-banner');
       if (!input) return;
       const val = input.value.trim();
@@ -3332,51 +3372,91 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       if (errorBanner) errorBanner.classList.add('hidden');
       const isZip = zipToggle && zipToggle.checked;
-      const tabParam = activeTabId ? `&tab=${encodeURIComponent(activeTabId)}` : '';
-      const zipParam = isZip ? '&zip=1' : '';
-      const dlUrl = `/api/download?file=${encodeURIComponent(val)}${zipParam}${tabParam}`;
+      const tabParam = activeTabId ? `tab=${encodeURIComponent(activeTabId)}` : '';
+      const zipParam = isZip ? 'zip=1' : '';
+      const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+      const fileParam = `file=${encodeURIComponent(val)}`;
+      const qs = [fileParam, zipParam, tabParam, tokenParam].filter(Boolean).join('&');
+      const dlUrl = `/api/download?${qs}`;
 
       if (submitBtn) {
         submitBtn.disabled = true;
         submitBtn.classList.add('opacity-75');
       }
+      if (submitLabel) {
+        submitLabel.textContent = 'Preparing...';
+      }
 
       try {
-        const res = await fetch(dlUrl, { method: 'HEAD' });
-        if (res.ok) {
-          closeDownloadModal();
-          const cleanName = val.replace(/\/+$/, '').split('/').pop() || 'download';
-          const filename = isZip ? `${cleanName}.zip` : cleanName;
-          const a = document.createElement('a');
-          a.href = dlUrl;
-          a.download = filename;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          showToast(`Downloading ${filename}...`);
-        } else {
-          // If HEAD check returns an error, fetch error details via GET JSON
+        const res = await fetch(dlUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': isZip ? 'application/zip, */*' : '*/*'
+          }
+        });
+
+        const contentType = (res.headers.get('content-type') || '').toLowerCase();
+
+        // Intercept any non-2xx response or responses returning text/html or application/json error payloads
+        if (!res.ok || contentType.includes('application/json') || contentType.includes('text/html')) {
+          let errMsg = `Download failed (HTTP ${res.status})`;
           try {
-            const errRes = await fetch(dlUrl, { method: 'GET' });
-            const data = await errRes.json();
-            const errMsg = data.error || `Download failed (${res.status} ${res.statusText})`;
-            showDownloadModalError(errMsg);
-          } catch(e) {
-            if (res.status === 404) {
-              showDownloadModalError(`File or directory not found: "${val}"`);
-            } else if (res.status === 400) {
-              showDownloadModalError(`Cannot download: Target is a directory. Enable "Allow folder download as .zip" to download.`);
+            if (contentType.includes('application/json')) {
+              const data = await res.json();
+              if (data && data.error) errMsg = data.error;
             } else {
-              showDownloadModalError(`Download request failed with HTTP ${res.status}`);
+              const text = await res.text();
+              const titleMatch = text.match(/<title>(.*?)<\/title>/i);
+              const pMatch = text.match(/<p>(.*?)<\/p>/i);
+              if (titleMatch && titleMatch[1]) {
+                errMsg = titleMatch[1] + (pMatch && pMatch[1] ? `: ${pMatch[1]}` : '');
+              } else if (text.length > 0 && text.length < 200) {
+                errMsg = text.trim();
+              }
             }
+          } catch(e) {}
+          showDownloadModalError(errMsg);
+          return;
+        }
+
+        // Successfully received file/archive stream
+        let filename = '';
+        const disp = res.headers.get('content-disposition');
+        if (disp) {
+          const matchUtf8 = disp.match(/filename\*=UTF-8''([^;]+)/i);
+          if (matchUtf8) {
+            filename = decodeURIComponent(matchUtf8[1]);
+          } else {
+            const matchStd = disp.match(/filename="?([^";]+)"?/i);
+            if (matchStd) filename = matchStd[1];
           }
         }
+        if (!filename) {
+          const cleanName = val.replace(/\/+$/, '').split('/').pop() || 'download';
+          filename = isZip ? `${cleanName}.zip` : cleanName;
+        }
+
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+
+        closeDownloadModal();
+        showToast(`Downloaded ${filename} (${formatBytes(blob.size)})`);
       } catch(err) {
-        showDownloadModalError(`Network error while preparing download: ${err.message || 'connection issue'}`);
+        showDownloadModalError(`Download error: ${err.message || 'connection failed'}`);
       } finally {
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.classList.remove('opacity-75');
+        }
+        if (submitLabel) {
+          submitLabel.textContent = 'Download';
         }
       }
     }
@@ -6085,9 +6165,12 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         parsed = urllib.parse.urlparse(self.path)
-        if parsed.path == '/api/download':
+        norm_path = parsed.path.rstrip('/') or '/'
+        if norm_path == '/api/download':
             if not self.is_authenticated():
-                self.send_error(401, "Unauthorized")
+                self.send_response(401)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
                 return
             token = self.get_auth_token()
             query = urllib.parse.parse_qs(parsed.query)
@@ -6096,49 +6179,75 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
             file_param = query.get('file', [None])[0] or query.get('path', [None])[0]
             if not file_param:
-                self.send_error(400, "Missing file parameter")
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
                 return
-            target_path = os.path.realpath(file_param) if os.path.isabs(file_param) else os.path.realpath(os.path.join(cwd, file_param))
+            target_path = resolve_fs_path(cwd, file_param)
             allow_zip = query.get('zip', ['0'])[0] in ('1', 'true', 'yes')
 
             if not os.path.exists(target_path):
-                self.send_error(404, "File or directory not found")
+                self.send_response(404)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
                 return
 
             if os.path.isdir(target_path):
                 if not allow_zip:
-                    self.send_error(400, "Directory download as zip is disabled. Enable the zip option in the download dialog to download this folder.")
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
                     return
                 # Allow directory zip download
                 folder_name = os.path.basename(target_path.rstrip(os.sep)) or "archive"
+                clean_name = folder_name.replace('"', '\\"')
                 safe_name = urllib.parse.quote(f"{folder_name}.zip")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/zip")
-                self.send_header("Content-Disposition", f'attachment; filename="{folder_name}.zip"; filename*=UTF-8\'\'{safe_name}')
+                self.send_header("Content-Disposition", f'attachment; filename="{clean_name}.zip"; filename*=UTF-8\'\'{safe_name}')
                 self.end_headers()
                 return
 
             if not os.path.isfile(target_path):
-                self.send_error(404, "Target is not a regular file")
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
                 return
 
             try:
                 file_size = os.path.getsize(target_path)
                 content_type = mimetypes.guess_type(target_path)[0] or "application/octet-stream"
                 filename = os.path.basename(target_path)
+                clean_name = filename.replace('"', '\\"')
                 safe_name = urllib.parse.quote(filename)
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(file_size))
-                self.send_header("Content-Disposition", f'attachment; filename="{filename}"; filename*=UTF-8\'\'{safe_name}')
+                self.send_header("Content-Disposition", f'attachment; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
                 self.end_headers()
             except Exception:
-                self.send_error(500, "Error reading file")
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
             return
 
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.end_headers()
+        elif norm_path in ('/', '/index.html'):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            return
+        elif norm_path == '/favicon.ico':
+            self.send_response(204)
+            self.end_headers()
+            return
+        elif norm_path == '/health':
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            return
+        else:
+            self.send_error(404, "Not Found")
+            return
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -6237,7 +6346,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
 
         elif parsed.path == '/api/cwd':
             if not self.is_authenticated():
-                self.send_error(401, "Unauthorized")
+                self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
                 return
             token = self.get_auth_token()
             query = urllib.parse.parse_qs(parsed.query)
@@ -6249,7 +6358,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
 
         elif parsed.path == '/api/suggest':
             if not self.is_authenticated():
-                self.send_error(401, "Unauthorized")
+                self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
                 return
             token = self.get_auth_token()
             query = urllib.parse.parse_qs(parsed.query)
@@ -6259,14 +6368,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
 
             req_dir = query.get('dir', [None])[0]
             filter_type = query.get('type', ['all'])[0]  # 'all' or 'dir_only'
-
-            if not req_dir:
-                target_dir = cwd
-            else:
-                if req_dir.startswith('~'):
-                    home = os.environ.get("HOME", "/root")
-                    req_dir = os.path.join(home, req_dir[1:].lstrip('/'))
-                target_dir = os.path.realpath(req_dir) if os.path.isabs(req_dir) else os.path.realpath(os.path.join(cwd, req_dir))
+            target_dir = resolve_fs_path(cwd, req_dir) if req_dir else cwd
 
             if not os.path.exists(target_dir):
                 self.send_json({"success": False, "error": "Directory not found", "items": [], "dir": target_dir}, status=404)
@@ -6304,9 +6406,9 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             self.send_json({"success": True, "dir": target_dir, "cwd": cwd, "items": items[:250]})
             return
 
-        elif parsed.path == '/api/download':
+        elif parsed.path.rstrip('/') == '/api/download':
             if not self.is_authenticated():
-                self.send_error(401, "Unauthorized")
+                self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
                 return
 
             token = self.get_auth_token()
@@ -6321,7 +6423,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_json({"success": False, "error": "Missing file parameter"}, status=400)
                 return
 
-            target_path = os.path.realpath(file_param) if os.path.isabs(file_param) else os.path.realpath(os.path.join(cwd, file_param))
+            target_path = resolve_fs_path(cwd, file_param)
             allow_zip = query.get('zip', ['0'])[0] in ('1', 'true', 'yes')
 
             if not os.path.exists(target_path):
@@ -6333,18 +6435,28 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                     self.send_json({"success": False, "error": f"'{os.path.basename(target_path.rstrip(os.sep)) or target_path}' is a folder. Enable 'Allow folder download as .zip' in the download dialog to download this folder."}, status=400)
                     return
 
+                tmp_zip_path = None
                 try:
                     folder_name = os.path.basename(target_path.rstrip(os.sep)) or "archive"
+                    clean_name = folder_name.replace('"', '\\"')
                     safe_name = urllib.parse.quote(f"{folder_name}.zip")
                     
                     # Create temporary zip archive
                     with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as tmp_zip:
                         tmp_zip_path = tmp_zip.name
 
+                    EXCLUDE_DIRS = {'.git', 'node_modules', '.venv', '__pycache__', '.pytest_cache', '.next'}
+                    MAX_ZIP_FILES = 25000
+                    file_count = 0
+
                     with zipfile.ZipFile(tmp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
                         base_parent = os.path.dirname(target_path) if os.path.dirname(target_path) != target_path else target_path
                         for root, dirs, files in os.walk(target_path):
+                            dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
                             for f in files:
+                                file_count += 1
+                                if file_count > MAX_ZIP_FILES:
+                                    break
                                 full_fp = os.path.join(root, f)
                                 if os.path.islink(full_fp):
                                     continue
@@ -6353,12 +6465,14 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                                     zf.write(full_fp, rel_fp)
                                 except Exception:
                                     continue
+                            if file_count > MAX_ZIP_FILES:
+                                break
 
                     zip_size = os.path.getsize(tmp_zip_path)
                     self.send_response(200)
                     self.send_header("Content-Type", "application/zip")
                     self.send_header("Content-Length", str(zip_size))
-                    self.send_header("Content-Disposition", f'attachment; filename="{folder_name}.zip"; filename*=UTF-8\'\'{safe_name}')
+                    self.send_header("Content-Disposition", f'attachment; filename="{clean_name}.zip"; filename*=UTF-8\'\'{safe_name}')
                     self.end_headers()
 
                     with open(tmp_zip_path, 'rb') as f:
@@ -6368,9 +6482,12 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                                 break
                             self.wfile.write(chunk)
                 except Exception as e:
-                    pass
+                    try:
+                        self.send_json({"success": False, "error": f"Failed creating zip archive: {e}"}, status=500)
+                    except Exception:
+                        pass
                 finally:
-                    if 'tmp_zip_path' in locals() and os.path.exists(tmp_zip_path):
+                    if tmp_zip_path and os.path.exists(tmp_zip_path):
                         try:
                             os.remove(tmp_zip_path)
                         except Exception:
@@ -6384,13 +6501,14 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             try:
                 file_size = os.path.getsize(target_path)
                 filename = os.path.basename(target_path)
+                clean_name = filename.replace('"', '\\"')
                 content_type = mimetypes.guess_type(target_path)[0] or "application/octet-stream"
 
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(file_size))
                 safe_name = urllib.parse.quote(filename)
-                self.send_header("Content-Disposition", f'attachment; filename="{filename}"; filename*=UTF-8\'\'{safe_name}')
+                self.send_header("Content-Disposition", f'attachment; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
                 self.end_headers()
 
                 with open(target_path, 'rb') as f:
@@ -6400,7 +6518,10 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                             break
                         self.wfile.write(chunk)
             except Exception as e:
-                pass
+                try:
+                    self.send_json({"success": False, "error": f"Failed reading file: {e}"}, status=500)
+                except Exception:
+                    pass
             return
 
         elif parsed.path == '/health':
@@ -6533,9 +6654,9 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                     }, status=401)
             return
 
-        elif parsed.path == '/api/upload':
+        elif parsed.path.rstrip('/') == '/api/upload':
             if not self.is_authenticated():
-                self.send_error(401, "Unauthorized")
+                self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
                 return
 
             token = self.get_auth_token()
@@ -6553,9 +6674,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_json({"success": False, "error": f"Upload exceeds maximum allowed size ({MAX_UPLOAD_BYTES // (1024*1024)} MB)"}, status=413)
                 return
 
-            target_dir = cwd
-            if dest:
-                target_dir = os.path.realpath(dest) if os.path.isabs(dest) else os.path.realpath(os.path.join(cwd, dest))
+            target_dir = resolve_fs_path(cwd, dest) if dest else cwd
 
             if not os.path.isdir(target_dir):
                 try:
