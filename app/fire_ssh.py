@@ -1599,18 +1599,42 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       </div>
     </div>
 
-    <!-- Terminal Image Hover Preview Card -->
-    <div id="image-hover-card" class="hidden fixed z-50 pointer-events-none p-1.5 bg-slate-950/95 border border-slate-700/80 rounded-xl shadow-2xl backdrop-blur-md transition-opacity duration-150 max-w-[240px]">
-      <div class="relative w-48 h-28 bg-slate-900/90 rounded-lg overflow-hidden flex items-center justify-center border border-slate-800">
-        <img id="image-hover-img" class="max-w-full max-h-full object-contain select-none" alt="Preview">
-        <div id="image-hover-spinner" class="absolute inset-0 flex items-center justify-center bg-slate-950/80 text-orange-400 text-xs">⟳ Loading...</div>
-      </div>
-      <div class="pt-1.5 px-1">
-        <div id="image-hover-name" class="text-[11px] font-mono text-white font-medium truncate"></div>
-        <div class="text-[10px] text-slate-400 flex items-center justify-between mt-0.5 font-mono">
-          <span id="image-hover-dims">-</span>
-          <span class="text-orange-400 font-semibold text-[9px] flex items-center gap-0.5">Click to view ↗</span>
+    <!-- Terminal File & Image Hover Quick Actions Menu -->
+    <div id="file-hover-menu" class="hidden fixed z-50 p-2.5 bg-slate-950/95 border border-slate-700/80 rounded-2xl shadow-2xl backdrop-blur-md transition-opacity duration-150 font-sans max-w-sm select-none">
+      <!-- File Info Header -->
+      <div class="flex items-center gap-2.5 px-1 pb-2 border-b border-slate-800/80 mb-2">
+        <div id="file-hover-icon-box" class="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 overflow-hidden">
+          <span id="file-hover-icon" class="text-base">📄</span>
+          <img id="file-hover-thumb" class="hidden max-w-full max-h-full object-contain" alt="Thumb">
         </div>
+        <div class="min-w-0 flex-1">
+          <div id="file-hover-name" class="text-xs font-semibold text-white font-mono truncate">file.txt</div>
+          <div id="file-hover-path" class="text-[10px] text-slate-400 font-mono truncate" title="Full Path">/path/to/file.txt</div>
+        </div>
+        <span id="file-hover-badge" class="hidden text-[9px] uppercase px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono font-medium"></span>
+      </div>
+
+      <!-- Quick Action Buttons -->
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <button type="button" id="file-hover-btn-cat" class="px-2.5 py-1 text-xs bg-slate-800/90 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl transition flex items-center gap-1.5 font-medium border border-slate-700/60 shadow-sm" title="View content with cat in a new tab">
+          <span>👁️</span> <span>Show Content</span>
+        </button>
+
+        <button type="button" id="file-hover-btn-edit" class="px-2.5 py-1 text-xs bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 hover:text-orange-200 rounded-xl transition flex items-center gap-1.5 font-medium border border-orange-500/30 shadow-sm" title="Edit with nano in a new tab">
+          <span>✏️</span> <span>Edit</span>
+        </button>
+
+        <button type="button" id="file-hover-btn-img" class="hidden px-2.5 py-1 text-xs bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 hover:text-sky-200 rounded-xl transition flex items-center gap-1.5 font-medium border border-sky-500/30 shadow-sm" title="Preview image in Lightbox viewer">
+          <span>🖼️</span> <span>View Image</span>
+        </button>
+
+        <button type="button" id="file-hover-btn-copy" class="px-2 py-1 text-xs bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition flex items-center gap-1 border border-slate-700/60" title="Copy path to clipboard">
+          <span>📋</span> <span>Copy</span>
+        </button>
+
+        <button type="button" id="file-hover-btn-dl" class="px-2 py-1 text-xs bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition flex items-center gap-1 border border-slate-700/60" title="Download file">
+          <span>↓</span> <span>Download</span>
+        </button>
       </div>
     </div>
 
@@ -3650,7 +3674,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (ctxCloseTab) ctxCloseTab.classList.add('hidden');
     }
 
-    // ==================== TERMINAL IMAGE PREVIEW & LIGHTBOX ====================
+    // ==================== TERMINAL FILE HOVER QUICK ACTIONS & IMAGE LIGHTBOX ====================
     let currentPreviewPath = '';
     let currentPreviewTabId = '';
     let imageZoom = 1.0;
@@ -3659,9 +3683,90 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let isPanningImage = false;
     let panStartX = 0;
     let panStartY = 0;
-    let hoverHideTimeout = null;
+    let fileMenuHideTimer = null;
     let imageChipTimer = null;
     const recentDetectedImages = new Set();
+
+    const BLOCKED_EXTENSIONS = new Set([
+      'exe', 'bin', 'dll', 'so', 'dylib', 'o', 'a', 'obj', 'pyc', 'pyo', 'class', 'wasm',
+      'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst', 'iso', 'dmg', 'deb', 'rpm', 'apk', 'msi',
+      'mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv', 'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a',
+      'pdf', 'docx', 'xlsx', 'pptx', 'sqlite', 'db', 'sqlite3'
+    ]);
+
+    const IMAGE_EXTENSIONS = new Set([
+      'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'tiff'
+    ]);
+
+    const KNOWN_SPECIAL_FILES = new Set(['dockerfile', 'makefile', 'license', 'procfile', 'gemfile']);
+
+    function isPathValidCandidate(candidate) {
+      if (!candidate || candidate.length < 2) return false;
+      const s = candidate.trim();
+      if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('ftp://') || s.startsWith('git@')) return false;
+      if (s.startsWith('-')) return false;
+      if (/^[0-9.]+$/.test(s)) return false;
+      if (s.includes(':') && !/^[a-zA-Z]:/.test(s)) return false;
+
+      const hasSlash = s.includes('/') || s.startsWith('~');
+      const base = s.split('/').pop();
+      if (hasSlash) return true;
+      if (base.startsWith('.') && base.length > 2) return true;
+      if (KNOWN_SPECIAL_FILES.has(base.toLowerCase())) return true;
+      if (base.includes('.')) {
+        const ext = base.split('.').pop().toLowerCase();
+        if (/^[a-z0-9_+-]{1,12}$/.test(ext) && !/^\d+$/.test(ext)) return true;
+      }
+      return false;
+    }
+
+    function getFileCategory(path) {
+      const base = path.split('/').pop() || path;
+      const parts = base.split('.');
+      const ext = (parts.length > 1 ? parts.pop() : '').toLowerCase();
+
+      if (IMAGE_EXTENSIONS.has(ext)) {
+        return { type: 'image', ext: ext, canEdit: false, canCat: false, isImage: true };
+      }
+      if (BLOCKED_EXTENSIONS.has(ext)) {
+        let badge = 'BINARY';
+        if (['zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst', 'iso', 'dmg', 'deb', 'rpm', 'apk', 'msi'].includes(ext)) badge = 'ARCHIVE';
+        else if (['mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv'].includes(ext)) badge = 'VIDEO';
+        else if (['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a'].includes(ext)) badge = 'AUDIO';
+        return { type: 'blocked', ext: ext, badge: badge, canEdit: false, canCat: false, isImage: false };
+      }
+      return { type: 'text', ext: ext, canEdit: true, canCat: true, isImage: false };
+    }
+
+    function quoteShellArg(arg) {
+      if (!arg) return '""';
+      if (arg.startsWith('~/')) {
+        return '~/"' + arg.slice(2).replace(/"/g, '\\"') + '"';
+      }
+      return '"' + arg.replace(/"/g, '\\"') + '"';
+    }
+
+    function openTabWithCommand(title, command) {
+      if (window.IS_READONLY) {
+        showToast('Cannot run command in read-only mode');
+        return;
+      }
+      const newTab = createNewTab(title, null, true);
+      if (!newTab) return;
+
+      let executed = false;
+      const sendCmd = () => {
+        if (executed) return;
+        if (newTab.socket && newTab.socket.readyState === WebSocket.OPEN) {
+          executed = true;
+          newTab.socket.send(new TextEncoder().encode(command + '\r'));
+        } else {
+          setTimeout(sendCmd, 80);
+        }
+      };
+
+      setTimeout(sendCmd, 350);
+    }
 
     function buildImageUrl(path, tabId, isDownload = false) {
       const endpoint = isDownload ? '/api/download' : '/api/preview';
@@ -3672,7 +3777,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       return `${endpoint}?${qs}`;
     }
 
-    function registerImageLinkProvider(term, tabId) {
+    function registerFileLinkProvider(term, tabId) {
       if (!term || typeof term.registerLinkProvider !== 'function') return;
 
       term.registerLinkProvider({
@@ -3688,30 +3793,39 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             return;
           }
 
-          const regex = /(?:^|[\s"'`(\[<])((?:[~.A-Za-z0-9_-]*\/)?(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.(?:png|jpe?g|gif|webp|svg|bmp|ico))(?=[\s"'`()\[\]<>{},;:!?.]|$)/gi;
+          const rawRegex = /(?:^|[\s"'`(\[<])((?:[~.A-Za-z0-9_-]*\/)?(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+(?:\.[A-Za-z0-9_+-]+)?)(?=[\s"'`()\[\]<>{},;:!?.]|$)/gi;
           const links = [];
           let match;
 
-          while ((match = regex.exec(lineText)) !== null) {
+          while ((match = rawRegex.exec(lineText)) !== null) {
             const fullMatch = match[0];
-            const imgPath = match[1];
-            const startOffset = match.index + fullMatch.indexOf(imgPath);
-            const endOffset = startOffset + imgPath.length;
+            const candidate = match[1];
+            if (!isPathValidCandidate(candidate)) continue;
+
+            const startOffset = match.index + fullMatch.indexOf(candidate);
+            const endOffset = startOffset + candidate.length;
 
             links.push({
               range: {
                 start: { x: startOffset + 1, y: bufferLineNumber },
                 end: { x: endOffset, y: bufferLineNumber }
               },
-              text: imgPath,
+              text: candidate,
               activate: (e, text) => {
-                openImagePreviewModal(text, tabId);
+                const cat = getFileCategory(text);
+                if (cat.isImage) {
+                  openImagePreviewModal(text, tabId);
+                } else if (cat.canCat) {
+                  openTabWithCommand(`cat ${text.split('/').pop() || text}`, `cat ${quoteShellArg(text)}`);
+                } else {
+                  showFileHoverMenu(e, text, tabId);
+                }
               },
               hover: (e, text) => {
-                showImageHoverCard(e, text, tabId);
+                showFileHoverMenu(e, text, tabId);
               },
               leave: () => {
-                hideImageHoverCard();
+                hideFileHoverMenu();
               }
             });
           }
@@ -3721,51 +3835,155 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       });
     }
 
-    function showImageHoverCard(event, path, tabId) {
-      clearTimeout(hoverHideTimeout);
-      const card = document.getElementById('image-hover-card');
-      const img = document.getElementById('image-hover-img');
-      const spinner = document.getElementById('image-hover-spinner');
-      const nameEl = document.getElementById('image-hover-name');
-      const dimsEl = document.getElementById('image-hover-dims');
-      if (!card || !img) return;
+    const registerImageLinkProvider = registerFileLinkProvider;
+
+    function showFileHoverMenu(event, path, tabId) {
+      clearTimeout(fileMenuHideTimer);
+      const menu = document.getElementById('file-hover-menu');
+      if (!menu) return;
 
       const fileName = path.split('/').pop() || path;
+      const cat = getFileCategory(path);
+
+      const nameEl = document.getElementById('file-hover-name');
+      const pathEl = document.getElementById('file-hover-path');
+      const iconEl = document.getElementById('file-hover-icon');
+      const thumbEl = document.getElementById('file-hover-thumb');
+      const badgeEl = document.getElementById('file-hover-badge');
+      const btnCat = document.getElementById('file-hover-btn-cat');
+      const btnEdit = document.getElementById('file-hover-btn-edit');
+      const btnImg = document.getElementById('file-hover-btn-img');
+      const btnCopy = document.getElementById('file-hover-btn-copy');
+      const btnDl = document.getElementById('file-hover-btn-dl');
+
       if (nameEl) nameEl.textContent = fileName;
-      if (dimsEl) dimsEl.textContent = 'Loading...';
-      if (spinner) spinner.classList.remove('hidden');
+      if (pathEl) pathEl.textContent = path;
 
-      const previewUrl = buildImageUrl(path, tabId);
-      img.onload = () => {
-        if (spinner) spinner.classList.add('hidden');
-        if (dimsEl) dimsEl.textContent = `${img.naturalWidth} × ${img.naturalHeight}px`;
-      };
-      img.onerror = () => {
-        if (spinner) spinner.classList.add('hidden');
-        if (dimsEl) dimsEl.textContent = 'Not found';
-      };
-      img.src = previewUrl;
-
-      const posX = Math.min(event.clientX + 14, window.innerWidth - 250);
-      let posY = event.clientY + 14;
-      if (posY + 160 > window.innerHeight) {
-        posY = Math.max(10, event.clientY - 170);
+      // Icon & thumbnail
+      if (cat.isImage) {
+        if (iconEl) iconEl.classList.add('hidden');
+        if (thumbEl) {
+          thumbEl.src = buildImageUrl(path, tabId);
+          thumbEl.classList.remove('hidden');
+        }
+      } else {
+        if (thumbEl) { thumbEl.classList.add('hidden'); thumbEl.src = ''; }
+        if (iconEl) {
+          iconEl.classList.remove('hidden');
+          if (cat.badge === 'ARCHIVE') iconEl.textContent = '📦';
+          else if (cat.badge === 'VIDEO') iconEl.textContent = '🎬';
+          else if (cat.badge === 'AUDIO') iconEl.textContent = '🎵';
+          else if (cat.badge === 'BINARY') iconEl.textContent = '⚙️';
+          else iconEl.textContent = '📄';
+        }
       }
-      card.style.left = `${posX}px`;
-      card.style.top = `${posY}px`;
-      card.classList.remove('hidden');
+
+      // Badge
+      if (badgeEl) {
+        if (cat.badge) {
+          badgeEl.textContent = cat.badge;
+          badgeEl.classList.remove('hidden');
+        } else {
+          badgeEl.classList.add('hidden');
+        }
+      }
+
+      // Show Content (cat)
+      if (btnCat) {
+        if (cat.canCat) {
+          btnCat.classList.remove('hidden');
+          btnCat.onclick = (e) => {
+            e.stopPropagation();
+            hideFileHoverMenu();
+            openTabWithCommand(`cat ${fileName}`, `cat ${quoteShellArg(path)}`);
+          };
+        } else {
+          btnCat.classList.add('hidden');
+        }
+      }
+
+      // Edit (nano)
+      if (btnEdit) {
+        if (cat.canEdit) {
+          btnEdit.classList.remove('hidden');
+          btnEdit.onclick = (e) => {
+            e.stopPropagation();
+            hideFileHoverMenu();
+            openTabWithCommand(`edit ${fileName}`, `nano ${quoteShellArg(path)}`);
+          };
+        } else {
+          btnEdit.classList.add('hidden');
+        }
+      }
+
+      // View Image (for images)
+      if (btnImg) {
+        if (cat.isImage) {
+          btnImg.classList.remove('hidden');
+          btnImg.onclick = (e) => {
+            e.stopPropagation();
+            hideFileHoverMenu();
+            openImagePreviewModal(path, tabId);
+          };
+        } else {
+          btnImg.classList.add('hidden');
+        }
+      }
+
+      // Copy Path
+      if (btnCopy) {
+        btnCopy.onclick = (e) => {
+          e.stopPropagation();
+          hideFileHoverMenu();
+          navigator.clipboard.writeText(path).then(() => {
+            showToast('Path copied to clipboard!');
+          }).catch(() => {
+            showToast(path);
+          });
+        };
+      }
+
+      // Download
+      if (btnDl) {
+        btnDl.onclick = (e) => {
+          e.stopPropagation();
+          hideFileHoverMenu();
+          const dlUrl = buildImageUrl(path, tabId, true);
+          const a = document.createElement('a');
+          a.href = dlUrl;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          showToast(`Downloading ${fileName}...`);
+        };
+      }
+
+      // Position
+      const posX = Math.min(event.clientX + 10, window.innerWidth - 340);
+      let posY = event.clientY + 14;
+      if (posY + 140 > window.innerHeight) {
+        posY = Math.max(10, event.clientY - 95);
+      }
+      menu.style.left = `${posX}px`;
+      menu.style.top = `${posY}px`;
+      menu.classList.remove('hidden');
+
+      menu.onmouseenter = () => clearTimeout(fileMenuHideTimer);
+      menu.onmouseleave = () => {
+        fileMenuHideTimer = setTimeout(hideFileHoverMenu, 250);
+      };
     }
 
-    function hideImageHoverCard() {
-      hoverHideTimeout = setTimeout(() => {
-        const card = document.getElementById('image-hover-card');
-        if (card) card.classList.add('hidden');
-      }, 120);
+    function hideFileHoverMenu() {
+      fileMenuHideTimer = setTimeout(() => {
+        const menu = document.getElementById('file-hover-menu');
+        if (menu) menu.classList.add('hidden');
+      }, 150);
     }
 
     function openImagePreviewModal(path, tabId) {
       if (!path) return;
-      hideImageHoverCard();
+      hideFileHoverMenu();
       dismissImageOutputChip();
 
       currentPreviewPath = path;
@@ -4387,8 +4605,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         t.loadAddon(new WebLinksAddon.WebLinksAddon());
       }
       t.open(mountEl);
-      if (typeof registerImageLinkProvider === 'function') {
-        registerImageLinkProvider(t, tabId);
+      if (typeof registerFileLinkProvider === 'function') {
+        registerFileLinkProvider(t, tabId);
       }
 
       // Hardware accelerated GPU rendering (with automatic canvas fallback)
