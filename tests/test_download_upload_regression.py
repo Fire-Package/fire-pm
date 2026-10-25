@@ -165,4 +165,86 @@ class TestEndpointsAndTokens:
         assert "if (!res.ok)" in HTML_TEMPLATE
         # Must not treat 200 OK with application/json as error
         assert "if (!res.ok || contentType.includes('application/json'))" not in HTML_TEMPLATE
+        # Must not buffer whole file into res.blob() or show "Preparing..."
+        assert "submitLabel.textContent = 'Preparing...'" not in HTML_TEMPLATE
+        assert "await res.blob()" not in HTML_TEMPLATE
+        # Must use fast HEAD preflight and native a.href = dlUrl streaming
+        assert "fetch(dlUrl, { method: 'HEAD' })" in HTML_TEMPLATE
+        assert "a.href = dlUrl;" in HTML_TEMPLATE
+
+    def test_directory_auto_packages_as_zip_without_zip_param(self):
+        handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.headers = {}
+        handler.is_authenticated = MagicMock(return_value=True)
+        handler.get_auth_token = MagicMock(return_value="valid-token")
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+        handler.wfile = MagicMock()
+        handler.server = MagicMock()
+        handler.server.terminals.get.return_value = None
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            subfile = os.path.join(tmp_dir, "hello.txt")
+            with open(subfile, "w") as f:
+                f.write("test content")
+
+            # Test HEAD request on folder without &zip=1
+            handler.path = f"/api/download?file={urllib.parse.quote(tmp_dir)}"
+            handler.do_HEAD()
+
+            handler.send_response.assert_called_with(200)
+            headers_sent = [call[0] for call in handler.send_header.call_args_list]
+            content_type = next(h[1] for h in headers_sent if h[0] == "Content-Type")
+            content_disp = next(h[1] for h in headers_sent if h[0] == "Content-Disposition")
+            assert content_type == "application/zip"
+            assert f'{os.path.basename(tmp_dir)}.zip' in content_disp
+
+            # Test GET request on folder without &zip=1
+            handler.send_response.reset_mock()
+            handler.send_header.reset_mock()
+            handler.do_GET()
+
+            handler.send_response.assert_called_with(200)
+            get_headers_sent = [call[0] for call in handler.send_header.call_args_list]
+            get_content_type = next(h[1] for h in get_headers_sent if h[0] == "Content-Type")
+            get_content_disp = next(h[1] for h in get_headers_sent if h[0] == "Content-Disposition")
+            assert get_content_type == "application/zip"
+            assert f'{os.path.basename(tmp_dir)}.zip' in get_content_disp
+
+    def test_file_download_never_returns_zip_headers(self):
+        handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.headers = {}
+        handler.is_authenticated = MagicMock(return_value=True)
+        handler.get_auth_token = MagicMock(return_value="valid-token")
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+        handler.wfile = MagicMock()
+        handler.server = MagicMock()
+        handler.server.terminals.get.return_value = None
+
+        with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as tmp_file:
+            tmp_file.write(b'{"key": 123}')
+            tmp_path = tmp_file.name
+
+        try:
+            # Request file with zip=1 passed in query
+            handler.path = f"/api/download?file={urllib.parse.quote(tmp_path)}&zip=1"
+            handler.do_GET()
+
+            handler.send_response.assert_called_with(200)
+            headers_sent = [call[0] for call in handler.send_header.call_args_list]
+            content_type = next(h[1] for h in headers_sent if h[0] == "Content-Type")
+            content_disp = next(h[1] for h in headers_sent if h[0] == "Content-Disposition")
+            # Files must never be served as application/zip or have .zip in filename
+            assert content_type == "application/json"
+            assert not content_disp.endswith('.zip"')
+            assert f'{os.path.basename(tmp_path)}"' in content_disp
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
 
