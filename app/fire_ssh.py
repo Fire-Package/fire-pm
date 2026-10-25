@@ -1616,12 +1616,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       <!-- Quick Action Buttons -->
       <div class="flex items-center gap-1.5 flex-wrap">
-        <button type="button" id="file-hover-btn-cat" class="px-2.5 py-1 text-xs bg-slate-800/90 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl transition flex items-center gap-1.5 font-medium border border-slate-700/60 shadow-sm" title="View content with cat in a new tab">
-          <span>👁️</span> <span>Show Content</span>
+        <button type="button" id="file-hover-btn-cat" class="px-2.5 py-1 text-xs bg-slate-800/90 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl transition flex items-center gap-1.5 font-medium border border-slate-700/60 shadow-sm" title="View content">
+          <span>👁️</span> <span id="file-hover-btn-cat-text">Show Content</span>
         </button>
 
         <button type="button" id="file-hover-btn-edit" class="px-2.5 py-1 text-xs bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 hover:text-orange-200 rounded-xl transition flex items-center gap-1.5 font-medium border border-orange-500/30 shadow-sm" title="Edit with nano in a new tab">
           <span>✏️</span> <span>Edit</span>
+        </button>
+
+        <button type="button" id="file-hover-btn-dir" class="hidden px-2.5 py-1 text-xs bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 hover:text-sky-200 rounded-xl transition flex items-center gap-1.5 font-medium border border-sky-500/30 shadow-sm" title="Open directory in new tab (cd)">
+          <span>📁</span> <span>Open in Tab</span>
         </button>
 
         <button type="button" id="file-hover-btn-img" class="hidden px-2.5 py-1 text-xs bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 hover:text-sky-200 rounded-xl transition flex items-center gap-1.5 font-medium border border-sky-500/30 shadow-sm" title="Preview image in Lightbox viewer">
@@ -1632,7 +1636,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <span>📋</span> <span>Copy</span>
         </button>
 
-        <button type="button" id="file-hover-btn-dl" class="px-2 py-1 text-xs bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition flex items-center gap-1 border border-slate-700/60" title="Download file">
+        <button type="button" id="file-hover-btn-dl" class="px-2 py-1 text-xs bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition flex items-center gap-1 border border-slate-700/60" title="Download">
           <span>↓</span> <span>Download</span>
         </button>
       </div>
@@ -1717,6 +1721,75 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
         <div class="text-[11px] text-slate-500 hidden md:block">
           Use mouse wheel to zoom, drag to pan, <kbd class="px-1 py-0.5 bg-slate-800 rounded text-slate-400">Esc</kbd> to exit
+        </div>
+      </div>
+    </div>
+
+    <!-- File Content In-Tab Preview Modal (< 2000 lines) -->
+    <div id="file-content-modal" class="hidden fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex flex-col justify-between font-sans select-none">
+      <!-- Top Bar -->
+      <div class="flex items-center justify-between px-4 py-3 bg-slate-950/80 border-b border-slate-800/80 shrink-0">
+        <div class="flex items-center gap-3 min-w-0">
+          <span id="file-modal-icon" class="text-lg">📄</span>
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <span id="file-modal-title" class="text-sm font-semibold text-white truncate font-mono">file.txt</span>
+              <span id="file-modal-line-badge" class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-sky-500/20 text-sky-300 border border-sky-500/30">0 lines</span>
+              <span id="file-modal-size-badge" class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-slate-800 text-slate-300">0 B</span>
+            </div>
+            <div id="file-modal-path" class="text-[11px] text-slate-400 font-mono truncate max-w-xl cursor-pointer hover:text-orange-300 transition" title="Click to copy path" onclick="copyModalFilePath()"></div>
+          </div>
+        </div>
+
+        <!-- Controls Toolbar -->
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button type="button" id="file-modal-edit-btn" onclick="editModalFileInNewTab()" class="px-2.5 py-1.5 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-xl text-xs text-orange-300 hover:text-orange-200 transition flex items-center gap-1 font-medium" title="Edit file with nano in a new tab">
+            <span>✏️</span> <span class="hidden sm:inline">Edit (nano)</span>
+          </button>
+          <button type="button" id="file-modal-tab-btn" onclick="openModalFileInNewTab()" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Run cat in a new terminal tab">
+            <span>↗</span> <span class="hidden sm:inline">Open in Tab</span>
+          </button>
+          <button type="button" onclick="copyModalFileContent()" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Copy file content to clipboard">
+            <span>📋</span> <span id="file-modal-copy-label" class="hidden sm:inline">Copy Content</span>
+          </button>
+          <button type="button" onclick="downloadModalFile()" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Download file">
+            <span>↓</span> <span class="hidden sm:inline">Download</span>
+          </button>
+          <button type="button" onclick="closeFileContentModal()" class="ml-2 p-1.5 px-2 bg-slate-800 hover:bg-red-500/20 hover:text-red-400 rounded-xl text-slate-400 hover:border-red-500/30 border border-slate-700 text-sm transition" title="Close (Escape)">✕</button>
+        </div>
+      </div>
+
+      <!-- Main Code Viewport -->
+      <div id="file-modal-viewport" class="flex-1 relative overflow-auto p-4 bg-slate-950 font-mono text-xs sm:text-sm select-text text-slate-200 flex">
+        <div id="file-modal-spinner" class="hidden absolute inset-0 flex items-center justify-center bg-slate-950/70 z-10 text-orange-400 text-sm select-none">
+          <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 p-3.5 rounded-2xl shadow-xl">
+            <span class="animate-spin text-base">⟳</span>
+            <span>Loading content...</span>
+          </div>
+        </div>
+        <div id="file-modal-error" class="hidden absolute inset-0 flex items-center justify-center bg-slate-950/80 z-10 text-red-400 text-xs select-none">
+          <div class="bg-slate-900 border border-red-500/30 p-4 rounded-2xl shadow-xl max-w-sm text-center">
+            <div class="text-2xl mb-1">⚠️</div>
+            <div id="file-modal-error-msg" class="text-slate-300">Unable to load file content</div>
+          </div>
+        </div>
+
+        <!-- Code Container with line numbers and text -->
+        <div id="file-modal-code-wrap" class="w-full flex font-mono text-xs sm:text-sm leading-relaxed">
+          <div id="file-modal-line-numbers" class="select-none text-right pr-4 text-slate-600 font-mono shrink-0 border-r border-slate-800/80"></div>
+          <pre id="file-modal-code-text" class="flex-1 pl-4 overflow-x-auto m-0 whitespace-pre font-mono text-slate-200 select-text outline-none"></pre>
+        </div>
+      </div>
+
+      <!-- Bottom Status Bar -->
+      <div class="px-4 py-2 bg-slate-950/90 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400 font-mono shrink-0 select-none">
+        <div class="flex items-center gap-4">
+          <span id="file-modal-meta-lines">Lines: --</span>
+          <span id="file-modal-meta-size">Size: --</span>
+          <span id="file-modal-meta-encoding">Encoding: UTF-8</span>
+        </div>
+        <div class="text-[11px] text-slate-500 hidden md:block">
+          Press <kbd class="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">Esc</kbd> to close
         </div>
       </div>
     </div>
@@ -3700,9 +3773,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     const KNOWN_SPECIAL_FILES = new Set(['dockerfile', 'makefile', 'license', 'procfile', 'gemfile']);
 
+    function cleanCandidatePath(p) {
+      if (!p) return '';
+      let s = p.trim();
+      s = s.replace(/^["'`]+|["'`]+$/g, '');
+      s = s.replace(/["'`]/g, '');
+      return s;
+    }
+
     function isPathValidCandidate(candidate) {
       if (!candidate || candidate.length < 2) return false;
-      const s = candidate.trim();
+      const s = cleanCandidatePath(candidate);
       if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('ftp://') || s.startsWith('git@')) return false;
       if (s.startsWith('-')) return false;
       if (/^[0-9.]+$/.test(s)) return false;
@@ -3718,6 +3799,32 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (/^[a-z0-9_+-]{1,12}$/.test(ext) && !/^\d+$/.test(ext)) return true;
       }
       return false;
+    }
+
+    const pathStatCache = new Map();
+
+    async function fetchPathStat(path, tabId) {
+      const clean = cleanCandidatePath(path);
+      if (!clean) return null;
+      const cacheKey = `${tabId || activeTabId || 'default'}:${clean}`;
+      if (pathStatCache.has(cacheKey)) {
+        return pathStatCache.get(cacheKey);
+      }
+      try {
+        const fileParam = encodeURIComponent(clean);
+        const tabParam = (tabId || activeTabId) ? `tab=${encodeURIComponent(tabId || activeTabId)}` : '';
+        const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+        const qs = [fileParam ? `file=${fileParam}` : '', tabParam, tokenParam].filter(Boolean).join('&');
+        const res = await fetch(`/api/stat?${qs}`);
+        if (res.ok) {
+          const data = await res.json();
+          pathStatCache.set(cacheKey, data);
+          return data;
+        }
+      } catch (err) {
+        console.debug('fetchPathStat error', err);
+      }
+      return null;
     }
 
     function getFileCategory(path) {
@@ -3811,12 +3918,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 end: { x: endOffset, y: bufferLineNumber }
               },
               text: candidate,
-              activate: (e, text) => {
-                const cat = getFileCategory(text);
+              activate: async (e, text) => {
+                const clean = cleanCandidatePath(text);
+                const stat = await fetchPathStat(clean, tabId);
+                if (stat && stat.is_dir) {
+                  openTabWithCommand(`cd ${stat.name || clean.split('/').pop() || clean}`, `cd ${quoteShellArg(stat.path || clean)}`);
+                  return;
+                }
+                const cat = getFileCategory(clean);
                 if (cat.isImage) {
-                  openImagePreviewModal(text, tabId);
+                  openImagePreviewModal(clean, tabId);
+                } else if (stat && stat.is_file && stat.lines !== null && stat.lines < 2000) {
+                  openFileContentModal(stat.path || clean, tabId, stat);
                 } else if (cat.canCat) {
-                  openTabWithCommand(`cat ${text.split('/').pop() || text}`, `cat ${quoteShellArg(text)}`);
+                  openTabWithCommand(`cat ${clean.split('/').pop() || clean}`, `cat ${quoteShellArg(clean)}`);
                 } else {
                   showFileHoverMenu(e, text, tabId);
                 }
@@ -3837,11 +3952,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     const registerImageLinkProvider = registerFileLinkProvider;
 
-    function showFileHoverMenu(event, path, tabId) {
+    function showFileHoverMenu(event, rawPath, tabId) {
       clearTimeout(fileMenuHideTimer);
       const menu = document.getElementById('file-hover-menu');
       if (!menu) return;
 
+      const path = cleanCandidatePath(rawPath);
       const fileName = path.split('/').pop() || path;
       const cat = getFileCategory(path);
 
@@ -3851,13 +3967,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const thumbEl = document.getElementById('file-hover-thumb');
       const badgeEl = document.getElementById('file-hover-badge');
       const btnCat = document.getElementById('file-hover-btn-cat');
+      const btnCatText = document.getElementById('file-hover-btn-cat-text');
       const btnEdit = document.getElementById('file-hover-btn-edit');
+      const btnDir = document.getElementById('file-hover-btn-dir');
       const btnImg = document.getElementById('file-hover-btn-img');
       const btnCopy = document.getElementById('file-hover-btn-copy');
       const btnDl = document.getElementById('file-hover-btn-dl');
 
       if (nameEl) nameEl.textContent = fileName;
       if (pathEl) pathEl.textContent = path;
+      if (btnDir) btnDir.classList.add('hidden');
 
       // Icon & thumbnail
       if (cat.isImage) {
@@ -3888,14 +4007,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
       }
 
-      // Show Content (cat)
+      // Show Content (cat or modal)
       if (btnCat) {
         if (cat.canCat) {
           btnCat.classList.remove('hidden');
+          if (btnCatText) btnCatText.textContent = 'Show Content';
+          btnCat.title = 'View file content in modal or new tab';
           btnCat.onclick = (e) => {
             e.stopPropagation();
             hideFileHoverMenu();
-            openTabWithCommand(`cat ${fileName}`, `cat ${quoteShellArg(path)}`);
+            openFileContentModal(path, tabId);
           };
         } else {
           btnCat.classList.add('hidden');
@@ -3972,6 +4093,75 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       menu.onmouseleave = () => {
         fileMenuHideTimer = setTimeout(hideFileHoverMenu, 250);
       };
+
+      // Asynchronously fetch filesystem stat to verify real file/directory status
+      fetchPathStat(path, tabId).then((stat) => {
+        if (!stat || menu.classList.contains('hidden')) return;
+        if (stat.exists === false) {
+          hideFileHoverMenu();
+          return;
+        }
+
+        if (stat.is_dir) {
+          if (nameEl) nameEl.textContent = (stat.name || fileName) + '/';
+          if (pathEl) pathEl.textContent = stat.path || path;
+          if (iconEl) {
+            iconEl.classList.remove('hidden');
+            iconEl.textContent = '📁';
+          }
+          if (thumbEl) thumbEl.classList.add('hidden');
+          if (badgeEl) {
+            badgeEl.textContent = 'DIR';
+            badgeEl.classList.remove('hidden');
+          }
+          if (btnCat) btnCat.classList.add('hidden');
+          if (btnEdit) btnEdit.classList.add('hidden');
+          if (btnImg) btnImg.classList.add('hidden');
+          if (btnDir) {
+            btnDir.classList.remove('hidden');
+            btnDir.onclick = (e) => {
+              e.stopPropagation();
+              hideFileHoverMenu();
+              openTabWithCommand(`cd ${stat.name || fileName}`, `cd ${quoteShellArg(stat.path || path)}`);
+            };
+          }
+        } else if (stat.is_file) {
+          if (btnDir) btnDir.classList.add('hidden');
+          if (!cat.isImage && !cat.badge) {
+            if (stat.lines !== null && stat.lines >= 2000) {
+              if (btnCat) {
+                btnCat.classList.remove('hidden');
+                if (btnCatText) btnCatText.textContent = 'Cat in Tab';
+                btnCat.title = `Large file (${stat.lines} lines) - open with cat in new tab`;
+                btnCat.onclick = (e) => {
+                  e.stopPropagation();
+                  hideFileHoverMenu();
+                  openTabWithCommand(`cat ${fileName}`, `cat ${quoteShellArg(stat.path || path)}`);
+                };
+              }
+              if (badgeEl) {
+                badgeEl.textContent = `${stat.lines}L`;
+                badgeEl.classList.remove('hidden');
+              }
+            } else if (stat.lines !== null && stat.lines < 2000) {
+              if (btnCat) {
+                btnCat.classList.remove('hidden');
+                if (btnCatText) btnCatText.textContent = 'Show Content';
+                btnCat.title = `View file content in modal (${stat.lines} lines)`;
+                btnCat.onclick = (e) => {
+                  e.stopPropagation();
+                  hideFileHoverMenu();
+                  openFileContentModal(stat.path || path, tabId, stat);
+                };
+              }
+              if (badgeEl) {
+                badgeEl.textContent = `${stat.lines}L`;
+                badgeEl.classList.remove('hidden');
+              }
+            }
+          }
+        }
+      }).catch(() => {});
     }
 
     function hideFileHoverMenu() {
@@ -3979,6 +4169,133 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const menu = document.getElementById('file-hover-menu');
         if (menu) menu.classList.add('hidden');
       }, 150);
+    }
+
+    let currentModalFilePath = '';
+    let currentModalFileTabId = '';
+    let currentModalFileContent = '';
+
+    async function openFileContentModal(path, tabId, statData) {
+      if (!path) return;
+      hideFileHoverMenu();
+      closeImagePreviewModal();
+      currentModalFilePath = path;
+      currentModalFileTabId = tabId || activeTabId;
+
+      const modal = document.getElementById('file-content-modal');
+      const titleEl = document.getElementById('file-modal-title');
+      const pathEl = document.getElementById('file-modal-path');
+      const lineBadge = document.getElementById('file-modal-line-badge');
+      const sizeBadge = document.getElementById('file-modal-size-badge');
+      const spinner = document.getElementById('file-modal-spinner');
+      const errorEl = document.getElementById('file-modal-error');
+      const errorMsg = document.getElementById('file-modal-error-msg');
+      const lineNumEl = document.getElementById('file-modal-line-numbers');
+      const codeTextEl = document.getElementById('file-modal-code-text');
+      const metaLines = document.getElementById('file-modal-meta-lines');
+      const metaSize = document.getElementById('file-modal-meta-size');
+
+      const fileName = path.split('/').pop() || path;
+      if (titleEl) titleEl.textContent = fileName;
+      if (pathEl) pathEl.textContent = path;
+      if (modal) modal.classList.remove('hidden');
+
+      if (spinner) spinner.classList.remove('hidden');
+      if (errorEl) errorEl.classList.add('hidden');
+      if (lineNumEl) lineNumEl.textContent = '';
+      if (codeTextEl) codeTextEl.textContent = '';
+
+      try {
+        const fileParam = encodeURIComponent(path);
+        const tabParam = (tabId || activeTabId) ? `tab=${encodeURIComponent(tabId || activeTabId)}` : '';
+        const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+        const qs = [fileParam ? `file=${fileParam}` : '', tabParam, tokenParam, 'inline=1'].filter(Boolean).join('&');
+        const res = await fetch(`/api/view?${qs}`);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}: Failed to read file`);
+        }
+        const text = await res.text();
+        currentModalFileContent = text;
+
+        const lines = text.split('\n');
+        const lineCount = lines.length;
+        const byteSize = new Blob([text]).size;
+
+        if (lineBadge) lineBadge.textContent = `${lineCount} line${lineCount === 1 ? '' : 's'}`;
+        if (sizeBadge) sizeBadge.textContent = formatBytes(byteSize);
+        if (metaLines) metaLines.textContent = `Lines: ${lineCount}`;
+        if (metaSize) metaSize.textContent = `Size: ${formatBytes(byteSize)}`;
+
+        let lineNums = '';
+        for (let i = 1; i <= lineCount; i++) {
+          lineNums += i + '\n';
+        }
+        if (lineNumEl) lineNumEl.textContent = lineNums;
+        if (codeTextEl) codeTextEl.textContent = text;
+      } catch (err) {
+        if (errorEl) errorEl.classList.remove('hidden');
+        if (errorMsg) errorMsg.textContent = err.message || 'Unable to load file content';
+      } finally {
+        if (spinner) spinner.classList.add('hidden');
+      }
+    }
+
+    function closeFileContentModal() {
+      const modal = document.getElementById('file-content-modal');
+      if (modal) modal.classList.add('hidden');
+      currentModalFileContent = '';
+      currentModalFilePath = '';
+    }
+
+    function copyModalFilePath() {
+      if (!currentModalFilePath) return;
+      navigator.clipboard.writeText(currentModalFilePath).then(() => {
+        showToast('Path copied to clipboard!');
+      }).catch(() => {
+        showToast(currentModalFilePath);
+      });
+    }
+
+    function copyModalFileContent() {
+      if (currentModalFileContent === undefined || currentModalFileContent === null) return;
+      navigator.clipboard.writeText(currentModalFileContent).then(() => {
+        const copyLabel = document.getElementById('file-modal-copy-label');
+        if (copyLabel) {
+          const orig = copyLabel.textContent;
+          copyLabel.textContent = 'Copied!';
+          setTimeout(() => { copyLabel.textContent = orig; }, 1500);
+        }
+        showToast('File content copied to clipboard!');
+      }).catch(() => {
+        showToast('Failed to copy content');
+      });
+    }
+
+    function editModalFileInNewTab() {
+      if (!currentModalFilePath) return;
+      const p = currentModalFilePath;
+      const fileName = p.split('/').pop() || p;
+      closeFileContentModal();
+      openTabWithCommand(`edit ${fileName}`, `nano ${quoteShellArg(p)}`);
+    }
+
+    function openModalFileInNewTab() {
+      if (!currentModalFilePath) return;
+      const p = currentModalFilePath;
+      const fileName = p.split('/').pop() || p;
+      closeFileContentModal();
+      openTabWithCommand(`cat ${fileName}`, `cat ${quoteShellArg(p)}`);
+    }
+
+    function downloadModalFile() {
+      if (!currentModalFilePath) return;
+      const dlUrl = buildImageUrl(currentModalFilePath, currentModalFileTabId, true);
+      const a = document.createElement('a');
+      a.href = dlUrl;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast(`Downloading ${currentModalFilePath.split('/').pop()}...`);
     }
 
     function openImagePreviewModal(path, tabId) {
@@ -4227,20 +4544,33 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       window.addEventListener('keydown', (e) => {
         const modal = document.getElementById('image-preview-modal');
-        if (!modal || modal.classList.contains('hidden')) return;
+        if (modal && !modal.classList.contains('hidden')) {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            closeImagePreviewModal();
+            return;
+          } else if (e.key === '+' || e.key === '=') {
+            e.preventDefault();
+            zoomImagePreview(0.25);
+            return;
+          } else if (e.key === '-' || e.key === '_') {
+            e.preventDefault();
+            zoomImagePreview(-0.25);
+            return;
+          } else if (e.key === '0') {
+            e.preventDefault();
+            resetImagePreviewZoom();
+            return;
+          }
+        }
 
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          closeImagePreviewModal();
-        } else if (e.key === '+' || e.key === '=') {
-          e.preventDefault();
-          zoomImagePreview(0.25);
-        } else if (e.key === '-' || e.key === '_') {
-          e.preventDefault();
-          zoomImagePreview(-0.25);
-        } else if (e.key === '0') {
-          e.preventDefault();
-          resetImagePreviewZoom();
+        const fileModal = document.getElementById('file-content-modal');
+        if (fileModal && !fileModal.classList.contains('hidden')) {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            closeFileContentModal();
+            return;
+          }
         }
       });
     }
@@ -6806,7 +7136,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         parsed = urllib.parse.urlparse(self.path)
         norm_path = parsed.path.rstrip('/') or '/'
-        if norm_path in ('/api/download', '/api/preview', '/api/view'):
+        if norm_path in ('/api/download', '/api/preview', '/api/view', '/api/stat'):
             if not self.is_authenticated():
                 self.send_response(401)
                 self.send_header("Content-Type", "application/json")
@@ -6824,6 +7154,12 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
             target_path = resolve_fs_path(cwd, file_param)
+
+            if norm_path == '/api/stat':
+                self.send_response(200 if os.path.exists(target_path) else 404)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                return
 
             if not os.path.exists(target_path):
                 self.send_response(404)
@@ -7043,6 +7379,80 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             self.send_json({"success": True, "dir": target_dir, "cwd": cwd, "items": items[:250]})
             return
 
+        elif parsed.path == '/api/stat':
+            if not self.is_authenticated():
+                self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
+                return
+            token = self.get_auth_token()
+            query = urllib.parse.parse_qs(parsed.query)
+            tab_id = query.get('tab', [None])[0]
+            session = self.server.terminals.get(token, tab_id)
+            cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
+
+            file_param = query.get('file', [None])[0] or query.get('path', [None])[0]
+            if not file_param:
+                self.send_json({"success": False, "error": "Missing file parameter"}, status=400)
+                return
+
+            target_path = resolve_fs_path(cwd, file_param)
+            exists = os.path.exists(target_path)
+            if not exists:
+                self.send_json({
+                    "success": True,
+                    "exists": False,
+                    "is_dir": False,
+                    "is_file": False,
+                    "size": 0,
+                    "lines": None,
+                    "is_text": False,
+                    "path": target_path,
+                    "name": os.path.basename(target_path) or file_param
+                })
+                return
+
+            is_dir = os.path.isdir(target_path)
+            is_file = os.path.isfile(target_path)
+            size = 0
+            lines = None
+            is_text = False
+
+            try:
+                stat_res = os.stat(target_path)
+                size = stat_res.st_size
+            except Exception:
+                pass
+
+            if is_file:
+                ext = (os.path.basename(target_path).split('.').pop() if '.' in os.path.basename(target_path) else '').lower()
+                BLOCKED_SET = {'exe', 'bin', 'dll', 'so', 'dylib', 'o', 'a', 'obj', 'pyc', 'pyo', 'class', 'wasm',
+                               'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst', 'iso', 'dmg', 'deb', 'rpm', 'apk', 'msi',
+                               'mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv', 'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a',
+                               'pdf', 'docx', 'xlsx', 'pptx', 'sqlite', 'db', 'sqlite3',
+                               'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'tiff'}
+                if ext not in BLOCKED_SET and size <= 5 * 1024 * 1024:
+                    try:
+                        with open(target_path, 'rb') as f:
+                            sample = f.read(2048)
+                            if b'\x00' not in sample:
+                                is_text = True
+                                f.seek(0)
+                                lines = sum(1 for _ in f)
+                    except Exception:
+                        pass
+
+            self.send_json({
+                "success": True,
+                "exists": True,
+                "is_dir": is_dir,
+                "is_file": is_file,
+                "size": size,
+                "lines": lines,
+                "is_text": is_text,
+                "path": target_path,
+                "name": os.path.basename(target_path) or file_param
+            })
+            return
+
         elif parsed.path.rstrip('/') in ('/api/download', '/api/preview', '/api/view'):
             if not self.is_authenticated():
                 self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
@@ -7136,13 +7546,16 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 filename = os.path.basename(target_path)
                 clean_name = filename.replace('"', '\\"')
                 content_type = mimetypes.guess_type(target_path)[0] or "application/octet-stream"
+                disposition_type = "inline" if (parsed.path.rstrip('/') in ('/api/preview', '/api/view') or query.get('inline', ['0'])[0] in ('1', 'true', 'yes')) else "attachment"
+                if disposition_type == "inline":
+                    if content_type == "application/octet-stream" or content_type.startswith("text/") or content_type in ("application/json", "application/javascript", "application/xml"):
+                        content_type = "text/plain; charset=utf-8"
 
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(file_size))
                 self.send_header("Access-Control-Expose-Headers", "Content-Disposition")
                 safe_name = urllib.parse.quote(filename)
-                disposition_type = "inline" if (parsed.path.rstrip('/') in ('/api/preview', '/api/view') or query.get('inline', ['0'])[0] in ('1', 'true', 'yes')) else "attachment"
                 self.send_header("Content-Disposition", f'{disposition_type}; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
                 self.end_headers()
 
