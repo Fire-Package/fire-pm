@@ -17,6 +17,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 * Prevent dual split terminal panes from physically flipping positions on screen when clicking panes or switching tabs ([#98](https://github.com/Fire-Package/fire-pm/issues/98), [#99](https://github.com/Fire-Package/fire-pm/pull/99)).
 
 ### Added
+* Add filesystem verification via `/api/stat` and in-tab code/text preview modal (`#file-content-modal`) for files under 2,000 lines with line numbers, copy content, and edit options, while hiding `cat`/`nano` on directories in favor of folder actions ([#118](https://github.com/Fire-Package/fire-pm/issues/118), [#119](https://github.com/Fire-Package/fire-pm/pull/119)).
 * Add hover quick-actions popover for terminal file paths with Show Content (`cat`), Edit (`nano`), Copy Path, and Download options, blocking raw binaries, archives, and videos while routing images to lightbox ([#116](https://github.com/Fire-Package/fire-pm/issues/116), [#117](https://github.com/Fire-Package/fire-pm/pull/117)).
 * Automatic image file path detection in terminal output with interactive links, floating hover preview cards, full-screen lightbox modal with pan/zoom controls, and output detection chips ([#114](https://github.com/Fire-Package/fire-pm/issues/114), [#115](https://github.com/Fire-Package/fire-pm/pull/115)).
 * Support `--lines <num>`, `-n <num>`, and `-l <num>` flags in `fire logs` and `fire log` for custom log output length with context-aware argument parsing ([#107](https://github.com/Fire-Package/fire-pm/pull/107)).
