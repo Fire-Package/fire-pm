@@ -1616,8 +1616,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       <!-- Quick Action Buttons -->
       <div class="flex items-center gap-1.5 flex-wrap">
-        <button type="button" id="file-hover-btn-cat" class="px-2.5 py-1 text-xs bg-slate-800/90 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl transition flex items-center gap-1.5 font-medium border border-slate-700/60 shadow-sm" title="View content">
-          <span>👁️</span> <span id="file-hover-btn-cat-text">Show Content</span>
+        <button type="button" id="file-hover-btn-cat" class="px-2.5 py-1 text-xs bg-slate-800/90 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl transition flex items-center gap-1.5 font-medium border border-slate-700/60 shadow-sm" title="View content in modal">
+          <span>👁️</span> <span id="file-hover-btn-cat-text">View File</span>
         </button>
 
         <button type="button" id="file-hover-btn-edit" class="px-2.5 py-1 text-xs bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 hover:text-orange-200 rounded-xl transition flex items-center gap-1.5 font-medium border border-orange-500/30 shadow-sm" title="Edit with nano in a new tab">
@@ -1745,9 +1745,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="flex items-center gap-1.5 shrink-0">
           <button type="button" id="file-modal-edit-btn" onclick="editModalFileInNewTab()" class="px-2.5 py-1.5 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-xl text-xs text-orange-300 hover:text-orange-200 transition flex items-center gap-1 font-medium" title="Edit file with nano in a new tab">
             <span>✏️</span> <span class="hidden sm:inline">Edit (nano)</span>
-          </button>
-          <button type="button" id="file-modal-tab-btn" onclick="openModalFileInNewTab()" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Run cat in a new terminal tab">
-            <span>↗</span> <span class="hidden sm:inline">Open in Tab</span>
           </button>
           <button type="button" onclick="copyModalFileContent()" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Copy file content to clipboard">
             <span>📋</span> <span id="file-modal-copy-label" class="hidden sm:inline">Copy Content</span>
@@ -3787,7 +3784,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('ftp://') || s.startsWith('git@')) return false;
       if (s.startsWith('-')) return false;
       if (/^[0-9.]+$/.test(s)) return false;
-      if (s.includes(':') && !/^[a-zA-Z]:/.test(s)) return false;
+      if (s.includes(':') && !/^[a-zA-Z]:[/\\]/.test(s)) return false;
 
       const hasSlash = s.includes('/') || s.startsWith('~');
       const base = s.split('/').pop();
@@ -3808,7 +3805,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (!clean) return null;
       const cacheKey = `${tabId || activeTabId || 'default'}:${clean}`;
       if (pathStatCache.has(cacheKey)) {
-        return pathStatCache.get(cacheKey);
+        const cached = pathStatCache.get(cacheKey);
+        if (cached && (Date.now() - cached.ts < 15000)) {
+          return cached.data;
+        }
+        pathStatCache.delete(cacheKey);
       }
       try {
         const fileParam = encodeURIComponent(clean);
@@ -3818,7 +3819,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const res = await fetch(`/api/stat?${qs}`);
         if (res.ok) {
           const data = await res.json();
-          pathStatCache.set(cacheKey, data);
+          pathStatCache.set(cacheKey, { data, ts: Date.now() });
           return data;
         }
       } catch (err) {
@@ -3888,7 +3889,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (!term || typeof term.registerLinkProvider !== 'function') return;
 
       term.registerLinkProvider({
-        provideLinks(bufferLineNumber, callback) {
+        async provideLinks(bufferLineNumber, callback) {
           const line = term.buffer.active.getLine(bufferLineNumber - 1);
           if (!line) {
             callback(undefined);
@@ -3901,7 +3902,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           }
 
           const rawRegex = /(?:^|[\s"'`(\[<])((?:[~.A-Za-z0-9_-]*\/)?(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+(?:\.[A-Za-z0-9_+-]+)?)(?=[\s"'`()\[\]<>{},;:!?.]|$)/gi;
-          const links = [];
+          const candidates = [];
           let match;
 
           while ((match = rawRegex.exec(lineText)) !== null) {
@@ -3911,48 +3912,62 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
             const startOffset = match.index + fullMatch.indexOf(candidate);
             const endOffset = startOffset + candidate.length;
+            candidates.push({ candidate, startOffset, endOffset });
+          }
 
-            links.push({
+          if (candidates.length === 0) {
+            callback(undefined);
+            return;
+          }
+
+          const validLinks = [];
+          await Promise.all(candidates.map(async ({ candidate, startOffset, endOffset }) => {
+            const clean = cleanCandidatePath(candidate);
+            const stat = await fetchPathStat(clean, tabId);
+            if (!stat || stat.exists === false) {
+              return;
+            }
+
+            validLinks.push({
               range: {
                 start: { x: startOffset + 1, y: bufferLineNumber },
                 end: { x: endOffset, y: bufferLineNumber }
               },
               text: candidate,
               activate: async (e, text) => {
-                const clean = cleanCandidatePath(text);
-                const stat = await fetchPathStat(clean, tabId);
-                if (stat && stat.is_dir) {
-                  openTabWithCommand(`cd ${stat.name || clean.split('/').pop() || clean}`, `cd ${quoteShellArg(stat.path || clean)}`);
+                const targetClean = cleanCandidatePath(text);
+                const targetStat = await fetchPathStat(targetClean, tabId);
+                if (targetStat && targetStat.is_dir) {
+                  openTabWithCommand(`cd ${targetStat.name || targetClean.split('/').pop() || targetClean}`, `cd ${quoteShellArg(targetStat.path || targetClean)}`);
                   return;
                 }
-                const cat = getFileCategory(clean);
+                const cat = getFileCategory(targetClean);
                 if (cat.isImage) {
-                  openImagePreviewModal(clean, tabId);
-                } else if (stat && stat.is_file && stat.lines !== null && stat.lines < 2000) {
-                  openFileContentModal(stat.path || clean, tabId, stat);
-                } else if (cat.canCat) {
-                  openTabWithCommand(`cat ${clean.split('/').pop() || clean}`, `cat ${quoteShellArg(clean)}`);
+                  openImagePreviewModal(targetClean, tabId);
+                } else if (cat.canCat || (targetStat && targetStat.is_file)) {
+                  openFileContentModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId, targetStat);
                 } else {
-                  showFileHoverMenu(e, text, tabId);
+                  showFileHoverMenu(e, text, tabId, targetStat);
                 }
               },
               hover: (e, text) => {
-                showFileHoverMenu(e, text, tabId);
+                showFileHoverMenu(e, text, tabId, stat);
               },
               leave: () => {
                 hideFileHoverMenu();
               }
             });
-          }
+          }));
 
-          callback(links.length > 0 ? links : undefined);
+          validLinks.sort((a, b) => a.range.start.x - b.range.start.x);
+          callback(validLinks.length > 0 ? validLinks : undefined);
         }
       });
     }
 
     const registerImageLinkProvider = registerFileLinkProvider;
 
-    function showFileHoverMenu(event, rawPath, tabId) {
+    function showFileHoverMenu(event, rawPath, tabId, prefetchedStat) {
       clearTimeout(fileMenuHideTimer);
       const menu = document.getElementById('file-hover-menu');
       if (!menu) return;
@@ -4007,12 +4022,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
       }
 
-      // Show Content (cat or modal)
+      // View File (in-tab modal)
       if (btnCat) {
         if (cat.canCat) {
           btnCat.classList.remove('hidden');
-          if (btnCatText) btnCatText.textContent = 'Show Content';
-          btnCat.title = 'View file content in modal or new tab';
+          if (btnCatText) btnCatText.textContent = 'View File';
+          btnCat.title = 'View file content in modal';
           btnCat.onclick = (e) => {
             e.stopPropagation();
             hideFileHoverMenu();
@@ -4094,8 +4109,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         fileMenuHideTimer = setTimeout(hideFileHoverMenu, 250);
       };
 
-      // Asynchronously fetch filesystem stat to verify real file/directory status
-      fetchPathStat(path, tabId).then((stat) => {
+      function applyStat(stat) {
         if (!stat || menu.classList.contains('hidden')) return;
         if (stat.exists === false) {
           hideFileHoverMenu();
@@ -4128,40 +4142,29 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         } else if (stat.is_file) {
           if (btnDir) btnDir.classList.add('hidden');
           if (!cat.isImage && !cat.badge) {
-            if (stat.lines !== null && stat.lines >= 2000) {
-              if (btnCat) {
-                btnCat.classList.remove('hidden');
-                if (btnCatText) btnCatText.textContent = 'Cat in Tab';
-                btnCat.title = `Large file (${stat.lines} lines) - open with cat in new tab`;
-                btnCat.onclick = (e) => {
-                  e.stopPropagation();
-                  hideFileHoverMenu();
-                  openTabWithCommand(`cat ${fileName}`, `cat ${quoteShellArg(stat.path || path)}`);
-                };
-              }
-              if (badgeEl) {
-                badgeEl.textContent = `${stat.lines}L`;
-                badgeEl.classList.remove('hidden');
-              }
-            } else if (stat.lines !== null && stat.lines < 2000) {
-              if (btnCat) {
-                btnCat.classList.remove('hidden');
-                if (btnCatText) btnCatText.textContent = 'Show Content';
-                btnCat.title = `View file content in modal (${stat.lines} lines)`;
-                btnCat.onclick = (e) => {
-                  e.stopPropagation();
-                  hideFileHoverMenu();
-                  openFileContentModal(stat.path || path, tabId, stat);
-                };
-              }
-              if (badgeEl) {
-                badgeEl.textContent = `${stat.lines}L`;
-                badgeEl.classList.remove('hidden');
-              }
+            if (btnCat) {
+              btnCat.classList.remove('hidden');
+              if (btnCatText) btnCatText.textContent = 'View File';
+              btnCat.title = `View file content in modal${stat.lines !== null ? ` (${stat.lines} lines)` : ''}`;
+              btnCat.onclick = (e) => {
+                e.stopPropagation();
+                hideFileHoverMenu();
+                openFileContentModal(stat.path || path, tabId, stat);
+              };
+            }
+            if (badgeEl && stat.lines !== null) {
+              badgeEl.textContent = `${stat.lines}L`;
+              badgeEl.classList.remove('hidden');
             }
           }
         }
-      }).catch(() => {});
+      }
+
+      if (prefetchedStat) {
+        applyStat(prefetchedStat);
+      } else {
+        fetchPathStat(path, tabId).then(applyStat).catch(() => {});
+      }
     }
 
     function hideFileHoverMenu() {
@@ -4282,14 +4285,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const fileName = p.split('/').pop() || p;
       closeFileContentModal();
       openTabWithCommand(`edit ${fileName}`, `nano ${quoteShellArg(p)}`);
-    }
-
-    function openModalFileInNewTab() {
-      if (!currentModalFilePath) return;
-      const p = currentModalFilePath;
-      const fileName = p.split('/').pop() || p;
-      closeFileContentModal();
-      openTabWithCommand(`cat ${fileName}`, `cat ${quoteShellArg(p)}`);
     }
 
     function downloadModalFile() {

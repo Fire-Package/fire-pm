@@ -50,7 +50,7 @@ class TestFileHoverComponents:
 
         # Modal action buttons
         assert 'id="file-modal-edit-btn"' in HTML_TEMPLATE
-        assert 'id="file-modal-tab-btn"' in HTML_TEMPLATE
+        assert 'id="file-modal-tab-btn"' not in HTML_TEMPLATE
         assert 'id="file-modal-copy-label"' in HTML_TEMPLATE
 
         # Viewport, line numbers, and pre code
@@ -72,6 +72,13 @@ class TestFileHoverComponents:
         assert 'function hideFileHoverMenu(' in HTML_TEMPLATE
         assert 'function openFileContentModal(' in HTML_TEMPLATE
         assert 'function closeFileContentModal(' in HTML_TEMPLATE
+
+    def test_cat_tab_action_removed(self):
+        # file-modal-tab-btn and openModalFileInNewTab removed in favor of in-tab modal
+        assert 'id="file-modal-tab-btn"' not in HTML_TEMPLATE
+        assert 'function openModalFileInNewTab(' not in HTML_TEMPLATE
+        # cat tab spawning should not be triggered on file hover or activation
+        assert 'openTabWithCommand(`cat' not in HTML_TEMPLATE
 
 
 class TestFileStatEndpoint:
@@ -283,7 +290,11 @@ class TestFileHoverLogicWithNode:
             "192.0.2.1",
             "7683",
             "hello",
-            "some-random-word"
+            "some-random-word",
+            "h:AGENT.md",
+            "path:AGENT.md",
+            "git:diff",
+            "test:12"
         ]
         for p in invalid_paths:
             assert self._eval_js(f"isPathValidCandidate({json.dumps(p)})") is False, f"{p} should be rejected as path candidate"
