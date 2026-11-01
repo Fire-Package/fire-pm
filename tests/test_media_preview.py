@@ -194,3 +194,12 @@ class TestMediaPreviewFrontendIntegration:
         assert 'AUDIO_EXTENSIONS' in HTML_TEMPLATE
         assert 'Play Audio' in HTML_TEMPLATE
         assert 'isAudio' in HTML_TEMPLATE
+
+    def test_html_template_contains_listener_leak_and_race_prevention(self):
+        assert 'activePreviewSeq' in HTML_TEMPLATE
+        assert 'resetMediaModalState' in HTML_TEMPLATE
+        assert 'img.onload = null;' in HTML_TEMPLATE
+        assert 'img.onerror = null;' in HTML_TEMPLATE
+        assert 'img.removeAttribute(\'src\');' in HTML_TEMPLATE
+        assert 'videoEl.removeAttribute(\'src\');' in HTML_TEMPLATE
+        assert 'reqId !== activePreviewSeq' in HTML_TEMPLATE

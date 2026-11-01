@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 ## [Unreleased]
 
 ### Fixed
+* Prevent media preview modal error listener leaks and async request collisions by nullifying callbacks, resetting media sources via attribute removal, and sequencing preview requests ([#124](https://github.com/Fire-Package/fire-pm/issues/124)).
 * Verify filesystem path existence asynchronously before registering terminal links, treating non-existent files and colon-prefixed text (e.g. `h:AGENT.md`) as normal text, and remove redundant `cat` tab spawning in favor of the in-tab file viewer ([#120](https://github.com/Fire-Package/fire-pm/issues/120)).
 * Fix line numbers whitespace collapsing and viewport overflow in in-tab file content modal, ensuring sticky left alignment, 1:1 line height match, and proper display for multi-hundred line files.
 * Stream downloads natively via the browser and package folders only, removing client-side memory buffering, "Preparing..." delays, and preventing files from receiving a .zip extension ([#112](https://github.com/Fire-Package/fire-pm/issues/112), [#113](https://github.com/Fire-Package/fire-pm/pull/113)).
