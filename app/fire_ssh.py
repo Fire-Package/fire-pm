@@ -1665,7 +1665,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <!-- Top Bar -->
       <div class="flex items-center justify-between px-4 py-3 bg-slate-950/80 border-b border-slate-800/80 shrink-0">
         <div class="flex items-center gap-3 min-w-0">
-          <span class="text-lg">🖼️</span>
+          <span id="image-modal-icon" class="text-lg">🖼️</span>
           <div class="min-w-0">
             <div id="image-modal-title" class="text-sm font-semibold text-white truncate font-mono">image.png</div>
             <div id="image-modal-path" class="text-[11px] text-slate-400 font-mono truncate max-w-lg cursor-pointer hover:text-orange-300 transition" title="Click to copy path" onclick="copyModalImagePath()"></div>
@@ -1674,7 +1674,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         <!-- Controls Toolbar -->
         <div class="flex items-center gap-1.5 shrink-0">
-          <div class="flex items-center bg-slate-900/90 border border-slate-700/80 rounded-xl px-1.5 py-1 text-xs mr-2 font-mono text-slate-300">
+          <div id="image-modal-zoom-group" class="flex items-center bg-slate-900/90 border border-slate-700/80 rounded-xl px-1.5 py-1 text-xs mr-2 font-mono text-slate-300">
             <button type="button" onclick="zoomImagePreview(-0.25)" class="px-2 py-0.5 hover:bg-slate-800 rounded transition text-slate-200" title="Zoom Out (-)">−</button>
             <span id="image-modal-zoom" class="px-2 min-w-[50px] text-center text-[11px] font-semibold text-orange-400">100%</span>
             <button type="button" onclick="zoomImagePreview(0.25)" class="px-2 py-0.5 hover:bg-slate-800 rounded transition text-slate-200" title="Zoom In (+)">+</button>
@@ -1700,16 +1700,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div id="image-modal-spinner" class="hidden absolute inset-0 flex items-center justify-center bg-slate-950/60 z-10 text-orange-400 text-sm">
           <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 p-3 rounded-2xl shadow-xl">
             <span class="animate-spin text-base">⟳</span>
-            <span>Loading image...</span>
+            <span>Loading media...</span>
           </div>
         </div>
         <div id="image-modal-error" class="hidden absolute inset-0 flex items-center justify-center bg-slate-950/80 z-10 text-red-400 text-xs">
           <div class="bg-slate-900 border border-red-500/30 p-4 rounded-2xl shadow-xl max-w-sm text-center">
             <div class="text-2xl mb-1">⚠️</div>
-            <div id="image-modal-error-msg" class="text-slate-300">Unable to load image preview</div>
+            <div id="image-modal-error-msg" class="text-slate-300">Unable to load preview</div>
           </div>
         </div>
         <img id="image-modal-img" class="max-w-none transition-transform duration-75 select-none rounded shadow-2xl" alt="Preview" draggable="false">
+        <video id="image-modal-video" class="hidden max-w-full max-h-[82vh] rounded-xl shadow-2xl bg-black focus:outline-none" controls autoplay playsinline preload="metadata"></video>
       </div>
 
       <!-- Bottom Status Bar -->
@@ -1719,7 +1720,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <span id="image-modal-meta-size">Size: --</span>
           <span id="image-modal-meta-type">Type: --</span>
         </div>
-        <div class="text-[11px] text-slate-500 hidden md:block">
+        <div id="image-modal-shortcuts-hint" class="text-[11px] text-slate-500 hidden md:block">
           Use mouse wheel to zoom, drag to pan, <kbd class="px-1 py-0.5 bg-slate-800 rounded text-slate-400">Esc</kbd> to exit
         </div>
       </div>
@@ -3760,13 +3761,30 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     const BLOCKED_EXTENSIONS = new Set([
       'exe', 'bin', 'dll', 'so', 'dylib', 'o', 'a', 'obj', 'pyc', 'pyo', 'class', 'wasm',
       'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst', 'iso', 'dmg', 'deb', 'rpm', 'apk', 'msi',
-      'mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv', 'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a',
+      'mkv', 'avi', 'mov', 'flv', 'wmv', 'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a',
       'pdf', 'docx', 'xlsx', 'pptx', 'sqlite', 'db', 'sqlite3'
     ]);
 
     const IMAGE_EXTENSIONS = new Set([
       'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'tiff'
     ]);
+
+    const VIDEO_EXTENSIONS = new Set([
+      'mp4', 'webm'
+    ]);
+
+    function formatDuration(sec) {
+      if (!sec || isNaN(sec)) return '00:00';
+      const s = Math.floor(sec);
+      const m = Math.floor(s / 60);
+      const remS = s % 60;
+      const h = Math.floor(m / 60);
+      const remM = m % 60;
+      if (h > 0) {
+        return `${h}:${remM.toString().padStart(2, '0')}:${remS.toString().padStart(2, '0')}`;
+      }
+      return `${remM.toString().padStart(2, '0')}:${remS.toString().padStart(2, '0')}`;
+    }
 
     const KNOWN_SPECIAL_FILES = new Set(['dockerfile', 'makefile', 'license', 'procfile', 'gemfile']);
 
@@ -3834,16 +3852,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const ext = (parts.length > 1 ? parts.pop() : '').toLowerCase();
 
       if (IMAGE_EXTENSIONS.has(ext)) {
-        return { type: 'image', ext: ext, canEdit: false, canCat: false, isImage: true };
+        return { type: 'image', ext: ext, canEdit: false, canCat: false, isImage: true, isVideo: false };
+      }
+      if (VIDEO_EXTENSIONS.has(ext)) {
+        return { type: 'video', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: true, badge: 'VIDEO' };
       }
       if (BLOCKED_EXTENSIONS.has(ext)) {
         let badge = 'BINARY';
         if (['zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst', 'iso', 'dmg', 'deb', 'rpm', 'apk', 'msi'].includes(ext)) badge = 'ARCHIVE';
-        else if (['mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv'].includes(ext)) badge = 'VIDEO';
+        else if (['mkv', 'avi', 'mov', 'flv', 'wmv'].includes(ext)) badge = 'VIDEO';
         else if (['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a'].includes(ext)) badge = 'AUDIO';
-        return { type: 'blocked', ext: ext, badge: badge, canEdit: false, canCat: false, isImage: false };
+        return { type: 'blocked', ext: ext, badge: badge, canEdit: false, canCat: false, isImage: false, isVideo: false };
       }
-      return { type: 'text', ext: ext, canEdit: true, canCat: true, isImage: false };
+      return { type: 'text', ext: ext, canEdit: true, canCat: true, isImage: false, isVideo: false };
     }
 
     function quoteShellArg(arg) {
@@ -3942,7 +3963,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                   return;
                 }
                 const cat = getFileCategory(targetClean);
-                if (cat.isImage) {
+                if (cat.isImage || cat.isVideo) {
                   openImagePreviewModal(targetClean, tabId);
                 } else if (cat.canCat || (targetStat && targetStat.is_file)) {
                   openFileContentModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId, targetStat);
@@ -4052,10 +4073,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
       }
 
-      // View Image (for images)
+      // View Image / Preview Video (for media)
       if (btnImg) {
-        if (cat.isImage) {
+        if (cat.isImage || cat.isVideo) {
           btnImg.classList.remove('hidden');
+          const iconSpan = btnImg.querySelector('span:first-child');
+          const textSpan = btnImg.querySelector('span:last-child');
+          if (iconSpan) iconSpan.textContent = cat.isVideo ? '🎬' : '🖼️';
+          if (textSpan) textSpan.textContent = cat.isVideo ? 'Preview Video' : 'View Image';
+          btnImg.title = cat.isVideo ? 'Preview MP4 video' : 'Preview image in Lightbox viewer';
           btnImg.onclick = (e) => {
             e.stopPropagation();
             hideFileHoverMenu();
@@ -4308,6 +4334,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       const modal = document.getElementById('image-preview-modal');
       const img = document.getElementById('image-modal-img');
+      const videoEl = document.getElementById('image-modal-video');
       const spinner = document.getElementById('image-modal-spinner');
       const errBox = document.getElementById('image-modal-error');
       const titleEl = document.getElementById('image-modal-title');
@@ -4315,15 +4342,33 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const metaDims = document.getElementById('image-modal-meta-dims');
       const metaSize = document.getElementById('image-modal-meta-size');
       const metaType = document.getElementById('image-modal-meta-type');
+      const iconEl = document.getElementById('image-modal-icon');
+      const zoomGroup = document.getElementById('image-modal-zoom-group');
+      const shortcutsHint = document.getElementById('image-modal-shortcuts-hint');
 
       const fileName = path.split('/').pop() || path;
-      const ext = fileName.split('.').pop() || 'image';
+      const ext = (fileName.split('.').pop() || 'image').toLowerCase();
+      const isVideo = VIDEO_EXTENSIONS.has(ext);
 
+      if (iconEl) iconEl.textContent = isVideo ? '🎬' : '🖼️';
       if (titleEl) titleEl.textContent = fileName;
       if (pathEl) pathEl.textContent = path;
       if (metaType) metaType.textContent = `Type: ${ext.toUpperCase()}`;
       if (metaDims) metaDims.textContent = 'Dimensions: loading...';
       if (metaSize) metaSize.textContent = 'Size: ...';
+
+      if (zoomGroup) {
+        if (isVideo) zoomGroup.classList.add('hidden');
+        else zoomGroup.classList.remove('hidden');
+      }
+
+      if (shortcutsHint) {
+        if (isVideo) {
+          shortcutsHint.innerHTML = 'Space to play/pause, ←/→ to seek 5s, <kbd class="px-1 py-0.5 bg-slate-800 rounded text-slate-400">Esc</kbd> to exit';
+        } else {
+          shortcutsHint.innerHTML = 'Use mouse wheel to zoom, drag to pan, <kbd class="px-1 py-0.5 bg-slate-800 rounded text-slate-400">Esc</kbd> to exit';
+        }
+      }
 
       imageZoom = 1.0;
       imagePanX = 0;
@@ -4345,34 +4390,80 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
       }).catch(() => {});
 
-      img.onload = () => {
-        if (spinner) spinner.classList.add('hidden');
-        if (metaDims) {
-          metaDims.textContent = `Dimensions: ${img.naturalWidth} × ${img.naturalHeight}px`;
+      if (isVideo) {
+        if (img) {
+          img.classList.add('hidden');
+          img.src = '';
         }
-        const vp = document.getElementById('image-modal-viewport');
-        if (vp && (img.naturalWidth > vp.clientWidth * 0.9 || img.naturalHeight > vp.clientHeight * 0.9)) {
-          fitImagePreviewToScreen();
+        if (videoEl) {
+          videoEl.classList.remove('hidden');
+          videoEl.onloadedmetadata = () => {
+            if (spinner) spinner.classList.add('hidden');
+            let dims = `${videoEl.videoWidth} × ${videoEl.videoHeight}px`;
+            if (videoEl.duration) {
+              dims += ` • ${formatDuration(videoEl.duration)}`;
+            }
+            if (metaDims) metaDims.textContent = `Dimensions: ${dims}`;
+          };
+          videoEl.onerror = () => {
+            if (spinner) spinner.classList.add('hidden');
+            if (errBox) {
+              const errMsg = document.getElementById('image-modal-error-msg');
+              if (errMsg) errMsg.textContent = `Could not load video: "${path}" (format unsupported or access denied)`;
+              errBox.classList.remove('hidden');
+            }
+          };
+          videoEl.src = previewUrl;
+          try { videoEl.play().catch(() => {}); } catch(e) {}
         }
-      };
+      } else {
+        if (videoEl) {
+          videoEl.pause();
+          videoEl.src = '';
+          videoEl.classList.add('hidden');
+        }
+        if (img) {
+          img.classList.remove('hidden');
+          img.onload = () => {
+            if (spinner) spinner.classList.add('hidden');
+            if (metaDims) {
+              metaDims.textContent = `Dimensions: ${img.naturalWidth} × ${img.naturalHeight}px`;
+            }
+            const vp = document.getElementById('image-modal-viewport');
+            if (vp && (img.naturalWidth > vp.clientWidth * 0.9 || img.naturalHeight > vp.clientHeight * 0.9)) {
+              fitImagePreviewToScreen();
+            }
+          };
 
-      img.onerror = () => {
-        if (spinner) spinner.classList.add('hidden');
-        if (errBox) {
-          const errMsg = document.getElementById('image-modal-error-msg');
-          if (errMsg) errMsg.textContent = `Could not load image: "${path}" (file not found or access denied)`;
-          errBox.classList.remove('hidden');
-        }
-      };
+          img.onerror = () => {
+            if (spinner) spinner.classList.add('hidden');
+            if (errBox) {
+              const errMsg = document.getElementById('image-modal-error-msg');
+              if (errMsg) errMsg.textContent = `Could not load image: "${path}" (file not found or access denied)`;
+              errBox.classList.remove('hidden');
+            }
+          };
 
-      img.src = previewUrl;
+          img.src = previewUrl;
+        }
+      }
     }
 
     function closeImagePreviewModal() {
       const modal = document.getElementById('image-preview-modal');
       const img = document.getElementById('image-modal-img');
+      const videoEl = document.getElementById('image-modal-video');
       if (modal) modal.classList.add('hidden');
-      if (img) img.src = '';
+      if (img) {
+        img.src = '';
+        img.classList.remove('hidden');
+      }
+      if (videoEl) {
+        videoEl.pause();
+        videoEl.src = '';
+        try { videoEl.load(); } catch(e) {}
+        videoEl.classList.add('hidden');
+      }
       currentPreviewPath = '';
     }
 
@@ -4450,17 +4541,41 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       clearTimeout(imageChipTimer);
 
       const fileName = path.split('/').pop() || path;
+      const ext = (fileName.split('.').pop() || '').toLowerCase();
+      const isVideo = VIDEO_EXTENSIONS.has(ext);
+
       if (nameEl) nameEl.textContent = fileName;
-      if (dimsEl) dimsEl.textContent = 'Image output detected';
+
+      const titleLabel = chip.querySelector('.tracking-wider');
+      if (titleLabel) {
+        titleLabel.innerHTML = isVideo ? '<span>🎬</span> Video Detected' : '<span>🖼️</span> Image Generated';
+      }
+
+      if (dimsEl) dimsEl.textContent = isVideo ? 'Video output detected' : 'Image output detected';
 
       const previewUrl = buildImageUrl(path, tabId);
-      img.onload = () => {
-        if (dimsEl) dimsEl.textContent = `${img.naturalWidth} × ${img.naturalHeight}px`;
-      };
-      img.onerror = () => {
-        chip.classList.add('hidden');
-      };
-      img.src = previewUrl;
+      if (isVideo) {
+        img.classList.add('hidden');
+        let iconSpan = thumbBox.querySelector('.chip-video-icon');
+        if (!iconSpan) {
+          iconSpan = document.createElement('span');
+          iconSpan.className = 'chip-video-icon text-2xl';
+          thumbBox.appendChild(iconSpan);
+        }
+        iconSpan.textContent = '🎬';
+        iconSpan.classList.remove('hidden');
+      } else {
+        const iconSpan = thumbBox.querySelector('.chip-video-icon');
+        if (iconSpan) iconSpan.classList.add('hidden');
+        img.classList.remove('hidden');
+        img.onload = () => {
+          if (dimsEl) dimsEl.textContent = `${img.naturalWidth} × ${img.naturalHeight}px`;
+        };
+        img.onerror = () => {
+          chip.classList.add('hidden');
+        };
+        img.src = previewUrl;
+      }
 
       const openAction = () => openImagePreviewModal(path, tabId);
       if (viewBtn) viewBtn.onclick = openAction;
@@ -4490,7 +4605,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
       if (!text || text.length < 5) return;
       const clean = text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-      const regex = /(?:^|[\s"'`(\[<])((?:[~.A-Za-z0-9_-]*\/)?(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.(?:png|jpe?g|gif|webp|svg|bmp|ico))(?=[\s"'`()\[\]<>{},;:!?.]|$)/gi;
+      const regex = /(?:^|[\s"'`(\[<])((?:[~.A-Za-z0-9_-]*\/)?(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.(?:png|jpe?g|gif|webp|svg|bmp|ico|mp4|webm))(?=[\s"'`()\[\]<>{},;:!?.]|$)/gi;
       let match;
       while ((match = regex.exec(clean)) !== null) {
         const imgPath = match[1];
@@ -4510,7 +4625,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (!vp) return;
 
       vp.addEventListener('mousedown', (e) => {
-        if (e.target.closest('button')) return;
+        if (e.target.closest('button') || e.target.closest('video')) return;
+        const videoEl = document.getElementById('image-modal-video');
+        if (videoEl && !videoEl.classList.contains('hidden')) return;
         isPanningImage = true;
         panStartX = e.clientX - imagePanX;
         panStartY = e.clientY - imagePanY;
@@ -4536,6 +4653,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       });
 
       vp.addEventListener('wheel', (e) => {
+        const videoEl = document.getElementById('image-modal-video');
+        if (videoEl && !videoEl.classList.contains('hidden')) return;
         e.preventDefault();
         const factor = e.deltaY < 0 ? 1.15 : 0.85;
         imageZoom = Math.min(8.0, Math.max(0.1, imageZoom * factor));
@@ -4545,22 +4664,48 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       window.addEventListener('keydown', (e) => {
         const modal = document.getElementById('image-preview-modal');
         if (modal && !modal.classList.contains('hidden')) {
+          const videoEl = document.getElementById('image-modal-video');
+          const isVideoActive = videoEl && !videoEl.classList.contains('hidden');
+
           if (e.key === 'Escape') {
             e.preventDefault();
             closeImagePreviewModal();
             return;
-          } else if (e.key === '+' || e.key === '=') {
-            e.preventDefault();
-            zoomImagePreview(0.25);
-            return;
-          } else if (e.key === '-' || e.key === '_') {
-            e.preventDefault();
-            zoomImagePreview(-0.25);
-            return;
-          } else if (e.key === '0') {
-            e.preventDefault();
-            resetImagePreviewZoom();
-            return;
+          }
+
+          if (isVideoActive) {
+            if (e.key === ' ' || e.code === 'Space') {
+              e.preventDefault();
+              if (videoEl.paused) videoEl.play();
+              else videoEl.pause();
+              return;
+            } else if (e.key === 'ArrowLeft') {
+              e.preventDefault();
+              videoEl.currentTime = Math.max(0, videoEl.currentTime - 5);
+              return;
+            } else if (e.key === 'ArrowRight') {
+              e.preventDefault();
+              videoEl.currentTime = Math.min(videoEl.duration || 0, videoEl.currentTime + 5);
+              return;
+            } else if (e.key === 'm' || e.key === 'M') {
+              e.preventDefault();
+              videoEl.muted = !videoEl.muted;
+              return;
+            }
+          } else {
+            if (e.key === '+' || e.key === '=') {
+              e.preventDefault();
+              zoomImagePreview(0.25);
+              return;
+            } else if (e.key === '-' || e.key === '_') {
+              e.preventDefault();
+              zoomImagePreview(-0.25);
+              return;
+            } else if (e.key === '0') {
+              e.preventDefault();
+              resetImagePreviewZoom();
+              return;
+            }
           }
         }
 
@@ -7194,7 +7339,8 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(file_size))
-                self.send_header("Access-Control-Expose-Headers", "Content-Disposition")
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Access-Control-Expose-Headers", "Content-Disposition, Content-Range, Accept-Ranges")
                 disposition_type = "inline" if (norm_path in ('/api/preview', '/api/view') or query.get('inline', ['0'])[0] in ('1', 'true', 'yes')) else "attachment"
                 self.send_header("Content-Disposition", f'{disposition_type}; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
                 self.end_headers()
@@ -7551,11 +7697,59 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                     if content_type == "application/octet-stream" or content_type.startswith("text/") or content_type in ("application/json", "application/javascript", "application/xml"):
                         content_type = "text/plain; charset=utf-8"
 
+                safe_name = urllib.parse.quote(filename)
+
+                # Check HTTP Range header
+                range_header = self.headers.get('Range')
+                if range_header and range_header.strip().startswith('bytes='):
+                    range_val = range_header.strip()[6:].strip()
+                    if ',' not in range_val:
+                        parts = range_val.split('-')
+                        start_str, end_str = parts[0].strip(), parts[1].strip()
+                        try:
+                            start = int(start_str) if start_str else None
+                            end = int(end_str) if end_str else None
+
+                            if start is None and end is not None:
+                                start = max(0, file_size - end)
+                                end = file_size - 1
+                            elif start is not None and end is None:
+                                end = file_size - 1
+
+                            if start is not None and end is not None and 0 <= start <= end < file_size:
+                                content_length = end - start + 1
+                                self.send_response(206)
+                                self.send_header("Content-Type", content_type)
+                                self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
+                                self.send_header("Content-Length", str(content_length))
+                                self.send_header("Accept-Ranges", "bytes")
+                                self.send_header("Access-Control-Expose-Headers", "Content-Disposition, Content-Range, Accept-Ranges")
+                                self.send_header("Content-Disposition", f'{disposition_type}; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
+                                self.end_headers()
+
+                                with open(target_path, 'rb') as f:
+                                    f.seek(start)
+                                    bytes_left = content_length
+                                    while bytes_left > 0:
+                                        chunk = f.read(min(65536, bytes_left))
+                                        if not chunk:
+                                            break
+                                        self.wfile.write(chunk)
+                                        bytes_left -= len(chunk)
+                                return
+                            else:
+                                self.send_response(416)
+                                self.send_header("Content-Range", f"bytes */{file_size}")
+                                self.end_headers()
+                                return
+                        except (ValueError, OSError):
+                            pass
+
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(file_size))
-                self.send_header("Access-Control-Expose-Headers", "Content-Disposition")
-                safe_name = urllib.parse.quote(filename)
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Access-Control-Expose-Headers", "Content-Disposition, Content-Range, Accept-Ranges")
                 self.send_header("Content-Disposition", f'{disposition_type}; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
                 self.end_headers()
 
