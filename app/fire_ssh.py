@@ -1682,6 +1682,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <button type="button" onclick="fitImagePreviewToScreen()" class="px-2 py-0.5 hover:bg-slate-800 rounded transition text-slate-400 hover:text-white" title="Fit to Screen">⊡</button>
           </div>
 
+          <button type="button" id="image-modal-pip-btn" onclick="toggleModalPictureInPicture()" class="hidden px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Picture in Picture">
+            <span>⧉</span> <span class="hidden sm:inline">PiP</span>
+          </button>
           <button type="button" onclick="copyModalImagePath()" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Copy Path">
             <span>📋</span> <span class="hidden sm:inline">Copy Path</span>
           </button>
@@ -1711,6 +1714,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
         <img id="image-modal-img" class="max-w-none transition-transform duration-75 select-none rounded shadow-2xl" alt="Preview" draggable="false">
         <video id="image-modal-video" class="hidden max-w-full max-h-[82vh] rounded-xl shadow-2xl bg-black focus:outline-none" controls autoplay playsinline preload="metadata"></video>
+        <div id="image-modal-audio-box" class="hidden flex flex-col items-center justify-center p-8 bg-slate-900/90 border border-slate-700/80 rounded-3xl shadow-2xl max-w-md w-full text-center">
+          <div class="w-20 h-20 rounded-2xl bg-slate-800/80 border border-slate-700 flex items-center justify-center text-4xl mb-4 shadow-inner">🎵</div>
+          <div id="image-modal-audio-title" class="text-sm font-semibold text-white font-mono truncate max-w-full mb-1">audio.mp3</div>
+          <div id="image-modal-audio-meta" class="text-xs text-slate-400 font-mono mb-5">Audio Track</div>
+          <audio id="image-modal-audio" class="w-full focus:outline-none rounded" controls autoplay preload="metadata"></audio>
+        </div>
       </div>
 
       <!-- Bottom Status Bar -->
@@ -3761,7 +3770,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     const BLOCKED_EXTENSIONS = new Set([
       'exe', 'bin', 'dll', 'so', 'dylib', 'o', 'a', 'obj', 'pyc', 'pyo', 'class', 'wasm',
       'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst', 'iso', 'dmg', 'deb', 'rpm', 'apk', 'msi',
-      'mkv', 'avi', 'mov', 'flv', 'wmv', 'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a',
+      'mkv', 'avi', 'mov', 'flv', 'wmv',
       'pdf', 'docx', 'xlsx', 'pptx', 'sqlite', 'db', 'sqlite3'
     ]);
 
@@ -3771,6 +3780,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     const VIDEO_EXTENSIONS = new Set([
       'mp4', 'webm'
+    ]);
+
+    const AUDIO_EXTENSIONS = new Set([
+      'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a'
     ]);
 
     function formatDuration(sec) {
@@ -3852,19 +3865,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const ext = (parts.length > 1 ? parts.pop() : '').toLowerCase();
 
       if (IMAGE_EXTENSIONS.has(ext)) {
-        return { type: 'image', ext: ext, canEdit: false, canCat: false, isImage: true, isVideo: false };
+        return { type: 'image', ext: ext, canEdit: false, canCat: false, isImage: true, isVideo: false, isAudio: false };
       }
       if (VIDEO_EXTENSIONS.has(ext)) {
-        return { type: 'video', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: true, badge: 'VIDEO' };
+        return { type: 'video', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: true, isAudio: false, badge: 'VIDEO' };
+      }
+      if (AUDIO_EXTENSIONS.has(ext)) {
+        return { type: 'audio', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: true, badge: 'AUDIO' };
       }
       if (BLOCKED_EXTENSIONS.has(ext)) {
         let badge = 'BINARY';
         if (['zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst', 'iso', 'dmg', 'deb', 'rpm', 'apk', 'msi'].includes(ext)) badge = 'ARCHIVE';
         else if (['mkv', 'avi', 'mov', 'flv', 'wmv'].includes(ext)) badge = 'VIDEO';
-        else if (['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a'].includes(ext)) badge = 'AUDIO';
-        return { type: 'blocked', ext: ext, badge: badge, canEdit: false, canCat: false, isImage: false, isVideo: false };
+        return { type: 'blocked', ext: ext, badge: badge, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: false };
       }
-      return { type: 'text', ext: ext, canEdit: true, canCat: true, isImage: false, isVideo: false };
+      return { type: 'text', ext: ext, canEdit: true, canCat: true, isImage: false, isVideo: false, isAudio: false };
     }
 
     function quoteShellArg(arg) {
@@ -3963,7 +3978,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                   return;
                 }
                 const cat = getFileCategory(targetClean);
-                if (cat.isImage || cat.isVideo) {
+                if (cat.isImage || cat.isVideo || cat.isAudio) {
                   openImagePreviewModal(targetClean, tabId);
                 } else if (cat.canCat || (targetStat && targetStat.is_file)) {
                   openFileContentModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId, targetStat);
@@ -4073,15 +4088,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
       }
 
-      // View Image / Preview Video (for media)
+      // View Image / Preview Video / Play Audio (for media)
       if (btnImg) {
-        if (cat.isImage || cat.isVideo) {
+        if (cat.isImage || cat.isVideo || cat.isAudio) {
           btnImg.classList.remove('hidden');
           const iconSpan = btnImg.querySelector('span:first-child');
           const textSpan = btnImg.querySelector('span:last-child');
-          if (iconSpan) iconSpan.textContent = cat.isVideo ? '🎬' : '🖼️';
-          if (textSpan) textSpan.textContent = cat.isVideo ? 'Preview Video' : 'View Image';
-          btnImg.title = cat.isVideo ? 'Preview MP4 video' : 'Preview image in Lightbox viewer';
+          if (iconSpan) iconSpan.textContent = cat.isAudio ? '🎵' : (cat.isVideo ? '🎬' : '🖼️');
+          if (textSpan) textSpan.textContent = cat.isAudio ? 'Play Audio' : (cat.isVideo ? 'Preview Video' : 'View Image');
+          btnImg.title = cat.isAudio ? 'Play audio track' : (cat.isVideo ? 'Preview MP4 video' : 'Preview image in Lightbox viewer');
           btnImg.onclick = (e) => {
             e.stopPropagation();
             hideFileHoverMenu();
@@ -4335,6 +4350,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const modal = document.getElementById('image-preview-modal');
       const img = document.getElementById('image-modal-img');
       const videoEl = document.getElementById('image-modal-video');
+      const audioBox = document.getElementById('image-modal-audio-box');
+      const audioEl = document.getElementById('image-modal-audio');
+      const audioTitle = document.getElementById('image-modal-audio-title');
+      const audioMeta = document.getElementById('image-modal-audio-meta');
       const spinner = document.getElementById('image-modal-spinner');
       const errBox = document.getElementById('image-modal-error');
       const titleEl = document.getElementById('image-modal-title');
@@ -4344,13 +4363,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const metaType = document.getElementById('image-modal-meta-type');
       const iconEl = document.getElementById('image-modal-icon');
       const zoomGroup = document.getElementById('image-modal-zoom-group');
+      const pipBtn = document.getElementById('image-modal-pip-btn');
       const shortcutsHint = document.getElementById('image-modal-shortcuts-hint');
 
       const fileName = path.split('/').pop() || path;
-      const ext = (fileName.split('.').pop() || 'image').toLowerCase();
+      const ext = (fileName.split('.').pop() || 'media').toLowerCase();
       const isVideo = VIDEO_EXTENSIONS.has(ext);
+      const isAudio = AUDIO_EXTENSIONS.has(ext);
 
-      if (iconEl) iconEl.textContent = isVideo ? '🎬' : '🖼️';
+      if (iconEl) iconEl.textContent = isAudio ? '🎵' : (isVideo ? '🎬' : '🖼️');
       if (titleEl) titleEl.textContent = fileName;
       if (pathEl) pathEl.textContent = path;
       if (metaType) metaType.textContent = `Type: ${ext.toUpperCase()}`;
@@ -4358,12 +4379,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (metaSize) metaSize.textContent = 'Size: ...';
 
       if (zoomGroup) {
-        if (isVideo) zoomGroup.classList.add('hidden');
+        if (isVideo || isAudio) zoomGroup.classList.add('hidden');
         else zoomGroup.classList.remove('hidden');
       }
 
+      if (pipBtn) {
+        if (isVideo && document.pictureInPictureEnabled) pipBtn.classList.remove('hidden');
+        else pipBtn.classList.add('hidden');
+      }
+
       if (shortcutsHint) {
-        if (isVideo) {
+        if (isVideo || isAudio) {
           shortcutsHint.innerHTML = 'Space to play/pause, ←/→ to seek 5s, <kbd class="px-1 py-0.5 bg-slate-800 rounded text-slate-400">Esc</kbd> to exit';
         } else {
           shortcutsHint.innerHTML = 'Use mouse wheel to zoom, drag to pan, <kbd class="px-1 py-0.5 bg-slate-800 rounded text-slate-400">Esc</kbd> to exit';
@@ -4390,10 +4416,38 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
       }).catch(() => {});
 
-      if (isVideo) {
-        if (img) {
-          img.classList.add('hidden');
-          img.src = '';
+      if (isAudio) {
+        if (img) { img.classList.add('hidden'); img.src = ''; }
+        if (videoEl) {
+          videoEl.pause();
+          videoEl.src = '';
+          videoEl.classList.add('hidden');
+        }
+        if (audioBox && audioEl) {
+          audioBox.classList.remove('hidden');
+          if (audioTitle) audioTitle.textContent = fileName;
+          if (audioMeta) audioMeta.textContent = `Audio Track (${ext.toUpperCase()})`;
+          audioEl.onloadedmetadata = () => {
+            if (spinner) spinner.classList.add('hidden');
+            if (metaDims) metaDims.textContent = `Duration: ${formatDuration(audioEl.duration)}`;
+          };
+          audioEl.onerror = () => {
+            if (spinner) spinner.classList.add('hidden');
+            if (errBox) {
+              const errMsg = document.getElementById('image-modal-error-msg');
+              if (errMsg) errMsg.textContent = `Could not load audio: "${path}" (format unsupported or access denied)`;
+              errBox.classList.remove('hidden');
+            }
+          };
+          audioEl.src = previewUrl;
+          try { audioEl.play().catch(() => {}); } catch(e) {}
+        }
+      } else if (isVideo) {
+        if (img) { img.classList.add('hidden'); img.src = ''; }
+        if (audioBox && audioEl) {
+          audioEl.pause();
+          audioEl.src = '';
+          audioBox.classList.add('hidden');
         }
         if (videoEl) {
           videoEl.classList.remove('hidden');
@@ -4417,6 +4471,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           try { videoEl.play().catch(() => {}); } catch(e) {}
         }
       } else {
+        if (audioBox && audioEl) {
+          audioEl.pause();
+          audioEl.src = '';
+          audioBox.classList.add('hidden');
+        }
         if (videoEl) {
           videoEl.pause();
           videoEl.src = '';
@@ -4449,20 +4508,50 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
     }
 
-    function closeImagePreviewModal() {
+    async function toggleModalPictureInPicture() {
+      const video = document.getElementById('image-modal-video');
+      if (!video) return;
+      try {
+        if (document.pictureInPictureElement) {
+          await document.exitPictureInPicture();
+        } else if (document.pictureInPictureEnabled) {
+          await video.requestPictureInPicture();
+        }
+      } catch (err) {
+        console.debug('Picture-in-Picture error', err);
+        showToast('Picture-in-Picture not supported or blocked');
+      }
+    }
+
+    function closeImagePreviewModal(exitPip = true) {
       const modal = document.getElementById('image-preview-modal');
       const img = document.getElementById('image-modal-img');
       const videoEl = document.getElementById('image-modal-video');
+      const audioBox = document.getElementById('image-modal-audio-box');
+      const audioEl = document.getElementById('image-modal-audio');
+
       if (modal) modal.classList.add('hidden');
       if (img) {
         img.src = '';
         img.classList.remove('hidden');
       }
+      if (audioEl) {
+        audioEl.pause();
+        audioEl.src = '';
+        try { audioEl.load(); } catch(e) {}
+      }
+      if (audioBox) audioBox.classList.add('hidden');
+
       if (videoEl) {
-        videoEl.pause();
-        videoEl.src = '';
-        try { videoEl.load(); } catch(e) {}
-        videoEl.classList.add('hidden');
+        if (exitPip && document.pictureInPictureElement === videoEl) {
+          try { document.exitPictureInPicture(); } catch(e) {}
+        }
+        if (document.pictureInPictureElement !== videoEl) {
+          videoEl.pause();
+          videoEl.src = '';
+          try { videoEl.load(); } catch(e) {}
+          videoEl.classList.add('hidden');
+        }
       }
       currentPreviewPath = '';
     }
@@ -4543,18 +4632,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const fileName = path.split('/').pop() || path;
       const ext = (fileName.split('.').pop() || '').toLowerCase();
       const isVideo = VIDEO_EXTENSIONS.has(ext);
+      const isAudio = AUDIO_EXTENSIONS.has(ext);
 
       if (nameEl) nameEl.textContent = fileName;
 
       const titleLabel = chip.querySelector('.tracking-wider');
       if (titleLabel) {
-        titleLabel.innerHTML = isVideo ? '<span>🎬</span> Video Detected' : '<span>🖼️</span> Image Generated';
+        titleLabel.innerHTML = isAudio ? '<span>🎵</span> Audio Detected' : (isVideo ? '<span>🎬</span> Video Detected' : '<span>🖼️</span> Image Generated');
       }
 
-      if (dimsEl) dimsEl.textContent = isVideo ? 'Video output detected' : 'Image output detected';
+      if (dimsEl) dimsEl.textContent = isAudio ? 'Audio output detected' : (isVideo ? 'Video output detected' : 'Image output detected');
 
       const previewUrl = buildImageUrl(path, tabId);
-      if (isVideo) {
+      if (isVideo || isAudio) {
         img.classList.add('hidden');
         let iconSpan = thumbBox.querySelector('.chip-video-icon');
         if (!iconSpan) {
@@ -4562,7 +4652,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           iconSpan.className = 'chip-video-icon text-2xl';
           thumbBox.appendChild(iconSpan);
         }
-        iconSpan.textContent = '🎬';
+        iconSpan.textContent = isAudio ? '🎵' : '🎬';
         iconSpan.classList.remove('hidden');
       } else {
         const iconSpan = thumbBox.querySelector('.chip-video-icon');
@@ -4605,7 +4695,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
       if (!text || text.length < 5) return;
       const clean = text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-      const regex = /(?:^|[\s"'`(\[<])((?:[~.A-Za-z0-9_-]*\/)?(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.(?:png|jpe?g|gif|webp|svg|bmp|ico|mp4|webm))(?=[\s"'`()\[\]<>{},;:!?.]|$)/gi;
+      const regex = /(?:^|[\s"'`(\[<])((?:[~.A-Za-z0-9_-]*\/)?(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.(?:png|jpe?g|gif|webp|svg|bmp|ico|mp4|webm|mp3|wav|ogg|flac|m4a|aac))(?=[\s"'`()\[\]<>{},;:!?.]|$)/gi;
       let match;
       while ((match = regex.exec(clean)) !== null) {
         const imgPath = match[1];
@@ -4625,9 +4715,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (!vp) return;
 
       vp.addEventListener('mousedown', (e) => {
-        if (e.target.closest('button') || e.target.closest('video')) return;
+        if (e.target.closest('button') || e.target.closest('video') || e.target.closest('audio') || e.target.closest('#image-modal-audio-box')) return;
         const videoEl = document.getElementById('image-modal-video');
-        if (videoEl && !videoEl.classList.contains('hidden')) return;
+        const audioBox = document.getElementById('image-modal-audio-box');
+        if ((videoEl && !videoEl.classList.contains('hidden')) || (audioBox && !audioBox.classList.contains('hidden'))) return;
         isPanningImage = true;
         panStartX = e.clientX - imagePanX;
         panStartY = e.clientY - imagePanY;
@@ -4654,7 +4745,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       vp.addEventListener('wheel', (e) => {
         const videoEl = document.getElementById('image-modal-video');
-        if (videoEl && !videoEl.classList.contains('hidden')) return;
+        const audioBox = document.getElementById('image-modal-audio-box');
+        if ((videoEl && !videoEl.classList.contains('hidden')) || (audioBox && !audioBox.classList.contains('hidden'))) return;
         e.preventDefault();
         const factor = e.deltaY < 0 ? 1.15 : 0.85;
         imageZoom = Math.min(8.0, Math.max(0.1, imageZoom * factor));
@@ -4665,7 +4757,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const modal = document.getElementById('image-preview-modal');
         if (modal && !modal.classList.contains('hidden')) {
           const videoEl = document.getElementById('image-modal-video');
+          const audioEl = document.getElementById('image-modal-audio');
+          const audioBox = document.getElementById('image-modal-audio-box');
           const isVideoActive = videoEl && !videoEl.classList.contains('hidden');
+          const isAudioActive = audioBox && !audioBox.classList.contains('hidden') && audioEl;
+          const activeMedia = isVideoActive ? videoEl : (isAudioActive ? audioEl : null);
 
           if (e.key === 'Escape') {
             e.preventDefault();
@@ -4673,23 +4769,23 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             return;
           }
 
-          if (isVideoActive) {
+          if (activeMedia) {
             if (e.key === ' ' || e.code === 'Space') {
               e.preventDefault();
-              if (videoEl.paused) videoEl.play();
-              else videoEl.pause();
+              if (activeMedia.paused) activeMedia.play();
+              else activeMedia.pause();
               return;
             } else if (e.key === 'ArrowLeft') {
               e.preventDefault();
-              videoEl.currentTime = Math.max(0, videoEl.currentTime - 5);
+              activeMedia.currentTime = Math.max(0, activeMedia.currentTime - 5);
               return;
             } else if (e.key === 'ArrowRight') {
               e.preventDefault();
-              videoEl.currentTime = Math.min(videoEl.duration || 0, videoEl.currentTime + 5);
+              activeMedia.currentTime = Math.min(activeMedia.duration || 0, activeMedia.currentTime + 5);
               return;
             } else if (e.key === 'm' || e.key === 'M') {
               e.preventDefault();
-              videoEl.muted = !videoEl.muted;
+              activeMedia.muted = !activeMedia.muted;
               return;
             }
           } else {
