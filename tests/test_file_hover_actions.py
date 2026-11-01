@@ -60,6 +60,16 @@ class TestFileHoverComponents:
         assert 'id="file-modal-line-numbers"' in HTML_TEMPLATE
         assert 'id="file-modal-code-text"' in HTML_TEMPLATE
 
+    def test_file_content_modal_html_preview_components(self):
+        assert 'id="file-modal-view-mode"' in HTML_TEMPLATE
+        assert 'id="file-modal-btn-code"' in HTML_TEMPLATE
+        assert 'id="file-modal-btn-preview"' in HTML_TEMPLATE
+        assert 'id="file-modal-open-tab-btn"' in HTML_TEMPLATE
+        assert 'id="file-modal-preview-wrap"' in HTML_TEMPLATE
+        assert 'id="file-modal-preview-frame"' in HTML_TEMPLATE
+        assert 'function setFileModalViewMode(' in HTML_TEMPLATE
+        assert 'function openModalFileInBrowser(' in HTML_TEMPLATE
+
     def test_hover_menu_javascript_functions(self):
         assert 'function registerFileLinkProvider(' in HTML_TEMPLATE
         assert 'function getFileCategory(' in HTML_TEMPLATE
@@ -154,6 +164,49 @@ class TestFileStatEndpoint:
             assert resolve_fs_path("/root", f"file://{tmp_path}") == tmp_path
             assert resolve_fs_path("/root", f"file://localhost{tmp_path}") == tmp_path
             assert resolve_fs_path("/root", f"file://{tmp_path}#L1-L10") == tmp_path
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_view_html_endpoint_raw_and_inline(self):
+        handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.is_authenticated = MagicMock(return_value=True)
+        handler.get_auth_token = MagicMock(return_value="valid-token")
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+        handler.wfile = MagicMock()
+        handler.server = MagicMock()
+        handler.server.terminals.get.return_value = None
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False) as tmp:
+            tmp.write("<!DOCTYPE html><html><body><h1>Test HTML</h1></body></html>")
+            tmp_path = tmp.name
+
+        try:
+            # 1. Standard inline view (returns text/plain for safe text modal reading)
+            handler.headers = {}
+            handler.path = f"/api/view?file={urllib.parse.quote(tmp_path)}&inline=1"
+            handler.do_GET()
+
+            handler.send_response.assert_called_with(200)
+            headers = [call[0] for call in handler.send_header.call_args_list]
+            content_type = next(h[1] for h in headers if h[0] == "Content-Type")
+            assert "text/plain" in content_type
+
+            # 2. Raw view (returns text/html with CSP for browser tab rendering)
+            handler.send_response.reset_mock()
+            handler.send_header.reset_mock()
+            handler.path = f"/api/view?file={urllib.parse.quote(tmp_path)}&raw=1"
+            handler.do_GET()
+
+            handler.send_response.assert_called_with(200)
+            raw_headers = [call[0] for call in handler.send_header.call_args_list]
+            raw_type = next(h[1] for h in raw_headers if h[0] == "Content-Type")
+            csp = next(h[1] for h in raw_headers if h[0] == "Content-Security-Policy")
+            assert raw_type == "text/html; charset=utf-8"
+            assert "sandbox" in csp
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
@@ -302,6 +355,13 @@ class TestFileHoverLogicWithNode:
             assert res["canCat"] is True, f"{fn} should allow cat"
             assert res["canEdit"] is True, f"{fn} should allow nano edit"
             assert res["isImage"] is False
+
+    def test_file_category_html_support(self):
+        for fn in ["index.html", "page.htm", "template.xhtml"]:
+            res = self._eval_js(f"getFileCategory('{fn}')")
+            assert res["isHtml"] is True
+            assert res["canCat"] is True
+            assert res["badge"] == "HTML"
 
     def test_file_category_dotfiles_and_special_files(self):
         special_files = [".bashrc", ".env", ".gitignore", "Dockerfile", "Makefile"]
