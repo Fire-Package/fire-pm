@@ -142,6 +142,40 @@ class TestMediaPreviewEndpoint:
                 os.remove(tmp_path)
 
 
+    def test_audio_preview_serves_inline_headers_and_accept_ranges(self):
+        handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.headers = {}
+        handler.is_authenticated = MagicMock(return_value=True)
+        handler.get_auth_token = MagicMock(return_value="valid-token")
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+        handler.wfile = MagicMock()
+        handler.server = MagicMock()
+        handler.server.terminals.get.return_value = None
+
+        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp_audio:
+            tmp_audio.write(b'fake-mp3-audio-bytes-for-preview-testing')
+            tmp_path = tmp_audio.name
+
+        try:
+            handler.path = f"/api/preview?file={urllib.parse.quote(tmp_path)}"
+            handler.do_GET()
+
+            handler.send_response.assert_called_with(200)
+            headers_sent = [call[0] for call in handler.send_header.call_args_list]
+            content_type = next(h[1] for h in headers_sent if h[0] == "Content-Type")
+            content_disp = next(h[1] for h in headers_sent if h[0] == "Content-Disposition")
+            accept_ranges = next(h[1] for h in headers_sent if h[0] == "Accept-Ranges")
+            assert "audio" in content_type
+            assert content_disp.startswith("inline;")
+            assert accept_ranges == "bytes"
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+
 class TestMediaPreviewFrontendIntegration:
     def test_html_template_contains_video_preview_components(self):
         assert 'id="image-modal-video"' in HTML_TEMPLATE
@@ -151,3 +185,12 @@ class TestMediaPreviewFrontendIntegration:
         assert 'isVideo' in HTML_TEMPLATE
         assert 'Space to play/pause' in HTML_TEMPLATE
         assert 'id="image-modal-zoom-group"' in HTML_TEMPLATE
+        assert 'id="image-modal-pip-btn"' in HTML_TEMPLATE
+        assert 'toggleModalPictureInPicture' in HTML_TEMPLATE
+
+    def test_html_template_contains_audio_preview_components(self):
+        assert 'id="image-modal-audio-box"' in HTML_TEMPLATE
+        assert 'id="image-modal-audio"' in HTML_TEMPLATE
+        assert 'AUDIO_EXTENSIONS' in HTML_TEMPLATE
+        assert 'Play Audio' in HTML_TEMPLATE
+        assert 'isAudio' in HTML_TEMPLATE
