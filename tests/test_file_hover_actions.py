@@ -70,6 +70,16 @@ class TestFileHoverComponents:
         assert 'function setFileModalViewMode(' in HTML_TEMPLATE
         assert 'function openModalFileInBrowser(' in HTML_TEMPLATE
 
+    def test_file_content_modal_markdown_preview_components(self):
+        assert 'id="file-modal-markdown-wrap"' in HTML_TEMPLATE
+        assert 'id="file-modal-markdown-body"' in HTML_TEMPLATE
+        assert 'class="markdown-body"' in HTML_TEMPLATE
+        assert 'github-markdown-dark.min.css' in HTML_TEMPLATE
+        assert 'marked.min.js' in HTML_TEMPLATE
+        assert 'function renderMarkdownContent(' in HTML_TEMPLATE
+        assert 'function parseGitHubAlerts(' in HTML_TEMPLATE
+        assert 'function renderMarkdownFallback(' in HTML_TEMPLATE
+
     def test_hover_menu_javascript_functions(self):
         assert 'function registerFileLinkProvider(' in HTML_TEMPLATE
         assert 'function getFileCategory(' in HTML_TEMPLATE
@@ -272,7 +282,9 @@ class TestFileHoverLogicWithNode:
         # Extract JS helper functions from HTML_TEMPLATE
         match = re.search(r'(const BLOCKED_EXTENSIONS = new Set\(.*?\n\s*const registerImageLinkProvider = registerFileLinkProvider;)', HTML_TEMPLATE, re.DOTALL)
         assert match is not None, "Could not extract file hover JS block from HTML_TEMPLATE"
-        cls.js_helpers = match.group(1)
+        md_match = re.search(r'(function parseGitHubAlerts\(.*?function renderMarkdownContent\(.*?\n    \})', HTML_TEMPLATE, re.DOTALL)
+        assert md_match is not None, "Could not extract markdown parser JS block from HTML_TEMPLATE"
+        cls.js_helpers = match.group(1) + "\n" + md_match.group(1)
 
     def _eval_js(self, js_expr: str):
         script = f"""
@@ -362,6 +374,40 @@ class TestFileHoverLogicWithNode:
             assert res["isHtml"] is True
             assert res["canCat"] is True
             assert res["badge"] == "HTML"
+
+    def test_file_category_markdown_support(self):
+        for fn in ["README.md", "guide.markdown", "AGENT.MD"]:
+            res = self._eval_js(f"getFileCategory('{fn}')")
+            assert res["isMarkdown"] is True
+            assert res["canCat"] is True
+            assert res["badge"] == "MARKDOWN"
+
+    def test_parse_github_alerts(self):
+        sample = "<blockquote><p>[!NOTE]<br>This is a note callout.</p></blockquote>"
+        out = self._eval_js(f"parseGitHubAlerts({json.dumps(sample)})")
+        assert 'class="markdown-alert markdown-alert-note"' in out
+        assert 'markdown-alert-title' in out
+        assert 'This is a note callout.' in out
+
+        sample_tip = "<blockquote><p>[!TIP]<br>This is a tip.</p></blockquote>"
+        out_tip = self._eval_js(f"parseGitHubAlerts({json.dumps(sample_tip)})")
+        assert 'class="markdown-alert markdown-alert-tip"' in out_tip
+
+    def test_render_markdown_fallback(self):
+        md = "# Hello Title\n\nThis is **bold** text and `inline code`.\n\n```python\nprint(123)\n```"
+        html = self._eval_js(f"renderMarkdownFallback({json.dumps(md)})")
+        assert "<h1>Hello Title</h1>" in html
+        assert "<strong>bold</strong>" in html
+        assert "<code>inline code</code>" in html
+        assert '<pre><code class="language-python">print(123)</code></pre>' in html
+
+    def test_render_markdown_content_fallback(self):
+        # In node without marked loaded, renderMarkdownContent gracefully falls back
+        md = "## Subtitle\n\n> [!WARNING]\n> Cautionary alert!"
+        html = self._eval_js(f"renderMarkdownContent({json.dumps(md)})")
+        assert "<h2>Subtitle</h2>" in html
+        assert "markdown-alert-warning" in html
+        assert "Cautionary alert!" in html
 
     def test_file_category_dotfiles_and_special_files(self):
         special_files = [".bashrc", ".env", ".gitignore", "Dockerfile", "Makefile"]

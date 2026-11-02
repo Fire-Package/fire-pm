@@ -947,7 +947,70 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-webgl@0.16.0/lib/xterm-addon-webgl.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.5.1/github-markdown-dark.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
   <style>
+    /* GitHub Markdown Container styling */
+    .markdown-body {
+      box-sizing: border-box;
+      min-width: 200px;
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 24px;
+      background-color: transparent !important;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+    }
+    .markdown-body pre {
+      background-color: #0f172a !important;
+      border: 1px solid #334155 !important;
+      border-radius: 8px;
+    }
+    .markdown-body table {
+      display: table !important;
+      width: 100% !important;
+      overflow-x: auto;
+    }
+    .markdown-body table tr {
+      background-color: #0b0f19 !important;
+      border-top: 1px solid #1e293b !important;
+    }
+    .markdown-body table tr:nth-child(2n) {
+      background-color: #0f172a !important;
+    }
+    .markdown-body table th, .markdown-body table td {
+      border: 1px solid #334155 !important;
+    }
+    .markdown-body blockquote {
+      color: #94a3b8 !important;
+      border-left: .25em solid #475569 !important;
+    }
+    /* GitHub Alert Callouts */
+    .markdown-alert {
+      padding: 12px 16px;
+      margin-bottom: 16px;
+      border-left: 4px solid #3b82f6;
+      border-radius: 6px;
+      background-color: rgba(30, 41, 59, 0.6);
+    }
+    .markdown-alert-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      font-size: 0.875rem;
+    }
+    .markdown-alert-note { border-left-color: #3b82f6; }
+    .markdown-alert-note .markdown-alert-title { color: #60a5fa; }
+    .markdown-alert-tip { border-left-color: #10b981; }
+    .markdown-alert-tip .markdown-alert-title { color: #34d399; }
+    .markdown-alert-important { border-left-color: #a855f7; }
+    .markdown-alert-important .markdown-alert-title { color: #c084fc; }
+    .markdown-alert-warning { border-left-color: #f59e0b; }
+    .markdown-alert-warning .markdown-alert-title { color: #fbbf24; }
+    .markdown-alert-caution { border-left-color: #ef4444; }
+    .markdown-alert-caution .markdown-alert-title { color: #f87171; }
     .xterm { height: 100%; padding: 4px; }
     .xterm-viewport { background-color: #020617 !important; -webkit-overflow-scrolling: touch; }
     .xterm-screen { touch-action: pan-y; }
@@ -1809,6 +1872,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <!-- HTML Render Preview Container -->
         <div id="file-modal-preview-wrap" class="hidden absolute inset-0 bg-white z-0 flex flex-col">
           <iframe id="file-modal-preview-frame" class="w-full h-full border-0 bg-white" sandbox="allow-scripts allow-forms allow-modals"></iframe>
+        </div>
+
+        <!-- Markdown Render Preview Container -->
+        <div id="file-modal-markdown-wrap" class="hidden min-w-full z-0 p-2 sm:p-4 select-text">
+          <div id="file-modal-markdown-body" class="markdown-body"></div>
         </div>
       </div>
 
@@ -3903,22 +3971,26 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const ext = (parts.length > 1 ? parts.pop() : '').toLowerCase();
 
       if (IMAGE_EXTENSIONS.has(ext)) {
-        return { type: 'image', ext: ext, canEdit: false, canCat: false, isImage: true, isVideo: false, isAudio: false, isHtml: false };
+        return { type: 'image', ext: ext, canEdit: false, canCat: false, isImage: true, isVideo: false, isAudio: false, isHtml: false, isMarkdown: false };
       }
       if (VIDEO_EXTENSIONS.has(ext)) {
-        return { type: 'video', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: true, isAudio: false, isHtml: false, badge: 'VIDEO' };
+        return { type: 'video', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: true, isAudio: false, isHtml: false, isMarkdown: false, badge: 'VIDEO' };
       }
       if (AUDIO_EXTENSIONS.has(ext)) {
-        return { type: 'audio', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: true, isHtml: false, badge: 'AUDIO' };
+        return { type: 'audio', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: true, isHtml: false, isMarkdown: false, badge: 'AUDIO' };
       }
       if (BLOCKED_EXTENSIONS.has(ext)) {
         let badge = 'BINARY';
         if (['zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst', 'iso', 'dmg', 'deb', 'rpm', 'apk', 'msi'].includes(ext)) badge = 'ARCHIVE';
         else if (['mkv', 'avi', 'mov', 'flv', 'wmv'].includes(ext)) badge = 'VIDEO';
-        return { type: 'blocked', ext: ext, badge: badge, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: false, isHtml: false };
+        return { type: 'blocked', ext: ext, badge: badge, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: false, isHtml: false, isMarkdown: false };
       }
       const isHtml = ['html', 'htm', 'xhtml'].includes(ext);
-      return { type: 'text', ext: ext, canEdit: true, canCat: true, isImage: false, isVideo: false, isAudio: false, isHtml: isHtml, badge: isHtml ? 'HTML' : undefined };
+      const isMarkdown = ['md', 'markdown'].includes(ext);
+      let badge = undefined;
+      if (isHtml) badge = 'HTML';
+      else if (isMarkdown) badge = 'MARKDOWN';
+      return { type: 'text', ext: ext, canEdit: true, canCat: true, isImage: false, isVideo: false, isAudio: false, isHtml: isHtml, isMarkdown: isMarkdown, badge: badge };
     }
 
     function quoteShellArg(arg) {
@@ -4020,7 +4092,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 if (cat.isImage || cat.isVideo || cat.isAudio) {
                   openImagePreviewModal(targetClean, tabId);
                 } else if (cat.canCat || (targetStat && targetStat.is_file)) {
-                  openFileContentModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId, targetStat, cat.isHtml ? 'preview' : 'code');
+                  openFileContentModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId, targetStat, (cat.isHtml || cat.isMarkdown) ? 'preview' : 'code');
                 } else {
                   showFileHoverMenu(e, text, tabId, targetStat);
                 }
@@ -4102,12 +4174,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (btnCat) {
         if (cat.canCat) {
           btnCat.classList.remove('hidden');
-          if (btnCatText) btnCatText.textContent = cat.isHtml ? 'Preview HTML' : 'View File';
-          btnCat.title = cat.isHtml ? 'Preview rendered HTML or view code' : 'View file content in modal';
+          const previewLabel = cat.isHtml ? 'Preview HTML' : (cat.isMarkdown ? 'Preview Markdown' : 'View File');
+          if (btnCatText) btnCatText.textContent = previewLabel;
+          btnCat.title = (cat.isHtml || cat.isMarkdown) ? `Preview rendered ${cat.isMarkdown ? 'Markdown' : 'HTML'} or view code` : 'View file content in modal';
           btnCat.onclick = (e) => {
             e.stopPropagation();
             hideFileHoverMenu();
-            openFileContentModal(path, tabId, null, cat.isHtml ? 'preview' : 'code');
+            openFileContentModal(path, tabId, null, (cat.isHtml || cat.isMarkdown) ? 'preview' : 'code');
           };
         } else {
           btnCat.classList.add('hidden');
@@ -4260,6 +4333,99 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let currentModalFileContent = '';
     let currentModalFileMode = 'code';
 
+    function parseGitHubAlerts(html) {
+      if (!html) return '';
+      const alertTypes = {
+        NOTE: { label: 'Note', icon: 'ℹ️', cls: 'markdown-alert-note' },
+        TIP: { label: 'Tip', icon: '💡', cls: 'markdown-alert-tip' },
+        IMPORTANT: { label: 'Important', icon: '🟣', cls: 'markdown-alert-important' },
+        WARNING: { label: 'Warning', icon: '⚠️', cls: 'markdown-alert-warning' },
+        CAUTION: { label: 'Caution', icon: '🛑', cls: 'markdown-alert-caution' }
+      };
+
+      return html.replace(/<blockquote>\s*<p>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:\s*<br\s*\/?>)?([\s\S]*?)<\/p>\s*<\/blockquote>/gi, (match, type, content) => {
+        const t = alertTypes[type.toUpperCase()] || alertTypes.NOTE;
+        return `<div class="markdown-alert ${t.cls}"><div class="markdown-alert-title"><span>${t.icon}</span> ${t.label}</div><div class="markdown-alert-content">${content.trim()}</div></div>`;
+      });
+    }
+
+    function renderMarkdownFallback(md) {
+      if (!md) return '';
+      let text = md.replace(/\r\n/g, '\n');
+
+      // Preserve fenced code blocks
+      const codeBlocks = [];
+      text = text.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (m, lang, code) => {
+        const escaped = code.replace(/\n$/, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const placeholder = `\x00CODEBLOCK_${codeBlocks.length}\x00`;
+        codeBlocks.push(`<pre><code class="language-${lang}">${escaped}</code></pre>`);
+        return placeholder;
+      });
+
+      // Escape remaining html
+      text = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+      // Blockquotes: match lines starting with &gt;
+      text = text.replace(/(?:^&gt;[ \t]?.*(?:\n|$))+/gm, (block) => {
+        const inner = block.split('\n')
+          .map(l => l.replace(/^&gt;[ \t]?/, ''))
+          .filter(l => l.length > 0)
+          .join('<br>');
+        return `<blockquote><p>${inner}</p></blockquote>\n`;
+      });
+
+      // Headers
+      text = text.replace(/^###### (.*$)/gm, '<h6>$1</h6>')
+                 .replace(/^##### (.*$)/gm, '<h5>$1</h5>')
+                 .replace(/^#### (.*$)/gm, '<h4>$1</h4>')
+                 .replace(/^### (.*$)/gm, '<h3>$1</h3>')
+                 .replace(/^## (.*$)/gm, '<h2>$1</h2>')
+                 .replace(/^# (.*$)/gm, '<h1>$1</h1>');
+
+      // Inline styles
+      text = text.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+                 .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                 .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                 .replace(/~~(.*?)~~/g, '<del>$1</del>')
+                 .replace(/`([^`]+)`/g, '<code>$1</code>');
+
+      // Links
+      text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+      // Task lists
+      text = text.replace(/^\s*-\s*\[ \]\s*(.*$)/gm, '<li class="task-list-item"><input type="checkbox" disabled /> $1</li>')
+                 .replace(/^\s*-\s*\[x\]\s*(.*$)/gm, '<li class="task-list-item"><input type="checkbox" checked disabled /> $1</li>');
+
+      // Lists
+      text = text.replace(/^\s*-\s*(.*$)/gm, '<li>$1</li>');
+
+      // Paragraphs
+      text = text.replace(/\n\n+/g, '</p><p>');
+
+      // Restore code blocks
+      codeBlocks.forEach((cb, idx) => {
+        text = text.replace(`\x00CODEBLOCK_${idx}\x00`, cb);
+      });
+
+      return `<p>${text}</p>`;
+    }
+
+    function renderMarkdownContent(md) {
+      if (!md) return '';
+      let rendered = '';
+      if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
+        try {
+          rendered = marked.parse(md, { gfm: true, breaks: true });
+        } catch(e) {
+          console.debug('marked.parse error, using fallback', e);
+          rendered = renderMarkdownFallback(md);
+        }
+      } else {
+        rendered = renderMarkdownFallback(md);
+      }
+      return parseGitHubAlerts(rendered);
+    }
+
     function setFileModalViewMode(mode) {
       currentModalFileMode = mode;
       const btnCode = document.getElementById('file-modal-btn-code');
@@ -4267,7 +4433,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const codeWrap = document.getElementById('file-modal-code-wrap');
       const previewWrap = document.getElementById('file-modal-preview-wrap');
       const previewFrame = document.getElementById('file-modal-preview-frame');
+      const mdWrap = document.getElementById('file-modal-markdown-wrap');
+      const mdBody = document.getElementById('file-modal-markdown-body');
       const metaEncoding = document.getElementById('file-modal-meta-encoding');
+
+      const ext = (currentModalFilePath.split('.').pop() || '').toLowerCase();
+      const isHtml = ['html', 'htm', 'xhtml'].includes(ext);
+      const isMd = ['md', 'markdown'].includes(ext);
 
       if (mode === 'preview') {
         if (btnCode) {
@@ -4277,11 +4449,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           btnPreview.className = 'px-2.5 py-1 rounded-lg transition bg-orange-500/20 text-orange-300 font-medium flex items-center gap-1';
         }
         if (codeWrap) codeWrap.classList.add('hidden');
-        if (previewWrap) previewWrap.classList.remove('hidden');
-        if (previewFrame && currentModalFileContent) {
-          previewFrame.srcdoc = currentModalFileContent;
+
+        if (isMd) {
+          if (previewWrap) previewWrap.classList.add('hidden');
+          if (mdWrap) mdWrap.classList.remove('hidden');
+          if (mdBody && currentModalFileContent) {
+            mdBody.innerHTML = renderMarkdownContent(currentModalFileContent);
+          }
+          if (metaEncoding) metaEncoding.textContent = 'Mode: Rendered Markdown (GitHub)';
+        } else {
+          if (mdWrap) mdWrap.classList.add('hidden');
+          if (previewWrap) previewWrap.classList.remove('hidden');
+          if (previewFrame && currentModalFileContent) {
+            previewFrame.srcdoc = currentModalFileContent;
+          }
+          if (metaEncoding) metaEncoding.textContent = 'Mode: Rendered HTML Preview';
         }
-        if (metaEncoding) metaEncoding.textContent = 'Mode: Rendered Preview';
       } else {
         if (btnCode) {
           btnCode.className = 'px-2.5 py-1 rounded-lg transition bg-orange-500/20 text-orange-300 font-medium flex items-center gap-1';
@@ -4290,6 +4473,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           btnPreview.className = 'px-2.5 py-1 rounded-lg transition text-slate-400 hover:text-white flex items-center gap-1';
         }
         if (previewWrap) previewWrap.classList.add('hidden');
+        if (mdWrap) mdWrap.classList.add('hidden');
         if (codeWrap) codeWrap.classList.remove('hidden');
         if (metaEncoding) metaEncoding.textContent = 'Mode: Source Code';
       }
@@ -4329,22 +4513,28 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const viewModeGroup = document.getElementById('file-modal-view-mode');
       const openTabBtn = document.getElementById('file-modal-open-tab-btn');
       const previewFrame = document.getElementById('file-modal-preview-frame');
+      const mdBody = document.getElementById('file-modal-markdown-body');
 
       const fileName = path.split('/').pop() || path;
       const ext = (fileName.split('.').pop() || '').toLowerCase();
       const isHtml = ['html', 'htm', 'xhtml'].includes(ext);
+      const isMd = ['md', 'markdown'].includes(ext);
+      const hasPreview = isHtml || isMd;
 
       if (titleEl) titleEl.textContent = fileName;
       if (pathEl) pathEl.textContent = path;
-      if (iconEl) iconEl.textContent = isHtml ? '🌐' : '📄';
+      if (iconEl) iconEl.textContent = isHtml ? '🌐' : (isMd ? '📖' : '📄');
       if (modal) modal.classList.remove('hidden');
 
-      if (isHtml) {
+      if (hasPreview) {
         if (viewModeGroup) {
           viewModeGroup.classList.remove('hidden');
           viewModeGroup.classList.add('flex');
         }
-        if (openTabBtn) openTabBtn.classList.remove('hidden');
+        if (openTabBtn) {
+          if (isHtml) openTabBtn.classList.remove('hidden');
+          else openTabBtn.classList.add('hidden');
+        }
       } else {
         if (viewModeGroup) {
           viewModeGroup.classList.add('hidden');
@@ -4358,8 +4548,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (lineNumEl) lineNumEl.textContent = '';
       if (codeTextEl) codeTextEl.textContent = '';
       if (previewFrame) previewFrame.srcdoc = '';
+      if (mdBody) mdBody.innerHTML = '';
 
-      const targetMode = initialMode || (isHtml ? 'preview' : 'code');
+      const targetMode = initialMode || (hasPreview ? 'preview' : 'code');
       setFileModalViewMode(targetMode);
 
       try {
@@ -4395,8 +4586,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           codeTextEl.textContent = (hasTrailingNewline && rawLines.length > 1) ? normalized.slice(0, -1) : normalized;
         }
 
-        if (isHtml && currentModalFileMode === 'preview' && previewFrame) {
-          previewFrame.srcdoc = text;
+        if (hasPreview && currentModalFileMode === 'preview') {
+          if (isMd && mdBody) {
+            mdBody.innerHTML = renderMarkdownContent(text);
+          } else if (isHtml && previewFrame) {
+            previewFrame.srcdoc = text;
+          }
         }
       } catch (err) {
         if (errorEl) errorEl.classList.remove('hidden');
@@ -4409,8 +4604,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     function closeFileContentModal() {
       const modal = document.getElementById('file-content-modal');
       const previewFrame = document.getElementById('file-modal-preview-frame');
+      const mdBody = document.getElementById('file-modal-markdown-body');
       if (modal) modal.classList.add('hidden');
       if (previewFrame) previewFrame.srcdoc = '';
+      if (mdBody) mdBody.innerHTML = '';
       currentModalFileContent = '';
       currentModalFilePath = '';
       setFileModalViewMode('code');
