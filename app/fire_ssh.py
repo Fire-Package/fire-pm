@@ -3757,6 +3757,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     // ==================== TERMINAL FILE HOVER QUICK ACTIONS & IMAGE LIGHTBOX ====================
     let currentPreviewPath = '';
     let currentPreviewTabId = '';
+    let activePreviewSeq = 0;
     let imageZoom = 1.0;
     let imagePanX = 0;
     let imagePanY = 0;
@@ -4339,10 +4340,51 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       showToast(`Downloading ${currentModalFilePath.split('/').pop()}...`);
     }
 
+    function resetMediaModalState() {
+      const img = document.getElementById('image-modal-img');
+      const videoEl = document.getElementById('image-modal-video');
+      const audioEl = document.getElementById('image-modal-audio');
+      const audioBox = document.getElementById('image-modal-audio-box');
+      const errBox = document.getElementById('image-modal-error');
+      const spinner = document.getElementById('image-modal-spinner');
+
+      if (errBox) errBox.classList.add('hidden');
+      if (spinner) spinner.classList.add('hidden');
+      const errMsg = document.getElementById('image-modal-error-msg');
+      if (errMsg) errMsg.textContent = '';
+
+      if (img) {
+        img.onload = null;
+        img.onerror = null;
+        img.removeAttribute('src');
+        img.classList.add('hidden');
+      }
+
+      if (videoEl) {
+        videoEl.onloadedmetadata = null;
+        videoEl.onerror = null;
+        videoEl.pause();
+        videoEl.removeAttribute('src');
+        try { videoEl.load(); } catch(e) {}
+        videoEl.classList.add('hidden');
+      }
+
+      if (audioEl) {
+        audioEl.onloadedmetadata = null;
+        audioEl.onerror = null;
+        audioEl.pause();
+        audioEl.removeAttribute('src');
+        try { audioEl.load(); } catch(e) {}
+      }
+      if (audioBox) audioBox.classList.add('hidden');
+    }
+
     function openImagePreviewModal(path, tabId) {
       if (!path) return;
       hideFileHoverMenu();
       dismissImageOutputChip();
+
+      const reqId = ++activePreviewSeq;
 
       currentPreviewPath = path;
       currentPreviewTabId = tabId || activeTabId;
@@ -4365,6 +4407,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const zoomGroup = document.getElementById('image-modal-zoom-group');
       const pipBtn = document.getElementById('image-modal-pip-btn');
       const shortcutsHint = document.getElementById('image-modal-shortcuts-hint');
+
+      // Fully reset prior media elements and detach previous listeners
+      resetMediaModalState();
 
       const fileName = path.split('/').pop() || path;
       const ext = (fileName.split('.').pop() || 'media').toLowerCase();
@@ -4408,6 +4453,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const previewUrl = buildImageUrl(path, currentPreviewTabId);
 
       fetch(previewUrl, { method: 'HEAD' }).then(r => {
+        if (reqId !== activePreviewSeq) return;
         if (r.ok) {
           const len = r.headers.get('content-length');
           if (len && metaSize) {
@@ -4417,21 +4463,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }).catch(() => {});
 
       if (isAudio) {
-        if (img) { img.classList.add('hidden'); img.src = ''; }
-        if (videoEl) {
-          videoEl.pause();
-          videoEl.src = '';
-          videoEl.classList.add('hidden');
-        }
         if (audioBox && audioEl) {
           audioBox.classList.remove('hidden');
           if (audioTitle) audioTitle.textContent = fileName;
           if (audioMeta) audioMeta.textContent = `Audio Track (${ext.toUpperCase()})`;
           audioEl.onloadedmetadata = () => {
+            if (reqId !== activePreviewSeq) return;
             if (spinner) spinner.classList.add('hidden');
             if (metaDims) metaDims.textContent = `Duration: ${formatDuration(audioEl.duration)}`;
           };
           audioEl.onerror = () => {
+            if (reqId !== activePreviewSeq) return;
             if (spinner) spinner.classList.add('hidden');
             if (errBox) {
               const errMsg = document.getElementById('image-modal-error-msg');
@@ -4443,15 +4485,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           try { audioEl.play().catch(() => {}); } catch(e) {}
         }
       } else if (isVideo) {
-        if (img) { img.classList.add('hidden'); img.src = ''; }
-        if (audioBox && audioEl) {
-          audioEl.pause();
-          audioEl.src = '';
-          audioBox.classList.add('hidden');
-        }
         if (videoEl) {
           videoEl.classList.remove('hidden');
           videoEl.onloadedmetadata = () => {
+            if (reqId !== activePreviewSeq) return;
             if (spinner) spinner.classList.add('hidden');
             let dims = `${videoEl.videoWidth} × ${videoEl.videoHeight}px`;
             if (videoEl.duration) {
@@ -4460,6 +4497,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             if (metaDims) metaDims.textContent = `Dimensions: ${dims}`;
           };
           videoEl.onerror = () => {
+            if (reqId !== activePreviewSeq) return;
             if (spinner) spinner.classList.add('hidden');
             if (errBox) {
               const errMsg = document.getElementById('image-modal-error-msg');
@@ -4471,19 +4509,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           try { videoEl.play().catch(() => {}); } catch(e) {}
         }
       } else {
-        if (audioBox && audioEl) {
-          audioEl.pause();
-          audioEl.src = '';
-          audioBox.classList.add('hidden');
-        }
-        if (videoEl) {
-          videoEl.pause();
-          videoEl.src = '';
-          videoEl.classList.add('hidden');
-        }
         if (img) {
           img.classList.remove('hidden');
           img.onload = () => {
+            if (reqId !== activePreviewSeq) return;
             if (spinner) spinner.classList.add('hidden');
             if (metaDims) {
               metaDims.textContent = `Dimensions: ${img.naturalWidth} × ${img.naturalHeight}px`;
@@ -4495,6 +4524,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           };
 
           img.onerror = () => {
+            if (reqId !== activePreviewSeq) return;
             if (spinner) spinner.classList.add('hidden');
             if (errBox) {
               const errMsg = document.getElementById('image-modal-error-msg');
@@ -4524,35 +4554,27 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function closeImagePreviewModal(exitPip = true) {
+      ++activePreviewSeq;
       const modal = document.getElementById('image-preview-modal');
-      const img = document.getElementById('image-modal-img');
       const videoEl = document.getElementById('image-modal-video');
-      const audioBox = document.getElementById('image-modal-audio-box');
-      const audioEl = document.getElementById('image-modal-audio');
 
       if (modal) modal.classList.add('hidden');
-      if (img) {
-        img.src = '';
-        img.classList.remove('hidden');
-      }
-      if (audioEl) {
-        audioEl.pause();
-        audioEl.src = '';
-        try { audioEl.load(); } catch(e) {}
-      }
-      if (audioBox) audioBox.classList.add('hidden');
 
-      if (videoEl) {
-        if (exitPip && document.pictureInPictureElement === videoEl) {
-          try { document.exitPictureInPicture(); } catch(e) {}
-        }
-        if (document.pictureInPictureElement !== videoEl) {
-          videoEl.pause();
-          videoEl.src = '';
-          try { videoEl.load(); } catch(e) {}
-          videoEl.classList.add('hidden');
-        }
+      if (videoEl && exitPip && document.pictureInPictureElement === videoEl) {
+        try { document.exitPictureInPicture(); } catch(e) {}
       }
+
+      if (!videoEl || document.pictureInPictureElement !== videoEl) {
+        resetMediaModalState();
+      } else {
+        const img = document.getElementById('image-modal-img');
+        const audioEl = document.getElementById('image-modal-audio');
+        const audioBox = document.getElementById('image-modal-audio-box');
+        if (img) { img.onload = null; img.onerror = null; img.removeAttribute('src'); }
+        if (audioEl) { audioEl.onloadedmetadata = null; audioEl.onerror = null; audioEl.pause(); audioEl.removeAttribute('src'); }
+        if (audioBox) audioBox.classList.add('hidden');
+      }
+
       currentPreviewPath = '';
     }
 
