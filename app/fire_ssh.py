@@ -382,6 +382,12 @@ def resolve_fs_path(base_dir: str, target: str) -> str:
     if not target or not str(target).strip():
         return os.path.realpath(os.path.expanduser(base_dir))
     target = str(target).strip()
+    if target.startswith("file://"):
+        try:
+            parsed = urllib.parse.urlparse(target)
+            target = urllib.parse.unquote(parsed.path)
+        except Exception:
+            target = target[7:]
     expanded = os.path.expanduser(target)
     if os.path.isabs(expanded):
         return os.path.realpath(expanded)
@@ -3807,6 +3813,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       let s = p.trim();
       s = s.replace(/^["'`]+|["'`]+$/g, '');
       s = s.replace(/["'`]/g, '');
+      if (s.toLowerCase().startsWith('file://')) {
+        s = s.slice(7);
+        if (s.toLowerCase().startsWith('localhost/')) {
+          s = s.slice(9);
+        }
+        try {
+          s = decodeURIComponent(s);
+        } catch(e) {}
+        if (s.includes('#')) {
+          s = s.split('#')[0];
+        }
+      }
+      s = s.replace(/:\d+(?::\d+)?$/, '');
       return s;
     }
 
@@ -3938,7 +3957,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             return;
           }
 
-          const rawRegex = /(?:^|[\s"'`(\[<])((?:[~.A-Za-z0-9_-]*\/)?(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+(?:\.[A-Za-z0-9_+-]+)?)(?=[\s"'`()\[\]<>{},;:!?.]|$)/gi;
+          const rawRegex = /(?:^|[\s"'`(\[<])((?:file:\/\/(?:localhost)?\/|[~.A-Za-z0-9_-]*\/)?(?:[A-Za-z0-9_.~%+-]+\/)*[A-Za-z0-9_.~%+-]+(?:\.[A-Za-z0-9_+-]+)?)(?=[\s"'`()\[\]<>{},;:!?.#]|$)/gi;
           const candidates = [];
           let match;
 
@@ -4222,6 +4241,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     async function openFileContentModal(path, tabId, statData) {
       if (!path) return;
+      path = cleanCandidatePath(path);
       hideFileHoverMenu();
       closeImagePreviewModal();
       currentModalFilePath = path;
@@ -4381,6 +4401,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     function openImagePreviewModal(path, tabId) {
       if (!path) return;
+      path = cleanCandidatePath(path);
       hideFileHoverMenu();
       dismissImageOutputChip();
 
@@ -4717,10 +4738,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
       if (!text || text.length < 5) return;
       const clean = text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-      const regex = /(?:^|[\s"'`(\[<])((?:[~.A-Za-z0-9_-]*\/)?(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.(?:png|jpe?g|gif|webp|svg|bmp|ico|mp4|webm|mp3|wav|ogg|flac|m4a|aac))(?=[\s"'`()\[\]<>{},;:!?.]|$)/gi;
+      const regex = /(?:^|[\s"'`(\[<])((?:file:\/\/(?:localhost)?\/|[~.A-Za-z0-9_-]*\/)?(?:[A-Za-z0-9_.~%+-]+\/)*[A-Za-z0-9_.~%+-]+\.(?:png|jpe?g|gif|webp|svg|bmp|ico|mp4|webm|mp3|wav|ogg|flac|m4a|aac))(?=[\s"'`()\[\]<>{},;:!?.#]|$)/gi;
       let match;
       while ((match = regex.exec(clean)) !== null) {
-        const imgPath = match[1];
+        let imgPath = match[1];
+        if (imgPath.toLowerCase().startsWith('file://')) {
+          imgPath = cleanCandidatePath(imgPath);
+        }
         if (recentDetectedImages.has(imgPath)) continue;
         recentDetectedImages.add(imgPath);
         if (recentDetectedImages.size > 100) {

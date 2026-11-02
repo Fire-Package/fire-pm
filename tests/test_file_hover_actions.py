@@ -13,7 +13,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "app"))
 
-from fire_ssh import FireSSHServerHandler, HTML_TEMPLATE
+from fire_ssh import FireSSHServerHandler, HTML_TEMPLATE, resolve_fs_path
 
 
 class TestFileHoverComponents:
@@ -116,6 +116,48 @@ class TestFileStatEndpoint:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
+    def test_stat_file_uri_scheme(self):
+        handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.headers = {}
+        handler.is_authenticated = MagicMock(return_value=True)
+        handler.get_auth_token = MagicMock(return_value="valid-token")
+        handler.send_json = MagicMock()
+        handler.server = MagicMock()
+        handler.server.terminals.get.return_value = None
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as tmp:
+            tmp.write("hello from file URI")
+            tmp_path = tmp.name
+
+        try:
+            # Test file:// URI resolution in /api/stat
+            file_uri = f"file://{tmp_path}"
+            handler.path = f"/api/stat?file={urllib.parse.quote(file_uri)}"
+            handler.do_GET()
+
+            handler.send_json.assert_called_once()
+            call_args = handler.send_json.call_args[0][0]
+            assert call_args["success"] is True
+            assert call_args["exists"] is True
+            assert call_args["is_file"] is True
+            assert call_args["path"] == tmp_path
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_resolve_fs_path_file_uri_schemes(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            assert resolve_fs_path("/root", f"file://{tmp_path}") == tmp_path
+            assert resolve_fs_path("/root", f"file://localhost{tmp_path}") == tmp_path
+            assert resolve_fs_path("/root", f"file://{tmp_path}#L1-L10") == tmp_path
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
     def test_stat_directory(self):
         handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
         handler.client_address = ('127.0.0.1', 12345)
@@ -193,6 +235,11 @@ class TestFileHoverLogicWithNode:
         assert self._eval_js("cleanCandidatePath('\"./src/index.ts\"')") == "./src/index.ts"
         assert self._eval_js("cleanCandidatePath(\"'app/main.py'\")") == "app/main.py"
         assert self._eval_js("cleanCandidatePath('simple.txt')") == "simple.txt"
+        assert self._eval_js("cleanCandidatePath('file:///root/app.py')") == "/root/app.py"
+        assert self._eval_js("cleanCandidatePath('file://localhost/root/test.txt')") == "/root/test.txt"
+        assert self._eval_js("cleanCandidatePath('file:///root/sample%20space.txt')") == "/root/sample space.txt"
+        assert self._eval_js("cleanCandidatePath('file:///root/app.py#L10-L20')") == "/root/app.py"
+        assert self._eval_js("cleanCandidatePath('file:///root/app.py:42:15')") == "/root/app.py"
 
     def test_file_category_blocked_archives(self):
         archives = ["archive.zip", "bundle.tar", "data.tar.gz", "pkg.tgz", "archive.bz2", "rootfs.xz", "backup.7z", "disk.iso", "old.rar"]
@@ -267,6 +314,9 @@ class TestFileHoverLogicWithNode:
         # Valid candidates
         valid_paths = [
             "/root/fire-package-pm/app/fire_ssh.py",
+            "file:///root/fire-package-pm/app/fire_ssh.py",
+            "file://localhost/root/test.txt",
+            "file:///root/my%20file.txt#L10-L20",
             "./src/index.ts",
             "../config.json",
             "~/.bashrc",
