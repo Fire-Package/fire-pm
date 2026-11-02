@@ -20,6 +20,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 * Prevent dual split terminal panes from physically flipping positions on screen when clicking panes or switching tabs ([#98](https://github.com/Fire-Package/fire-pm/issues/98), [#99](https://github.com/Fire-Package/fire-pm/pull/99)).
 
 ### Added
+* Add interactive HTML render preview in file content modal with Code/Preview segmented toggle, sandboxed iframe viewport, Open in Tab action, and backend `/api/view?raw=1` support ([#128](https://github.com/Fire-Package/fire-pm/issues/128)).
 * Support `file://` (and `file://localhost/`) URI schemes across terminal link providers, media output detection chips, and backend filesystem endpoints ([#126](https://github.com/Fire-Package/fire-pm/issues/126)).
 * Add Picture-in-Picture (`PiP`) floating video player support and terminal audio preview for `.mp3`, `.wav`, `.ogg`, `.flac`, `.aac`, and `.m4a` files with card player, hover menu "Play Audio" quick-action, and playback keyboard shortcuts.
 * Add in-terminal media preview support for `.mp4` and `.webm` video files with dedicated HTML5 player modal, playback shortcuts (Space to toggle play/pause, seek, mute), dynamic hover menu "Preview Video" action, live stdout output detection toast chip, and backend HTTP 206 Partial Content byte-range streaming support.

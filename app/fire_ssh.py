@@ -1759,6 +1759,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         <!-- Controls Toolbar -->
         <div class="flex items-center gap-1.5 shrink-0">
+          <!-- View Mode Toggle (Code vs HTML Preview) -->
+          <div id="file-modal-view-mode" class="hidden items-center bg-slate-900 border border-slate-700/80 rounded-xl p-0.5 text-xs font-mono mr-1">
+            <button type="button" id="file-modal-btn-code" onclick="setFileModalViewMode('code')" class="px-2.5 py-1 rounded-lg transition bg-orange-500/20 text-orange-300 font-medium flex items-center gap-1" title="View Source Code">
+              <span>📄</span> <span class="hidden sm:inline">Code</span>
+            </button>
+            <button type="button" id="file-modal-btn-preview" onclick="setFileModalViewMode('preview')" class="px-2.5 py-1 rounded-lg transition text-slate-400 hover:text-white flex items-center gap-1" title="Render HTML Preview">
+              <span>🌐</span> <span class="hidden sm:inline">Preview</span>
+            </button>
+          </div>
+
+          <button type="button" id="file-modal-open-tab-btn" onclick="openModalFileInBrowser()" class="hidden px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Open rendered HTML in new browser tab">
+            <span>↗</span> <span class="hidden sm:inline">Open in Tab</span>
+          </button>
           <button type="button" id="file-modal-edit-btn" onclick="editModalFileInNewTab()" class="px-2.5 py-1.5 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-xl text-xs text-orange-300 hover:text-orange-200 transition flex items-center gap-1 font-medium" title="Edit file with nano in a new tab">
             <span>✏️</span> <span class="hidden sm:inline">Edit (nano)</span>
           </button>
@@ -1791,6 +1804,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div id="file-modal-code-wrap" class="min-w-full inline-flex font-mono text-xs sm:text-sm leading-6">
           <div id="file-modal-line-numbers" class="select-none text-right pr-4 text-slate-500 font-mono shrink-0 border-r border-slate-800/80 whitespace-pre leading-6 min-w-[3.5rem] sticky left-0 bg-slate-950 z-10"></div>
           <pre id="file-modal-code-text" class="flex-1 pl-4 m-0 whitespace-pre font-mono text-slate-200 select-text outline-none leading-6"></pre>
+        </div>
+
+        <!-- HTML Render Preview Container -->
+        <div id="file-modal-preview-wrap" class="hidden absolute inset-0 bg-white z-0 flex flex-col">
+          <iframe id="file-modal-preview-frame" class="w-full h-full border-0 bg-white" sandbox="allow-scripts allow-forms allow-modals"></iframe>
         </div>
       </div>
 
@@ -3885,21 +3903,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const ext = (parts.length > 1 ? parts.pop() : '').toLowerCase();
 
       if (IMAGE_EXTENSIONS.has(ext)) {
-        return { type: 'image', ext: ext, canEdit: false, canCat: false, isImage: true, isVideo: false, isAudio: false };
+        return { type: 'image', ext: ext, canEdit: false, canCat: false, isImage: true, isVideo: false, isAudio: false, isHtml: false };
       }
       if (VIDEO_EXTENSIONS.has(ext)) {
-        return { type: 'video', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: true, isAudio: false, badge: 'VIDEO' };
+        return { type: 'video', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: true, isAudio: false, isHtml: false, badge: 'VIDEO' };
       }
       if (AUDIO_EXTENSIONS.has(ext)) {
-        return { type: 'audio', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: true, badge: 'AUDIO' };
+        return { type: 'audio', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: true, isHtml: false, badge: 'AUDIO' };
       }
       if (BLOCKED_EXTENSIONS.has(ext)) {
         let badge = 'BINARY';
         if (['zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst', 'iso', 'dmg', 'deb', 'rpm', 'apk', 'msi'].includes(ext)) badge = 'ARCHIVE';
         else if (['mkv', 'avi', 'mov', 'flv', 'wmv'].includes(ext)) badge = 'VIDEO';
-        return { type: 'blocked', ext: ext, badge: badge, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: false };
+        return { type: 'blocked', ext: ext, badge: badge, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: false, isHtml: false };
       }
-      return { type: 'text', ext: ext, canEdit: true, canCat: true, isImage: false, isVideo: false, isAudio: false };
+      const isHtml = ['html', 'htm', 'xhtml'].includes(ext);
+      return { type: 'text', ext: ext, canEdit: true, canCat: true, isImage: false, isVideo: false, isAudio: false, isHtml: isHtml, badge: isHtml ? 'HTML' : undefined };
     }
 
     function quoteShellArg(arg) {
@@ -4001,7 +4020,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 if (cat.isImage || cat.isVideo || cat.isAudio) {
                   openImagePreviewModal(targetClean, tabId);
                 } else if (cat.canCat || (targetStat && targetStat.is_file)) {
-                  openFileContentModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId, targetStat);
+                  openFileContentModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId, targetStat, cat.isHtml ? 'preview' : 'code');
                 } else {
                   showFileHoverMenu(e, text, tabId, targetStat);
                 }
@@ -4064,6 +4083,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           else if (cat.badge === 'VIDEO') iconEl.textContent = '🎬';
           else if (cat.badge === 'AUDIO') iconEl.textContent = '🎵';
           else if (cat.badge === 'BINARY') iconEl.textContent = '⚙️';
+          else if (cat.isHtml) iconEl.textContent = '🌐';
           else iconEl.textContent = '📄';
         }
       }
@@ -4082,12 +4102,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (btnCat) {
         if (cat.canCat) {
           btnCat.classList.remove('hidden');
-          if (btnCatText) btnCatText.textContent = 'View File';
-          btnCat.title = 'View file content in modal';
+          if (btnCatText) btnCatText.textContent = cat.isHtml ? 'Preview HTML' : 'View File';
+          btnCat.title = cat.isHtml ? 'Preview rendered HTML or view code' : 'View file content in modal';
           btnCat.onclick = (e) => {
             e.stopPropagation();
             hideFileHoverMenu();
-            openFileContentModal(path, tabId);
+            openFileContentModal(path, tabId, null, cat.isHtml ? 'preview' : 'code');
           };
         } else {
           btnCat.classList.add('hidden');
@@ -4238,8 +4258,54 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let currentModalFilePath = '';
     let currentModalFileTabId = '';
     let currentModalFileContent = '';
+    let currentModalFileMode = 'code';
 
-    async function openFileContentModal(path, tabId, statData) {
+    function setFileModalViewMode(mode) {
+      currentModalFileMode = mode;
+      const btnCode = document.getElementById('file-modal-btn-code');
+      const btnPreview = document.getElementById('file-modal-btn-preview');
+      const codeWrap = document.getElementById('file-modal-code-wrap');
+      const previewWrap = document.getElementById('file-modal-preview-wrap');
+      const previewFrame = document.getElementById('file-modal-preview-frame');
+      const metaEncoding = document.getElementById('file-modal-meta-encoding');
+
+      if (mode === 'preview') {
+        if (btnCode) {
+          btnCode.className = 'px-2.5 py-1 rounded-lg transition text-slate-400 hover:text-white flex items-center gap-1';
+        }
+        if (btnPreview) {
+          btnPreview.className = 'px-2.5 py-1 rounded-lg transition bg-orange-500/20 text-orange-300 font-medium flex items-center gap-1';
+        }
+        if (codeWrap) codeWrap.classList.add('hidden');
+        if (previewWrap) previewWrap.classList.remove('hidden');
+        if (previewFrame && currentModalFileContent) {
+          previewFrame.srcdoc = currentModalFileContent;
+        }
+        if (metaEncoding) metaEncoding.textContent = 'Mode: Rendered Preview';
+      } else {
+        if (btnCode) {
+          btnCode.className = 'px-2.5 py-1 rounded-lg transition bg-orange-500/20 text-orange-300 font-medium flex items-center gap-1';
+        }
+        if (btnPreview) {
+          btnPreview.className = 'px-2.5 py-1 rounded-lg transition text-slate-400 hover:text-white flex items-center gap-1';
+        }
+        if (previewWrap) previewWrap.classList.add('hidden');
+        if (codeWrap) codeWrap.classList.remove('hidden');
+        if (metaEncoding) metaEncoding.textContent = 'Mode: Source Code';
+      }
+    }
+
+    function openModalFileInBrowser() {
+      if (!currentModalFilePath) return;
+      const fileParam = `file=${encodeURIComponent(currentModalFilePath)}`;
+      const tabParam = currentModalFileTabId ? `tab=${encodeURIComponent(currentModalFileTabId)}` : '';
+      const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+      const qs = [fileParam, tabParam, tokenParam, 'raw=1'].filter(Boolean).join('&');
+      const url = `/api/view?${qs}`;
+      window.open(url, '_blank');
+    }
+
+    async function openFileContentModal(path, tabId, statData, initialMode = null) {
       if (!path) return;
       path = cleanCandidatePath(path);
       hideFileHoverMenu();
@@ -4250,6 +4316,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const modal = document.getElementById('file-content-modal');
       const titleEl = document.getElementById('file-modal-title');
       const pathEl = document.getElementById('file-modal-path');
+      const iconEl = document.getElementById('file-modal-icon');
       const lineBadge = document.getElementById('file-modal-line-badge');
       const sizeBadge = document.getElementById('file-modal-size-badge');
       const spinner = document.getElementById('file-modal-spinner');
@@ -4259,16 +4326,41 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const codeTextEl = document.getElementById('file-modal-code-text');
       const metaLines = document.getElementById('file-modal-meta-lines');
       const metaSize = document.getElementById('file-modal-meta-size');
+      const viewModeGroup = document.getElementById('file-modal-view-mode');
+      const openTabBtn = document.getElementById('file-modal-open-tab-btn');
+      const previewFrame = document.getElementById('file-modal-preview-frame');
 
       const fileName = path.split('/').pop() || path;
+      const ext = (fileName.split('.').pop() || '').toLowerCase();
+      const isHtml = ['html', 'htm', 'xhtml'].includes(ext);
+
       if (titleEl) titleEl.textContent = fileName;
       if (pathEl) pathEl.textContent = path;
+      if (iconEl) iconEl.textContent = isHtml ? '🌐' : '📄';
       if (modal) modal.classList.remove('hidden');
+
+      if (isHtml) {
+        if (viewModeGroup) {
+          viewModeGroup.classList.remove('hidden');
+          viewModeGroup.classList.add('flex');
+        }
+        if (openTabBtn) openTabBtn.classList.remove('hidden');
+      } else {
+        if (viewModeGroup) {
+          viewModeGroup.classList.add('hidden');
+          viewModeGroup.classList.remove('flex');
+        }
+        if (openTabBtn) openTabBtn.classList.add('hidden');
+      }
 
       if (spinner) spinner.classList.remove('hidden');
       if (errorEl) errorEl.classList.add('hidden');
       if (lineNumEl) lineNumEl.textContent = '';
       if (codeTextEl) codeTextEl.textContent = '';
+      if (previewFrame) previewFrame.srcdoc = '';
+
+      const targetMode = initialMode || (isHtml ? 'preview' : 'code');
+      setFileModalViewMode(targetMode);
 
       try {
         const fileParam = encodeURIComponent(path);
@@ -4302,6 +4394,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (codeTextEl) {
           codeTextEl.textContent = (hasTrailingNewline && rawLines.length > 1) ? normalized.slice(0, -1) : normalized;
         }
+
+        if (isHtml && currentModalFileMode === 'preview' && previewFrame) {
+          previewFrame.srcdoc = text;
+        }
       } catch (err) {
         if (errorEl) errorEl.classList.remove('hidden');
         if (errorMsg) errorMsg.textContent = err.message || 'Unable to load file content';
@@ -4312,9 +4408,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     function closeFileContentModal() {
       const modal = document.getElementById('file-content-modal');
+      const previewFrame = document.getElementById('file-modal-preview-frame');
       if (modal) modal.classList.add('hidden');
+      if (previewFrame) previewFrame.srcdoc = '';
       currentModalFileContent = '';
       currentModalFilePath = '';
+      setFileModalViewMode('code');
     }
 
     function copyModalFilePath() {
@@ -7478,13 +7577,22 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 filename = os.path.basename(target_path)
                 clean_name = filename.replace('"', '\\"')
                 safe_name = urllib.parse.quote(filename)
+                disposition_type = "inline" if (norm_path in ('/api/preview', '/api/view') or query.get('inline', ['0'])[0] in ('1', 'true', 'yes')) else "attachment"
+                is_raw = query.get('raw', ['0'])[0] in ('1', 'true', 'yes')
+                if disposition_type == "inline" and not is_raw:
+                    if content_type == "application/octet-stream" or content_type.startswith("text/") or content_type in ("application/json", "application/javascript", "application/xml"):
+                        content_type = "text/plain; charset=utf-8"
+                elif is_raw and content_type == "text/html":
+                    content_type = "text/html; charset=utf-8"
+
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(file_size))
                 self.send_header("Accept-Ranges", "bytes")
                 self.send_header("Access-Control-Expose-Headers", "Content-Disposition, Content-Range, Accept-Ranges")
-                disposition_type = "inline" if (norm_path in ('/api/preview', '/api/view') or query.get('inline', ['0'])[0] in ('1', 'true', 'yes')) else "attachment"
                 self.send_header("Content-Disposition", f'{disposition_type}; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
+                if is_raw and content_type.startswith("text/html"):
+                    self.send_header("Content-Security-Policy", "sandbox allow-scripts allow-forms allow-modals;")
                 self.end_headers()
             except Exception:
                 self.send_response(500)
@@ -7835,9 +7943,12 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 clean_name = filename.replace('"', '\\"')
                 content_type = mimetypes.guess_type(target_path)[0] or "application/octet-stream"
                 disposition_type = "inline" if (parsed.path.rstrip('/') in ('/api/preview', '/api/view') or query.get('inline', ['0'])[0] in ('1', 'true', 'yes')) else "attachment"
-                if disposition_type == "inline":
+                is_raw = query.get('raw', ['0'])[0] in ('1', 'true', 'yes')
+                if disposition_type == "inline" and not is_raw:
                     if content_type == "application/octet-stream" or content_type.startswith("text/") or content_type in ("application/json", "application/javascript", "application/xml"):
                         content_type = "text/plain; charset=utf-8"
+                elif is_raw and content_type == "text/html":
+                    content_type = "text/html; charset=utf-8"
 
                 safe_name = urllib.parse.quote(filename)
 
@@ -7867,6 +7978,8 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                                 self.send_header("Accept-Ranges", "bytes")
                                 self.send_header("Access-Control-Expose-Headers", "Content-Disposition, Content-Range, Accept-Ranges")
                                 self.send_header("Content-Disposition", f'{disposition_type}; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
+                                if is_raw and content_type.startswith("text/html"):
+                                    self.send_header("Content-Security-Policy", "sandbox allow-scripts allow-forms allow-modals;")
                                 self.end_headers()
 
                                 with open(target_path, 'rb') as f:
@@ -7893,6 +8006,8 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_header("Accept-Ranges", "bytes")
                 self.send_header("Access-Control-Expose-Headers", "Content-Disposition, Content-Range, Accept-Ranges")
                 self.send_header("Content-Disposition", f'{disposition_type}; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
+                if is_raw and content_type.startswith("text/html"):
+                    self.send_header("Content-Security-Policy", "sandbox allow-scripts allow-forms allow-modals;")
                 self.end_headers()
 
                 with open(target_path, 'rb') as f:
