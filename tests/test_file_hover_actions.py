@@ -305,6 +305,10 @@ class TestFileHoverLogicWithNode:
         assert self._eval_js("cleanCandidatePath('file:///root/sample%20space.txt')") == "/root/sample space.txt"
         assert self._eval_js("cleanCandidatePath('file:///root/app.py#L10-L20')") == "/root/app.py"
         assert self._eval_js("cleanCandidatePath('file:///root/app.py:42:15')") == "/root/app.py"
+        assert self._eval_js("cleanCandidatePath('README.md#L10')") == "README.md"
+        assert self._eval_js("cleanCandidatePath('/root/fire-package-pm/README.md#features')") == "/root/fire-package-pm/README.md"
+        assert self._eval_js("cleanCandidatePath('index.html?token=xyz')") == "index.html"
+        assert self._eval_js("cleanCandidatePath('app/file.md?raw=1#L5')") == "app/file.md"
 
     def test_file_category_blocked_archives(self):
         archives = ["archive.zip", "bundle.tar", "data.tar.gz", "pkg.tgz", "archive.bz2", "rootfs.xz", "backup.7z", "disk.iso", "old.rar"]
@@ -460,3 +464,94 @@ class TestFileHoverLogicWithNode:
         assert self._eval_js("quoteShellArg('file with spaces.txt')") == '"file with spaces.txt"'
         assert self._eval_js("quoteShellArg('~/projects/app.js')") == '~/"projects/app.js"'
         assert self._eval_js('quoteShellArg(\'foo"bar.txt\')') == '"foo\\"bar.txt"'
+
+    def test_file_category_html_and_markdown_with_fragments(self):
+        cat_md = self._eval_js("getFileCategory('README.md#L10')")
+        assert cat_md["isMarkdown"] is True
+        assert cat_md["badge"] == "MARKDOWN"
+
+        cat_html = self._eval_js("getFileCategory('index.html?v=2#preview')")
+        assert cat_html["isHtml"] is True
+        assert cat_html["badge"] == "HTML"
+
+    def test_file_modal_preview_wrap_dark_styling(self):
+        assert 'id="file-modal-preview-wrap" class="hidden absolute inset-0 bg-slate-950 z-0 flex flex-col p-2 sm:p-4"' in HTML_TEMPLATE
+        assert 'id="file-modal-preview-frame" class="w-full h-full border-0 bg-white rounded-lg shadow-inner"' in HTML_TEMPLATE
+
+    def test_set_file_modal_view_mode_clean_toggle(self):
+        toggle_script = """
+        (() => {
+            let currentModalFilePath = 'README.md#L10';
+            let currentModalFileType = 'markdown';
+            let currentModalFileContent = '# Hello MD';
+            let previewWrapHidden = false;
+            let mdWrapHidden = true;
+            let codeWrapHidden = false;
+            let previewFrameSrcdoc = '';
+            let mdBodyHtml = '';
+
+            const previewWrap = { classList: { add: (c) => { if (c==='hidden') previewWrapHidden = true; }, remove: (c) => { if (c==='hidden') previewWrapHidden = false; } } };
+            const mdWrap = { classList: { add: (c) => { if (c==='hidden') mdWrapHidden = true; }, remove: (c) => { if (c==='hidden') mdWrapHidden = false; } } };
+            const codeWrap = { classList: { add: (c) => { if (c==='hidden') codeWrapHidden = true; }, remove: (c) => { if (c==='hidden') codeWrapHidden = false; } } };
+            const previewFrame = { removeAttribute: () => {}, set srcdoc(v) { previewFrameSrcdoc = v; }, get srcdoc() { return previewFrameSrcdoc; } };
+            const mdBody = { set innerHTML(v) { mdBodyHtml = v; }, get innerHTML() { return mdBodyHtml; } };
+
+            function simulateToggle(mode) {
+                let isHtml = currentModalFileType === 'html';
+                let isMd = currentModalFileType === 'markdown';
+                if (!isHtml && !isMd && currentModalFilePath) {
+                    const cleanBase = (cleanCandidatePath(currentModalFilePath).split('/').pop() || '').toLowerCase();
+                    const ext = cleanBase.includes('.') ? cleanBase.split('.').pop() : '';
+                    isHtml = ['html', 'htm', 'xhtml'].includes(ext);
+                    isMd = ['md', 'markdown'].includes(ext);
+                }
+
+                if (mode === 'preview') {
+                    codeWrap.classList.add('hidden');
+                    if (isMd) {
+                        previewWrap.classList.add('hidden');
+                        mdWrap.classList.remove('hidden');
+                        mdBody.innerHTML = renderMarkdownContent(currentModalFileContent);
+                    } else if (isHtml) {
+                        mdWrap.classList.add('hidden');
+                        previewWrap.classList.remove('hidden');
+                        previewFrame.removeAttribute('srcdoc');
+                        previewFrame.srcdoc = currentModalFileContent;
+                    } else {
+                        previewWrap.classList.add('hidden');
+                        mdWrap.classList.add('hidden');
+                        codeWrap.classList.remove('hidden');
+                    }
+                } else {
+                    previewWrap.classList.add('hidden');
+                    mdWrap.classList.add('hidden');
+                    codeWrap.classList.remove('hidden');
+                }
+            }
+
+            simulateToggle('preview');
+            const state1 = { previewWrapHidden, mdWrapHidden, codeWrapHidden, hasMd: mdBodyHtml.includes('Hello MD') };
+
+            simulateToggle('code');
+            const state2 = { previewWrapHidden, mdWrapHidden, codeWrapHidden };
+
+            simulateToggle('preview');
+            const state3 = { previewWrapHidden, mdWrapHidden, codeWrapHidden, hasMd: mdBodyHtml.includes('Hello MD') };
+
+            return { state1, state2, state3 };
+        })()
+        """
+        res = self._eval_js(toggle_script)
+        assert res["state1"]["previewWrapHidden"] is True
+        assert res["state1"]["mdWrapHidden"] is False
+        assert res["state1"]["codeWrapHidden"] is True
+        assert res["state1"]["hasMd"] is True
+
+        assert res["state2"]["previewWrapHidden"] is True
+        assert res["state2"]["mdWrapHidden"] is True
+        assert res["state2"]["codeWrapHidden"] is False
+
+        assert res["state3"]["previewWrapHidden"] is True
+        assert res["state3"]["mdWrapHidden"] is False
+        assert res["state3"]["codeWrapHidden"] is True
+        assert res["state3"]["hasMd"] is True

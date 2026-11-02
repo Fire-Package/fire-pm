@@ -1870,8 +1870,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
 
         <!-- HTML Render Preview Container -->
-        <div id="file-modal-preview-wrap" class="hidden absolute inset-0 bg-white z-0 flex flex-col">
-          <iframe id="file-modal-preview-frame" class="w-full h-full border-0 bg-white" sandbox="allow-scripts allow-forms allow-modals"></iframe>
+        <div id="file-modal-preview-wrap" class="hidden absolute inset-0 bg-slate-950 z-0 flex flex-col p-2 sm:p-4">
+          <iframe id="file-modal-preview-frame" class="w-full h-full border-0 bg-white rounded-lg shadow-inner" sandbox="allow-scripts allow-forms allow-modals"></iframe>
         </div>
 
         <!-- Markdown Render Preview Container -->
@@ -3907,9 +3907,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         try {
           s = decodeURIComponent(s);
         } catch(e) {}
-        if (s.includes('#')) {
-          s = s.split('#')[0];
-        }
+      }
+      if (s.includes('#')) {
+        s = s.split('#')[0];
+      }
+      if (s.includes('?')) {
+        s = s.split('?')[0];
       }
       s = s.replace(/:\d+(?::\d+)?$/, '');
       return s;
@@ -3966,7 +3969,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function getFileCategory(path) {
-      const base = path.split('/').pop() || path;
+      const clean = cleanCandidatePath(path);
+      const base = clean.split('/').pop() || clean;
       const parts = base.split('.');
       const ext = (parts.length > 1 ? parts.pop() : '').toLowerCase();
 
@@ -4332,6 +4336,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let currentModalFileTabId = '';
     let currentModalFileContent = '';
     let currentModalFileMode = 'code';
+    let currentModalFileType = 'text';
 
     function parseGitHubAlerts(html) {
       if (!html) return '';
@@ -4437,9 +4442,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const mdBody = document.getElementById('file-modal-markdown-body');
       const metaEncoding = document.getElementById('file-modal-meta-encoding');
 
-      const ext = (currentModalFilePath.split('.').pop() || '').toLowerCase();
-      const isHtml = ['html', 'htm', 'xhtml'].includes(ext);
-      const isMd = ['md', 'markdown'].includes(ext);
+      let isHtml = currentModalFileType === 'html';
+      let isMd = currentModalFileType === 'markdown';
+      if (!isHtml && !isMd && currentModalFilePath) {
+        const cleanBase = (cleanCandidatePath(currentModalFilePath).split('/').pop() || '').toLowerCase();
+        const ext = cleanBase.includes('.') ? cleanBase.split('.').pop() : '';
+        isHtml = ['html', 'htm', 'xhtml'].includes(ext);
+        isMd = ['md', 'markdown'].includes(ext);
+        if (isMd) currentModalFileType = 'markdown';
+        else if (isHtml) currentModalFileType = 'html';
+      }
 
       if (mode === 'preview') {
         if (btnCode) {
@@ -4457,13 +4469,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             mdBody.innerHTML = renderMarkdownContent(currentModalFileContent);
           }
           if (metaEncoding) metaEncoding.textContent = 'Mode: Rendered Markdown (GitHub)';
-        } else {
+        } else if (isHtml) {
           if (mdWrap) mdWrap.classList.add('hidden');
           if (previewWrap) previewWrap.classList.remove('hidden');
           if (previewFrame && currentModalFileContent) {
+            previewFrame.removeAttribute('srcdoc');
             previewFrame.srcdoc = currentModalFileContent;
           }
           if (metaEncoding) metaEncoding.textContent = 'Mode: Rendered HTML Preview';
+        } else {
+          if (previewWrap) previewWrap.classList.add('hidden');
+          if (mdWrap) mdWrap.classList.add('hidden');
+          if (codeWrap) codeWrap.classList.remove('hidden');
         }
       } else {
         if (btnCode) {
@@ -4520,6 +4537,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const isHtml = ['html', 'htm', 'xhtml'].includes(ext);
       const isMd = ['md', 'markdown'].includes(ext);
       const hasPreview = isHtml || isMd;
+      currentModalFileType = isMd ? 'markdown' : (isHtml ? 'html' : 'text');
 
       if (titleEl) titleEl.textContent = fileName;
       if (pathEl) pathEl.textContent = path;
@@ -4590,6 +4608,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           if (isMd && mdBody) {
             mdBody.innerHTML = renderMarkdownContent(text);
           } else if (isHtml && previewFrame) {
+            previewFrame.removeAttribute('srcdoc');
             previewFrame.srcdoc = text;
           }
         }
@@ -4606,10 +4625,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const previewFrame = document.getElementById('file-modal-preview-frame');
       const mdBody = document.getElementById('file-modal-markdown-body');
       if (modal) modal.classList.add('hidden');
-      if (previewFrame) previewFrame.srcdoc = '';
+      if (previewFrame) {
+        previewFrame.removeAttribute('srcdoc');
+        previewFrame.srcdoc = '';
+      }
       if (mdBody) mdBody.innerHTML = '';
       currentModalFileContent = '';
       currentModalFilePath = '';
+      currentModalFileType = 'text';
       setFileModalViewMode('code');
     }
 
