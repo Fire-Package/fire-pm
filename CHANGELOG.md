@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 ## [Unreleased]
 
 ### Fixed
+* Fix Highlight.js CDN URLs using cdnjs and remove CSS color override to enable syntax highlighting in file modal ([#138](https://github.com/Fire-Package/fire-pm/issues/138)).
 * Fix `ReferenceError: metaEncoding is not defined` in file content modal by declaring `metaEncoding` in `openFileContentModal` ([#136](https://github.com/Fire-Package/fire-pm/issues/136)).
 * Fix blank white screen when toggling between Code and Preview modes in file content modal by tracking explicit modal file types, stripping fragments/queries universally in path cleaning, ensuring reliable iframe srcdoc reloading, and scoping dark theme wrapper styles ([#132](https://github.com/Fire-Package/fire-pm/issues/132)).
 * Prevent media preview modal error listener leaks and async request collisions by nullifying callbacks, resetting media sources via attribute removal, and sequencing preview requests ([#124](https://github.com/Fire-Package/fire-pm/issues/124)).
@@ -22,6 +23,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 * Prevent dual split terminal panes from physically flipping positions on screen when clicking panes or switching tabs ([#98](https://github.com/Fire-Package/fire-pm/issues/98), [#99](https://github.com/Fire-Package/fire-pm/pull/99)).
 
 ### Added
+* Add active tab CWD directory entry cache and bare directory/file name recognition in terminal output, allowing folders like `Desktop` or `fire-package-pm` without slashes to be hovered and browsed ([#138](https://github.com/Fire-Package/fire-pm/issues/138)).
 * Add syntax highlighting in file content modal using Highlight.js for Python, JavaScript/Node.js, TypeScript, JSON, Bash, YAML, HTML, CSS, C/C++, Rust, Go, and more, with GitHub Dark theme and Markdown fenced code blocks highlighting support.
 * Add interactive folder browser to file content modal: clicking a directory in the terminal opens an in-modal file browser with breadcrumb navigation, sortable file/folder listing, subfolder navigation, and direct file preview on click ([#134](https://github.com/Fire-Package/fire-pm/issues/134)).
 * Support GitHub-style Markdown rendering in file content modal with Code/Preview segmented toggle, GitHub Flavored Markdown (tables, checklists, code fences), GitHub alert callouts ([!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION]), and offline fallback parser ([#130](https://github.com/Fire-Package/fire-pm/issues/130)).

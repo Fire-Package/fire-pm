@@ -949,18 +949,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-webgl@0.16.0/lib/xterm-addon-webgl.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.5.1/github-markdown-dark.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css" />
-  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <style>
     /* Syntax Highlighting overrides for file modal */
-    #file-modal-code-text .hljs,
     #file-modal-code-text code.hljs {
       background: transparent !important;
       padding: 0 !important;
       font-family: inherit !important;
       font-size: inherit !important;
       line-height: inherit !important;
-      color: inherit;
     }
     /* GitHub Markdown Container styling */
     .markdown-body {
@@ -2863,6 +2861,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       tab.title = newName.trim() || 'bash';
       renderTabsList();
       saveTabsState();
+      fetchCwdEntries(tabId);
       showToast(`Tab ${tab.index} renamed to "${tab.title}"`);
     }
 
@@ -3948,7 +3947,34 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       return s;
     }
 
-    function isPathValidCandidate(candidate) {
+    const cwdEntriesCache = new Map();
+
+    async function fetchCwdEntries(tabId) {
+      const tid = tabId || (typeof activeTabId !== 'undefined' ? activeTabId : 'default');
+      const cached = cwdEntriesCache.get(tid);
+      if (cached && (Date.now() - cached.ts < 15000)) {
+        return cached.names;
+      }
+      try {
+        const tabParam = (tabId || activeTabId) ? `tab=${encodeURIComponent(tabId || activeTabId)}` : '';
+        const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+        const qs = [tabParam, tokenParam].filter(Boolean).join('&');
+        const res = await fetch(`/api/suggest?${qs}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.success && Array.isArray(data.items)) {
+            const names = new Set(data.items.map(i => i.name));
+            cwdEntriesCache.set(tid, { names, ts: Date.now() });
+            return names;
+          }
+        }
+      } catch (err) {
+        console.debug('fetchCwdEntries error', err);
+      }
+      return cached ? cached.names : new Set();
+    }
+
+    function isPathValidCandidate(candidate, tabId) {
       if (!candidate || candidate.length < 2) return false;
       const s = cleanCandidatePath(candidate);
       if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('ftp://') || s.startsWith('git@')) return false;
@@ -3965,6 +3991,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const ext = base.split('.').pop().toLowerCase();
         if (/^[a-z0-9_+-]{1,12}$/.test(ext) && !/^\d+$/.test(ext)) return true;
       }
+
+      // Check if bare candidate matches an existing file/directory in the current directory
+      const tid = tabId || (typeof activeTabId !== 'undefined' ? activeTabId : 'default');
+      const cached = cwdEntriesCache.get(tid);
+      if (cached && cached.names && cached.names.has(s)) {
+        return true;
+      }
+
       return false;
     }
 
@@ -4082,6 +4116,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             return;
           }
 
+          // Ensure CWD entries are fresh for bare directory and file detection
+          const tid = tabId || activeTabId || 'default';
+          const cachedCwd = cwdEntriesCache.get(tid);
+          if (!cachedCwd || (Date.now() - cachedCwd.ts >= 15000)) {
+            await fetchCwdEntries(tid);
+          }
+
           const rawRegex = /(?:^|[\s"'`(\[<])((?:file:\/\/(?:localhost)?\/|[~.A-Za-z0-9_-]*\/)?(?:[A-Za-z0-9_.~%+-]+\/)*[A-Za-z0-9_.~%+-]+(?:\.[A-Za-z0-9_+-]+)?)(?=[\s"'`()\[\]<>{},;:!?.#]|$)/gi;
           const candidates = [];
           let match;
@@ -4089,7 +4130,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           while ((match = rawRegex.exec(lineText)) !== null) {
             const fullMatch = match[0];
             const candidate = match[1];
-            if (!isPathValidCandidate(candidate)) continue;
+            if (!isPathValidCandidate(candidate, tabId)) continue;
 
             const startOffset = match.index + fullMatch.indexOf(candidate);
             const endOffset = startOffset + candidate.length;
@@ -6847,6 +6888,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       activeTab.hasAlert = false;
       renderTabsList();
       saveTabsState();
+      fetchCwdEntries(tabId);
 
       Object.keys(tabs).forEach(id => {
         const t = tabs[id];
@@ -7019,6 +7061,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       renderTabsList();
       saveTabsState();
+      fetchCwdEntries(tabId);
       showToast(`Tab moved ${direction < 0 ? 'left' : 'right'}`);
     }
 
@@ -7042,6 +7085,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       renderTabsList();
       saveTabsState();
+      fetchCwdEntries(tabId);
     }
 
     function handleTabDragStart(e, tabId) {
@@ -7409,6 +7453,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (!window.IS_READONLY) {
         t.onData(data => {
           if (isTerminalQueryResponse(data)) return;
+          if (data.includes('\r') || data.includes('\n')) {
+            setTimeout(() => {
+              cwdEntriesCache.delete(tabId);
+              fetchCwdEntries(tabId);
+            }, 600);
+          }
           if (tab.fitAddon && tab.term) {
             if (tab.lastSentCols !== tab.term.cols || tab.lastSentRows !== tab.term.rows) {
               sendResize(tab);
