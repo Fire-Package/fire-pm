@@ -1829,7 +1829,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         <!-- PDF Viewer Container -->
         <div id="file-modal-pdf-wrap" class="hidden absolute inset-0 z-0 flex flex-col bg-slate-950">
-          <iframe id="file-modal-pdf-frame" class="w-full flex-1 border-0" title="PDF Viewer" allow="fullscreen"></iframe>
+          <!-- Loading overlay -->
+          <div id="file-modal-pdf-loading" class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950 select-none">
+            <div class="text-3xl mb-4">📕</div>
+            <div class="text-sm text-slate-300 font-mono mb-5">Loading PDF<span id="file-modal-pdf-loading-name" class="text-orange-400"></span>…</div>
+            <!-- Progress bar track -->
+            <div class="w-64 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div id="file-modal-pdf-progress" class="h-full bg-orange-500 rounded-full transition-all duration-300" style="width:0%"></div>
+            </div>
+            <div id="file-modal-pdf-loading-hint" class="text-[11px] text-slate-500 font-mono mt-3">Fetching from server…</div>
+          </div>
+          <iframe id="file-modal-pdf-frame" class="w-full flex-1 border-0 opacity-0 transition-opacity duration-300" title="PDF Viewer" allow="fullscreen"></iframe>
         </div>
       </div>
 
@@ -5510,7 +5520,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (dirWrap) dirWrap.classList.add('hidden');
       if (dbWrap) dbWrap.classList.add('hidden');
       if (pdfWrap) pdfWrap.classList.add('hidden');
-      if (pdfFrame) pdfFrame.src = '';
+      if (pdfFrame) { pdfFrame.onload = null; pdfFrame.onerror = null; pdfFrame.src = ''; pdfFrame.classList.remove('opacity-100'); }
+      const pdfLoading = document.getElementById('file-modal-pdf-loading');
+      const pdfProgress = document.getElementById('file-modal-pdf-progress');
+      if (pdfLoading) pdfLoading.classList.remove('hidden');
+      if (pdfProgress) pdfProgress.style.width = '0%';
       if (cdBtn) cdBtn.classList.add('hidden');
       if (editBtn) editBtn.classList.remove('hidden');
       if (nanoBtn) nanoBtn.classList.remove('hidden');
@@ -5624,8 +5638,52 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (metaSize) metaSize.textContent = '';
       if (metaEncoding) metaEncoding.textContent = 'Mode: PDF Viewer';
 
-      // Build the inline URL and load into iframe
+      // Build the inline URL and load into iframe with progress animation
+      const pdfLoading = document.getElementById('file-modal-pdf-loading');
+      const pdfProgress = document.getElementById('file-modal-pdf-progress');
+      const pdfLoadingName = document.getElementById('file-modal-pdf-loading-name');
+      const pdfLoadingHint = document.getElementById('file-modal-pdf-loading-hint');
+
+      if (pdfLoading) pdfLoading.classList.remove('hidden');
+      if (pdfFrame) pdfFrame.classList.remove('opacity-100');
+
+      // Animate progress bar: 0→70% quickly, then slow crawl to 90%
+      let pdfProgressVal = 0;
+      let pdfProgressTimer = null;
+      function advancePdfProgress() {
+        if (pdfProgressVal < 70) {
+          pdfProgressVal += 4 + Math.random() * 6;
+        } else if (pdfProgressVal < 90) {
+          pdfProgressVal += 0.4 + Math.random() * 0.6;
+        } else {
+          pdfProgressVal = 90;
+          clearInterval(pdfProgressTimer);
+          return;
+        }
+        pdfProgressVal = Math.min(90, pdfProgressVal);
+        if (pdfProgress) pdfProgress.style.width = pdfProgressVal + '%';
+      }
+
+      function finishPdfProgress(success) {
+        clearInterval(pdfProgressTimer);
+        if (pdfProgress) pdfProgress.style.width = '100%';
+        if (pdfLoadingHint) pdfLoadingHint.textContent = success ? 'Rendering…' : 'Error loading PDF';
+        setTimeout(() => {
+          if (pdfLoading) pdfLoading.classList.add('hidden');
+          if (pdfFrame) pdfFrame.classList.add('opacity-100');
+          if (pdfProgress) pdfProgress.style.width = '0%';
+        }, 300);
+      }
+
+      if (pdfLoadingName) pdfLoadingName.textContent = ` ${fileName}`;
+      if (pdfLoadingHint) pdfLoadingHint.textContent = 'Fetching from server…';
+      pdfProgressVal = 0;
+      if (pdfProgress) pdfProgress.style.width = '0%';
+      pdfProgressTimer = setInterval(advancePdfProgress, 120);
+
       if (pdfFrame) {
+        pdfFrame.onload = () => finishPdfProgress(true);
+        pdfFrame.onerror = () => finishPdfProgress(false);
         const fileParam = `file=${encodeURIComponent(path)}`;
         const tabParam = (tabId || activeTabId) ? `tab=${encodeURIComponent(tabId || activeTabId)}` : '';
         const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
