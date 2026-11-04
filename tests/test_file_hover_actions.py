@@ -103,6 +103,16 @@ class TestFileHoverComponents:
         assert match is not None
         assert "const metaEncoding = document.getElementById('file-modal-meta-encoding');" in match.group(0)
 
+    def test_file_modal_editor_components(self):
+        assert 'id="file-modal-edit-btn"' in HTML_TEMPLATE
+        assert 'id="file-modal-save-btn"' in HTML_TEMPLATE
+        assert 'id="file-modal-cancel-edit-btn"' in HTML_TEMPLATE
+        assert 'id="file-modal-nano-btn"' in HTML_TEMPLATE
+        assert 'id="file-modal-code-editor"' in HTML_TEMPLATE
+        assert 'function toggleFileModalEditor(' in HTML_TEMPLATE
+        assert 'function saveModalFile(' in HTML_TEMPLATE
+        assert 'function updateEditorLineCount(' in HTML_TEMPLATE
+
     def test_hover_menu_javascript_functions(self):
         assert 'function registerFileLinkProvider(' in HTML_TEMPLATE
         assert 'function getFileCategory(' in HTML_TEMPLATE
@@ -294,6 +304,50 @@ class TestFileStatEndpoint:
 
         handler.path = "/api/stat?file=/some/path"
         handler.do_GET()
+        handler.send_json.assert_called_once_with({"success": False, "error": "Unauthorized session"}, status=401)
+
+    def test_save_file_endpoint_authenticated(self):
+        handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.headers = {}
+        handler.is_authenticated = MagicMock(return_value=True)
+        handler.get_auth_token = MagicMock(return_value="valid-token")
+        handler.send_json = MagicMock()
+        handler.server = MagicMock()
+        handler.server.terminals.get.return_value = None
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as tmp:
+            tmp.write("original content")
+            tmp_path = tmp.name
+
+        try:
+            handler.path = "/api/save"
+            payload = json.dumps({"file": tmp_path, "content": "updated content from modal"}).encode('utf-8')
+            handler.headers = {"Content-Length": str(len(payload))}
+            handler.rfile = MagicMock()
+            handler.rfile.read.return_value = payload
+            handler.do_POST()
+
+            handler.send_json.assert_called_once()
+            call_args = handler.send_json.call_args[0][0]
+            assert call_args["success"] is True
+            assert call_args["path"] == tmp_path
+
+            with open(tmp_path, 'r', encoding='utf-8') as f:
+                assert f.read() == "updated content from modal"
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_save_file_endpoint_unauthorized(self):
+        handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.headers = {}
+        handler.is_authenticated = MagicMock(return_value=False)
+        handler.send_json = MagicMock()
+
+        handler.path = "/api/save"
+        handler.do_POST()
         handler.send_json.assert_called_once_with({"success": False, "error": "Unauthorized session"}, status=401)
 
 

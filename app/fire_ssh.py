@@ -1848,8 +1848,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <button type="button" id="file-modal-cd-btn" onclick="openModalDirInTab()" class="hidden px-2.5 py-1.5 bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/30 rounded-xl text-xs text-sky-300 hover:text-sky-200 transition flex items-center gap-1" title="cd into this directory in a new terminal tab">
             <span>⇥</span> <span class="hidden sm:inline">cd in Tab</span>
           </button>
-          <button type="button" id="file-modal-edit-btn" onclick="editModalFileInNewTab()" class="px-2.5 py-1.5 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-xl text-xs text-orange-300 hover:text-orange-200 transition flex items-center gap-1 font-medium" title="Edit file with nano in a new tab">
-            <span>✏️</span> <span class="hidden sm:inline">Edit (nano)</span>
+          <button type="button" id="file-modal-edit-btn" onclick="toggleFileModalEditor(true)" class="px-2.5 py-1.5 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-xl text-xs text-orange-300 hover:text-orange-200 transition flex items-center gap-1 font-medium" title="Edit file directly in modal">
+            <span>✏️</span> <span class="hidden sm:inline">Edit</span>
+          </button>
+          <button type="button" id="file-modal-save-btn" onclick="saveModalFile()" class="hidden px-2.5 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 hover:text-emerald-200 transition flex items-center gap-1 font-medium" title="Save changes (Ctrl+S)">
+            <span>💾</span> <span class="hidden sm:inline">Save</span>
+          </button>
+          <button type="button" id="file-modal-cancel-edit-btn" onclick="cancelFileModalEditor()" class="hidden px-2 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Cancel editing">
+            <span>✕</span> <span class="hidden sm:inline">Cancel</span>
+          </button>
+          <button type="button" id="file-modal-nano-btn" onclick="editModalFileInNewTab()" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Edit file with nano in a new terminal tab">
+            <span>📟</span> <span class="hidden sm:inline">nano</span>
           </button>
           <button type="button" id="file-modal-copy-btn" onclick="copyModalFileContent()" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Copy file content to clipboard">
             <span>📋</span> <span id="file-modal-copy-label" class="hidden sm:inline">Copy Content</span>
@@ -1880,6 +1889,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div id="file-modal-code-wrap" class="min-w-full inline-flex font-mono text-xs sm:text-sm leading-6">
           <div id="file-modal-line-numbers" class="select-none text-right pr-4 text-slate-500 font-mono shrink-0 border-r border-slate-800/80 whitespace-pre leading-6 min-w-[3.5rem] sticky left-0 bg-slate-950 z-10"></div>
           <pre id="file-modal-code-text" class="flex-1 pl-4 m-0 whitespace-pre font-mono text-slate-200 select-text outline-none leading-6"></pre>
+          <textarea id="file-modal-code-editor" oninput="updateEditorLineCount()" onkeydown="handleEditorKeydown.call(this, event)" class="hidden flex-1 pl-4 m-0 whitespace-pre font-mono text-slate-200 bg-transparent border-0 outline-none resize-none leading-6 overflow-hidden p-0" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
         </div>
 
         <!-- HTML Render Preview Container -->
@@ -4694,6 +4704,240 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
     }
 
+    let isModalEditing = false;
+
+    function handleEditorKeydown(e) {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        saveModalFile();
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        cancelFileModalEditor();
+        return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const start = this.selectionStart;
+        const end = this.selectionEnd;
+        this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
+        this.selectionStart = this.selectionEnd = start + 2;
+        updateEditorLineCount();
+      }
+    }
+
+    function updateEditorLineCount() {
+      const codeEditor = document.getElementById('file-modal-code-editor');
+      const lineNumEl = document.getElementById('file-modal-line-numbers');
+      const lineBadge = document.getElementById('file-modal-line-badge');
+      const metaLines = document.getElementById('file-modal-meta-lines');
+      const metaSize = document.getElementById('file-modal-meta-size');
+      if (!codeEditor) return;
+
+      const text = codeEditor.value;
+      const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      const rawLines = normalized.split('\n');
+      const hasTrailingNewline = normalized.endsWith('\n');
+      const contentLines = (hasTrailingNewline && rawLines.length > 1) ? rawLines.slice(0, -1) : rawLines;
+      const lineCount = normalized.length === 0 ? 0 : contentLines.length;
+      const byteSize = new Blob([text]).size;
+
+      if (lineBadge) lineBadge.textContent = `${lineCount} line${lineCount === 1 ? '' : 's'}`;
+      if (metaLines) metaLines.textContent = `Lines: ${lineCount}`;
+      if (metaSize) metaSize.textContent = `Size: ${formatBytes(byteSize)}`;
+
+      let lineNums = '';
+      for (let i = 1; i <= Math.max(1, lineCount); i++) {
+        lineNums += (i === 1 ? '' : '\n') + i;
+      }
+      if (lineNumEl) lineNumEl.textContent = lineNums;
+    }
+
+    function renderModalCodeContent(text, filePath) {
+      const codeTextEl = document.getElementById('file-modal-code-text');
+      const lineNumEl = document.getElementById('file-modal-line-numbers');
+      const lineBadge = document.getElementById('file-modal-line-badge');
+      const sizeBadge = document.getElementById('file-modal-size-badge');
+      const metaLines = document.getElementById('file-modal-meta-lines');
+      const metaSize = document.getElementById('file-modal-meta-size');
+
+      const normalized = (text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      const rawLines = normalized.split('\n');
+      const hasTrailingNewline = normalized.endsWith('\n');
+      const contentLines = (hasTrailingNewline && rawLines.length > 1) ? rawLines.slice(0, -1) : rawLines;
+      const lineCount = normalized.length === 0 ? 0 : contentLines.length;
+      const byteSize = new Blob([text || '']).size;
+
+      if (lineBadge) lineBadge.textContent = `${lineCount} line${lineCount === 1 ? '' : 's'}`;
+      if (sizeBadge) sizeBadge.textContent = formatBytes(byteSize);
+      if (metaLines) metaLines.textContent = `Lines: ${lineCount}`;
+      if (metaSize) metaSize.textContent = `Size: ${formatBytes(byteSize)}`;
+
+      let lineNums = '';
+      for (let i = 1; i <= lineCount; i++) {
+        lineNums += (i === 1 ? '' : '\n') + i;
+      }
+      if (lineNumEl) lineNumEl.textContent = lineNums;
+
+      const displayCode = (hasTrailingNewline && rawLines.length > 1) ? normalized.slice(0, -1) : normalized;
+      const detectedLang = getLanguageFromPath(filePath);
+
+      if (codeTextEl) {
+        if (typeof hljs !== 'undefined' && displayCode) {
+          try {
+            let highlightedVal = '';
+            if (detectedLang && hljs.getLanguage(detectedLang)) {
+              highlightedVal = hljs.highlight(displayCode, { language: detectedLang, ignoreIllegals: true }).value;
+            } else {
+              highlightedVal = hljs.highlightAuto(displayCode).value;
+            }
+            codeTextEl.innerHTML = `<code class="hljs ${detectedLang ? `language-${detectedLang}` : ''}">${highlightedVal}</code>`;
+          } catch (err) {
+            codeTextEl.textContent = displayCode;
+          }
+        } else {
+          codeTextEl.textContent = displayCode;
+        }
+      }
+    }
+
+    function toggleFileModalEditor(enable) {
+      if (currentModalIsDir || !currentModalFilePath) return;
+      if (window.IS_READONLY) {
+        showToast('Cannot edit file in read-only mode');
+        return;
+      }
+
+      isModalEditing = (enable !== undefined) ? !!enable : !isModalEditing;
+
+      const editBtn = document.getElementById('file-modal-edit-btn');
+      const nanoBtn = document.getElementById('file-modal-nano-btn');
+      const saveBtn = document.getElementById('file-modal-save-btn');
+      const cancelBtn = document.getElementById('file-modal-cancel-edit-btn');
+      const copyBtn = document.getElementById('file-modal-copy-btn');
+      const dlBtn = document.getElementById('file-modal-dl-btn');
+      const viewModeGroup = document.getElementById('file-modal-view-mode');
+      const openTabBtn = document.getElementById('file-modal-open-tab-btn');
+      const codeTextEl = document.getElementById('file-modal-code-text');
+      const codeEditor = document.getElementById('file-modal-code-editor');
+      const metaEncoding = document.getElementById('file-modal-meta-encoding');
+
+      const detectedLang = getLanguageFromPath(currentModalFilePath);
+      const langLabel = getLanguageLabel(detectedLang, currentModalFilePath);
+
+      if (isModalEditing) {
+        setFileModalViewMode('code');
+
+        if (viewModeGroup) viewModeGroup.classList.add('hidden');
+        if (openTabBtn) openTabBtn.classList.add('hidden');
+        if (editBtn) editBtn.classList.add('hidden');
+        if (nanoBtn) nanoBtn.classList.add('hidden');
+        if (copyBtn) copyBtn.classList.add('hidden');
+        if (dlBtn) dlBtn.classList.add('hidden');
+        if (saveBtn) saveBtn.classList.remove('hidden');
+        if (cancelBtn) cancelBtn.classList.remove('hidden');
+
+        if (codeTextEl) codeTextEl.classList.add('hidden');
+        if (codeEditor) {
+          codeEditor.classList.remove('hidden');
+          codeEditor.value = currentModalFileContent;
+          updateEditorLineCount();
+          setTimeout(() => {
+            codeEditor.focus();
+          }, 50);
+        }
+
+        if (metaEncoding) metaEncoding.textContent = `Mode: Editing (${langLabel})`;
+      } else {
+        if (saveBtn) saveBtn.classList.add('hidden');
+        if (cancelBtn) cancelBtn.classList.add('hidden');
+        if (editBtn) editBtn.classList.remove('hidden');
+        if (nanoBtn) nanoBtn.classList.remove('hidden');
+        if (copyBtn) copyBtn.classList.remove('hidden');
+        if (dlBtn) dlBtn.classList.remove('hidden');
+
+        const isHtml = currentModalFileType === 'html';
+        const isMd = currentModalFileType === 'markdown';
+        if ((isHtml || isMd) && viewModeGroup) {
+          viewModeGroup.classList.remove('hidden');
+          viewModeGroup.classList.add('flex');
+          if (isHtml && openTabBtn) openTabBtn.classList.remove('hidden');
+        }
+
+        if (codeEditor) codeEditor.classList.add('hidden');
+        if (codeTextEl) codeTextEl.classList.remove('hidden');
+
+        renderModalCodeContent(currentModalFileContent, currentModalFilePath);
+        if (metaEncoding) metaEncoding.textContent = `Mode: Source Code (${langLabel})`;
+      }
+    }
+
+    function cancelFileModalEditor() {
+      toggleFileModalEditor(false);
+    }
+
+    async function saveModalFile() {
+      if (!isModalEditing || !currentModalFilePath) return;
+      const codeEditor = document.getElementById('file-modal-code-editor');
+      const saveBtn = document.getElementById('file-modal-save-btn');
+      if (!codeEditor) return;
+
+      const newContent = codeEditor.value;
+      const origBtnHtml = saveBtn ? saveBtn.innerHTML : '';
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<span>⟳</span> <span>Saving...</span>';
+      }
+
+      try {
+        const payload = {
+          file: currentModalFilePath,
+          content: newContent,
+          tab: currentModalFileTabId || activeTabId
+        };
+        const tokenParam = sessionToken ? `?token=${encodeURIComponent(sessionToken)}` : '';
+        const res = await fetch(`/api/save${tokenParam}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || `HTTP ${res.status}: Failed to save file`);
+        }
+
+        currentModalFileContent = newContent;
+        const fileName = currentModalFilePath.split('/').pop() || currentModalFilePath;
+        showToast(`Saved ${fileName}`);
+
+        const isHtml = currentModalFileType === 'html';
+        const isMd = currentModalFileType === 'markdown';
+        if (isHtml) {
+          const previewFrame = document.getElementById('file-modal-preview-frame');
+          if (previewFrame) {
+            previewFrame.removeAttribute('srcdoc');
+            previewFrame.srcdoc = newContent;
+          }
+        } else if (isMd) {
+          const mdBody = document.getElementById('file-modal-markdown-body');
+          if (mdBody) {
+            mdBody.innerHTML = renderMarkdownContent(newContent);
+          }
+        }
+
+        toggleFileModalEditor(false);
+      } catch (err) {
+        showToast('Save failed: ' + (err.message || 'Unknown error'));
+      } finally {
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = origBtnHtml;
+        }
+      }
+    }
+
     function openModalFileInBrowser() {
       if (!currentModalFilePath) return;
       const fileParam = `file=${encodeURIComponent(currentModalFilePath)}`;
@@ -4742,6 +4986,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const openTabBtn = document.getElementById('file-modal-open-tab-btn');
       const cdBtn = document.getElementById('file-modal-cd-btn');
       const editBtn = document.getElementById('file-modal-edit-btn');
+      const nanoBtn = document.getElementById('file-modal-nano-btn');
+      const saveBtn = document.getElementById('file-modal-save-btn');
+      const cancelBtn = document.getElementById('file-modal-cancel-edit-btn');
       const copyBtn = document.getElementById('file-modal-copy-btn');
       const dlBtn = document.getElementById('file-modal-dl-btn');
       const metaLines = document.getElementById('file-modal-meta-lines');
@@ -4762,6 +5009,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (openTabBtn) openTabBtn.classList.add('hidden');
       if (cdBtn) cdBtn.classList.remove('hidden');
       if (editBtn) editBtn.classList.add('hidden');
+      if (nanoBtn) nanoBtn.classList.add('hidden');
+      if (saveBtn) saveBtn.classList.add('hidden');
+      if (cancelBtn) cancelBtn.classList.add('hidden');
       if (copyBtn) copyBtn.classList.add('hidden');
       if (dlBtn) dlBtn.classList.add('hidden');
 
@@ -4982,11 +5232,25 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (iconEl) iconEl.textContent = isHtml ? '🌐' : (isMd ? '📖' : '📄');
       if (lineBadge) lineBadge.classList.remove('hidden');
       if (sizeBadge) sizeBadge.classList.remove('hidden');
+      isModalEditing = false;
+      const nanoBtn = document.getElementById('file-modal-nano-btn');
+      const saveBtn = document.getElementById('file-modal-save-btn');
+      const cancelBtn = document.getElementById('file-modal-cancel-edit-btn');
+      const codeEditor = document.getElementById('file-modal-code-editor');
+
       if (cdBtn) cdBtn.classList.add('hidden');
       if (editBtn) editBtn.classList.remove('hidden');
+      if (nanoBtn) nanoBtn.classList.remove('hidden');
+      if (saveBtn) saveBtn.classList.add('hidden');
+      if (cancelBtn) cancelBtn.classList.add('hidden');
       if (copyBtn) copyBtn.classList.remove('hidden');
       if (dlBtn) dlBtn.classList.remove('hidden');
       if (dirWrap) dirWrap.classList.add('hidden');
+      if (codeEditor) {
+        codeEditor.classList.add('hidden');
+        codeEditor.value = '';
+      }
+      if (codeTextEl) codeTextEl.classList.remove('hidden');
       if (modal) modal.classList.remove('hidden');
 
       if (hasPreview) {
@@ -5098,12 +5362,27 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const copyBtn = document.getElementById('file-modal-copy-btn');
       const dlBtn = document.getElementById('file-modal-dl-btn');
 
+      isModalEditing = false;
+      const nanoBtn = document.getElementById('file-modal-nano-btn');
+      const saveBtn = document.getElementById('file-modal-save-btn');
+      const cancelBtn = document.getElementById('file-modal-cancel-edit-btn');
+      const codeEditor = document.getElementById('file-modal-code-editor');
+      const codeTextEl = document.getElementById('file-modal-code-text');
+
       if (modal) modal.classList.add('hidden');
       if (dirWrap) dirWrap.classList.add('hidden');
       if (cdBtn) cdBtn.classList.add('hidden');
       if (editBtn) editBtn.classList.remove('hidden');
+      if (nanoBtn) nanoBtn.classList.remove('hidden');
+      if (saveBtn) saveBtn.classList.add('hidden');
+      if (cancelBtn) cancelBtn.classList.add('hidden');
       if (copyBtn) copyBtn.classList.remove('hidden');
       if (dlBtn) dlBtn.classList.remove('hidden');
+      if (codeEditor) {
+        codeEditor.classList.add('hidden');
+        codeEditor.value = '';
+      }
+      if (codeTextEl) codeTextEl.classList.remove('hidden');
 
       if (previewFrame) {
         previewFrame.removeAttribute('srcdoc');
@@ -5655,9 +5934,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         const fileModal = document.getElementById('file-content-modal');
         if (fileModal && !fileModal.classList.contains('hidden')) {
+          if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+            e.preventDefault();
+            if (isModalEditing) {
+              saveModalFile();
+            }
+            return;
+          }
           if (e.key === 'Escape') {
             e.preventDefault();
-            closeFileContentModal();
+            if (isModalEditing) {
+              cancelFileModalEditor();
+            } else {
+              closeFileContentModal();
+            }
             return;
           }
         }
@@ -9058,6 +9348,64 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 pass
 
             self.send_json({"success": True, "title": new_title})
+            return
+
+        elif parsed.path == '/api/save':
+            if not self.is_authenticated():
+                self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
+                return
+
+            content_len = int(self.headers.get('Content-Length', 0))
+            if content_len > 10 * 1024 * 1024:
+                self.send_json({"success": False, "error": "File content too large (max 10MB)"}, status=413)
+                return
+
+            try:
+                body = self.rfile.read(content_len).decode('utf-8', errors='replace')
+                data = json.loads(body)
+            except Exception as e:
+                self.send_json({"success": False, "error": f"Invalid JSON payload: {e}"}, status=400)
+                return
+
+            token = self.get_auth_token()
+            tab_id = data.get('tab')
+            file_param = data.get('file') or data.get('path')
+            content = data.get('content')
+
+            if not file_param or content is None:
+                self.send_json({"success": False, "error": "Missing file or content parameter"}, status=400)
+                return
+
+            session = self.server.terminals.get(token, tab_id)
+            cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
+            target_path = resolve_fs_path(cwd, file_param)
+
+            if os.path.isdir(target_path):
+                self.send_json({"success": False, "error": "Cannot overwrite directory with file content"}, status=400)
+                return
+
+            temp_name = None
+            try:
+                target_dir = os.path.dirname(target_path) or '.'
+                os.makedirs(target_dir, exist_ok=True)
+                with tempfile.NamedTemporaryFile('w', dir=target_dir, delete=False, encoding='utf-8') as tf:
+                    tf.write(content)
+                    temp_name = tf.name
+                os.replace(temp_name, target_path)
+
+                stat = os.stat(target_path)
+                self.send_json({
+                    "success": True,
+                    "path": target_path,
+                    "size": stat.st_size
+                })
+            except Exception as e:
+                if temp_name and os.path.exists(temp_name):
+                    try:
+                        os.remove(temp_name)
+                    except Exception:
+                        pass
+                self.send_json({"success": False, "error": f"Failed to save file: {e}"}, status=500)
             return
 
         elif parsed.path == '/api/logout':

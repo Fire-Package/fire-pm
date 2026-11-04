@@ -23,6 +23,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 * Prevent dual split terminal panes from physically flipping positions on screen when clicking panes or switching tabs ([#98](https://github.com/Fire-Package/fire-pm/issues/98), [#99](https://github.com/Fire-Package/fire-pm/pull/99)).
 
 ### Added
+* Add direct in-modal file editor in file content modal with `[ ✏️ Edit ]`, `[ 💾 Save ]` (Ctrl+S), `[ ✕ Cancel ]`, dynamic line numbering textarea, and authenticated atomic `POST /api/save` endpoint, alongside dedicated `[ 📟 nano ]` terminal tab button ([#140](https://github.com/Fire-Package/fire-pm/issues/140)).
 * Add active tab CWD directory entry cache and bare directory/file name recognition in terminal output, allowing folders like `Desktop` or `fire-package-pm` without slashes to be hovered and browsed ([#138](https://github.com/Fire-Package/fire-pm/issues/138)).
 * Add syntax highlighting in file content modal using Highlight.js for Python, JavaScript/Node.js, TypeScript, JSON, Bash, YAML, HTML, CSS, C/C++, Rust, Go, and more, with GitHub Dark theme and Markdown fenced code blocks highlighting support.
 * Add interactive folder browser to file content modal: clicking a directory in the terminal opens an in-modal file browser with breadcrumb navigation, sortable file/folder listing, subfolder navigation, and direct file preview on click ([#134](https://github.com/Fire-Package/fire-pm/issues/134)).
