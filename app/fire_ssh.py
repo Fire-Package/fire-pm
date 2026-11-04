@@ -1965,15 +1965,37 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               </button>
             </div>
           </div>
-          <!-- Query Status / Stats Bar -->
-          <div id="file-modal-db-status" class="px-4 py-1.5 bg-slate-900/40 border-b border-slate-800/60 text-[11px] font-mono text-slate-400 flex items-center justify-between shrink-0">
-            <span id="file-modal-db-status-text">Select a table or enter a SQL query</span>
-            <span id="file-modal-db-status-stats" class="text-slate-500"></span>
+          <!-- Query Status / Stats Bar & Controls -->
+          <div id="file-modal-db-status" class="px-4 py-1.5 bg-slate-900/60 border-b border-slate-800/80 text-[11px] font-mono text-slate-400 flex items-center justify-between shrink-0 gap-2 flex-wrap">
+            <div class="flex items-center gap-2 min-w-0">
+              <span id="file-modal-db-status-text" class="truncate">Select a table or enter a SQL query</span>
+              <span id="file-modal-db-status-stats" class="text-slate-500 shrink-0"></span>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <!-- Quick Limits -->
+              <div class="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5 text-[10px]">
+                <button type="button" onclick="setDbQueryLimit(50)" class="px-2 py-0.5 rounded text-slate-400 hover:text-white transition" title="Set LIMIT 50">50</button>
+                <button type="button" onclick="setDbQueryLimit(100)" class="px-2 py-0.5 rounded text-slate-400 hover:text-white transition" title="Set LIMIT 100">100</button>
+                <button type="button" onclick="setDbQueryLimit(500)" class="px-2 py-0.5 rounded text-slate-400 hover:text-white transition" title="Set LIMIT 500">500</button>
+              </div>
+              <!-- Text Wrap Toggle -->
+              <button type="button" id="file-modal-db-wrap-btn" onclick="toggleDbTableWrap()" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700/80 rounded-lg text-slate-300 hover:text-white transition flex items-center gap-1" title="Toggle text wrapping">
+                <span>↔</span> <span id="file-modal-db-wrap-label">Wrap</span>
+              </button>
+              <!-- Export CSV -->
+              <button type="button" id="file-modal-db-export-csv-btn" onclick="exportDbResultsCsv()" class="px-2 py-1 bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/30 rounded-lg text-sky-300 hover:text-sky-200 transition flex items-center gap-1 font-medium" title="Export current results as CSV">
+                <span>⤓</span> <span>CSV</span>
+              </button>
+              <!-- Export JSON -->
+              <button type="button" id="file-modal-db-export-json-btn" onclick="exportDbResultsJson()" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700/80 rounded-lg text-slate-300 hover:text-white transition flex items-center gap-1" title="Export current results as JSON">
+                <span>⤓</span> <span>JSON</span>
+              </button>
+            </div>
           </div>
           <!-- Results Table or Empty/Error State -->
           <div id="file-modal-db-table-container" class="flex-1 overflow-auto p-4">
             <div id="file-modal-db-results-wrap" class="overflow-x-auto border border-slate-800 rounded-xl bg-slate-900/50">
-              <table id="file-modal-db-table" class="min-w-full text-left border-collapse text-xs font-mono">
+              <table id="file-modal-db-table" class="w-max min-w-full text-left border-collapse text-xs font-mono">
                 <thead id="file-modal-db-thead" class="bg-slate-900/90 border-b border-slate-800 text-slate-300 sticky top-0"></thead>
                 <tbody id="file-modal-db-tbody" class="divide-y divide-slate-800/60 text-slate-300"></tbody>
               </table>
@@ -5494,6 +5516,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (queryInput) queryInput.value = '';
       if (thead) thead.innerHTML = '';
       if (tbody) tbody.innerHTML = '';
+      currentDbColumns = [];
+      currentDbRows = [];
+      isDbTableWrap = false;
 
       currentModalFileContent = '';
       currentModalFilePath = '';
@@ -5502,6 +5527,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       currentModalFileType = 'text';
       setFileModalViewMode('code');
     }
+
+    let currentDbColumns = [];
+    let currentDbRows = [];
+    let isDbTableWrap = false;
 
     async function openDatabaseModal(path, tabId, statData) {
       if (!path) return;
@@ -5515,6 +5544,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       currentModalFileTabId = tabId || activeTabId;
       currentModalFileType = 'database';
       isModalEditing = false;
+      isDbTableWrap = false;
 
       const modal = document.getElementById('file-content-modal');
       const titleEl = document.getElementById('file-modal-title');
@@ -5579,6 +5609,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const emptyEl = document.getElementById('file-modal-db-empty');
       const statusText = document.getElementById('file-modal-db-status-text');
       const statusStats = document.getElementById('file-modal-db-status-stats');
+      const wrapBtn = document.getElementById('file-modal-db-wrap-btn');
+      const wrapLabel = document.getElementById('file-modal-db-wrap-label');
 
       if (tablesListEl) tablesListEl.innerHTML = '';
       if (queryInput) queryInput.value = '';
@@ -5587,6 +5619,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (emptyEl) emptyEl.classList.add('hidden');
       if (statusText) statusText.textContent = 'Loading database schema...';
       if (statusStats) statusStats.textContent = '';
+      if (wrapBtn) {
+        wrapBtn.classList.remove('bg-sky-500/20', 'text-sky-300', 'border-sky-500/40');
+        wrapBtn.classList.add('bg-slate-800', 'text-slate-300');
+      }
+      if (wrapLabel) wrapLabel.textContent = 'Wrap';
+      currentDbColumns = [];
+      currentDbRows = [];
 
       try {
         const fileParam = `file=${encodeURIComponent(path)}`;
@@ -5709,7 +5748,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           throw new Error(data.error || `HTTP ${res.status}: Query failed`);
         }
 
-        renderDbResults(data.columns || [], data.rows || []);
+        currentDbColumns = data.columns || [];
+        currentDbRows = data.rows || [];
+        renderDbResults(currentDbColumns, currentDbRows);
 
         if (statusText) {
           statusText.innerHTML = `<span class="text-emerald-400">✓ Query OK:</span> <span class="text-slate-300 font-mono">${escapeHtml(sql.length > 60 ? sql.slice(0, 57) + '...' : sql)}</span>`;
@@ -5720,6 +5761,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       } catch (err) {
         if (thead) thead.innerHTML = '';
         if (tbody) tbody.innerHTML = '';
+        currentDbColumns = [];
+        currentDbRows = [];
         if (emptyEl) {
           emptyEl.classList.remove('hidden');
           if (emptyMsg) emptyMsg.textContent = err.message || 'Query execution failed';
@@ -5735,7 +5778,96 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
     }
 
+    function toggleDbTableWrap() {
+      isDbTableWrap = !isDbTableWrap;
+      const wrapBtn = document.getElementById('file-modal-db-wrap-btn');
+      const wrapLabel = document.getElementById('file-modal-db-wrap-label');
+      if (wrapBtn) {
+        if (isDbTableWrap) {
+          wrapBtn.classList.add('bg-sky-500/20', 'text-sky-300', 'border-sky-500/40');
+          wrapBtn.classList.remove('bg-slate-800', 'text-slate-300');
+        } else {
+          wrapBtn.classList.remove('bg-sky-500/20', 'text-sky-300', 'border-sky-500/40');
+          wrapBtn.classList.add('bg-slate-800', 'text-slate-300');
+        }
+      }
+      if (wrapLabel) {
+        wrapLabel.textContent = isDbTableWrap ? 'Unwrap' : 'Wrap';
+      }
+      renderDbResults(currentDbColumns, currentDbRows);
+    }
+
+    function setDbQueryLimit(limit) {
+      const queryInput = document.getElementById('file-modal-db-query-input');
+      if (!queryInput) return;
+      let sql = queryInput.value.trim();
+      if (!sql) return;
+
+      if (/LIMIT\s+\d+/i.test(sql)) {
+        sql = sql.replace(/LIMIT\s+\d+/i, `LIMIT ${limit}`);
+      } else {
+        sql = sql.replace(/;?\s*$/, ` LIMIT ${limit};`);
+      }
+      queryInput.value = sql;
+      runCurrentDbQuery();
+    }
+
+    function exportDbResultsCsv() {
+      if (!currentDbColumns || currentDbColumns.length === 0 || !currentDbRows || currentDbRows.length === 0) {
+        showToast('No query results to export');
+        return;
+      }
+
+      const escapeCsvCell = (val) => {
+        if (val === null || val === undefined) return '';
+        const str = String(val);
+        if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+          return '"' + str.replace(/"/g, '""') + '"';
+        }
+        return str;
+      };
+
+      const headerLine = currentDbColumns.map(escapeCsvCell).join(',');
+      const rowLines = currentDbRows.map(row => {
+        return currentDbColumns.map(col => escapeCsvCell(row[col])).join(',');
+      });
+
+      const csvContent = [headerLine, ...rowLines].join('\r\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const baseName = (currentModalFilePath.split('/').pop() || 'query_results').replace(/\.[^.]+$/, '');
+      a.href = url;
+      a.download = `${baseName}_export.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast(`Exported ${currentDbRows.length} rows to CSV`);
+    }
+
+    function exportDbResultsJson() {
+      if (!currentDbRows || currentDbRows.length === 0) {
+        showToast('No query results to export');
+        return;
+      }
+      const jsonStr = JSON.stringify(currentDbRows, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const baseName = (currentModalFilePath.split('/').pop() || 'query_results').replace(/\.[^.]+$/, '');
+      a.href = url;
+      a.download = `${baseName}_export.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast(`Exported ${currentDbRows.length} rows to JSON`);
+    }
+
     function renderDbResults(columns, rows) {
+      currentDbColumns = columns || [];
+      currentDbRows = rows || [];
       const thead = document.getElementById('file-modal-db-thead');
       const tbody = document.getElementById('file-modal-db-tbody');
       const emptyEl = document.getElementById('file-modal-db-empty');
@@ -5792,8 +5924,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         columns.forEach(col => {
           const td = document.createElement('td');
-          td.className = 'px-3 py-1.5 whitespace-nowrap overflow-hidden text-ellipsis max-w-xs border-r border-slate-800/80 last:border-r-0 text-slate-200 select-text';
+          const baseClass = isDbTableWrap
+            ? 'px-3 py-1.5 whitespace-pre-wrap break-words max-w-xl min-w-[120px] border-r border-slate-800/80 last:border-r-0 text-slate-200 select-text cursor-pointer hover:bg-slate-800/60 transition'
+            : 'px-3 py-1.5 whitespace-nowrap overflow-hidden text-ellipsis max-w-md min-w-[100px] border-r border-slate-800/80 last:border-r-0 text-slate-200 select-text cursor-pointer hover:bg-slate-800/60 transition';
+          td.className = baseClass;
           const val = row[col];
+          const rawStr = (val !== null && val !== undefined) ? String(val) : 'NULL';
+          td.title = `${col}: ${rawStr}\n(Click to copy)`;
+          td.onclick = () => {
+            const sel = window.getSelection();
+            if (sel && sel.toString().length > 0) return;
+            navigator.clipboard.writeText(rawStr).then(() => {
+              showToast(`Copied ${col} value`);
+            }).catch(() => {});
+          };
+
           if (val === null || val === undefined) {
             td.innerHTML = '<span class="text-slate-500 italic select-none">NULL</span>';
           } else if (typeof val === 'boolean') {
@@ -9922,7 +10067,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 cursor = conn.cursor()
                 cursor.execute(sql_query)
 
-                rows_raw = cursor.fetchmany(500)
+                rows_raw = cursor.fetchmany(1000)
                 col_names = [d[0] for d in cursor.description] if cursor.description else []
 
                 rows = []
