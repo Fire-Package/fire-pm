@@ -1826,6 +1826,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <div id="image-modal-audio-meta" class="text-xs text-slate-400 font-mono mb-5">Audio Track</div>
           <audio id="image-modal-audio" class="w-full focus:outline-none rounded" controls autoplay preload="metadata"></audio>
         </div>
+
+        <!-- PDF Viewer Container -->
+        <div id="file-modal-pdf-wrap" class="hidden absolute inset-0 z-0 flex flex-col bg-slate-950">
+          <iframe id="file-modal-pdf-frame" class="w-full flex-1 border-0" title="PDF Viewer" allow="fullscreen"></iframe>
+        </div>
       </div>
 
       <!-- Bottom Status Bar -->
@@ -3994,8 +3999,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       'exe', 'bin', 'dll', 'so', 'dylib', 'o', 'a', 'obj', 'pyc', 'pyo', 'class', 'wasm',
       'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst', 'iso', 'dmg', 'deb', 'rpm', 'apk', 'msi',
       'mkv', 'avi', 'mov', 'flv', 'wmv',
-      'pdf', 'docx', 'xlsx', 'pptx'
+      'docx', 'xlsx', 'pptx'
     ]);
+
+    const PDF_EXTENSIONS = new Set(['pdf']);
 
     const DB_EXTENSIONS = new Set([
       'db', 'sqlite', 'sqlite3', 'db3', 's3db', 'sl3'
@@ -4152,6 +4159,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (AUDIO_EXTENSIONS.has(ext)) {
         return { type: 'audio', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: true, isHtml: false, isMarkdown: false, isDb: false, badge: 'AUDIO' };
       }
+      if (PDF_EXTENSIONS.has(ext)) {
+        return { type: 'pdf', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: false, isHtml: false, isMarkdown: false, isDb: false, isPdf: true, badge: 'PDF' };
+      }
       if (DB_EXTENSIONS.has(ext)) {
         return { type: 'db', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: false, isHtml: false, isMarkdown: false, isDb: true, badge: 'DATABASE' };
       }
@@ -4276,6 +4286,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                   openImagePreviewModal(targetClean, tabId);
                 } else if (cat.isDb) {
                   openDatabaseModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId);
+                } else if (cat.isPdf) {
+                  openPdfModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId);
                 } else if (cat.canCat || (targetStat && targetStat.is_file)) {
                   openFileContentModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId, targetStat, (cat.isHtml || cat.isMarkdown) ? 'preview' : 'code');
                 } else {
@@ -4340,6 +4352,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           else if (cat.badge === 'VIDEO') iconEl.textContent = '🎬';
           else if (cat.badge === 'AUDIO') iconEl.textContent = '🎵';
           else if (cat.badge === 'DATABASE') iconEl.textContent = '🗄️';
+          else if (cat.badge === 'PDF') iconEl.textContent = '📕';
           else if (cat.badge === 'BINARY') iconEl.textContent = '⚙️';
           else if (cat.isHtml) iconEl.textContent = '🌐';
           else iconEl.textContent = '📄';
@@ -4358,16 +4371,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       // View File / Explore DB (in-tab modal)
       if (btnCat) {
-        if (cat.canCat || cat.isDb) {
+        if (cat.canCat || cat.isDb || cat.isPdf) {
           btnCat.classList.remove('hidden');
-          const previewLabel = cat.isDb ? 'Explore DB' : (cat.isHtml ? 'Preview HTML' : (cat.isMarkdown ? 'Preview Markdown' : 'View File'));
+          const previewLabel = cat.isDb ? 'Explore DB' : (cat.isPdf ? 'View PDF' : (cat.isHtml ? 'Preview HTML' : (cat.isMarkdown ? 'Preview Markdown' : 'View File')));
           if (btnCatText) btnCatText.textContent = previewLabel;
-          btnCat.title = cat.isDb ? 'Explore SQLite database tables and run queries' : ((cat.isHtml || cat.isMarkdown) ? `Preview rendered ${cat.isMarkdown ? 'Markdown' : 'HTML'} or view code` : 'View file content in modal');
+          btnCat.title = cat.isDb ? 'Explore SQLite database tables and run queries' : (cat.isPdf ? 'View PDF document in modal' : ((cat.isHtml || cat.isMarkdown) ? `Preview rendered ${cat.isMarkdown ? 'Markdown' : 'HTML'} or view code` : 'View file content in modal'));
           btnCat.onclick = (e) => {
             e.stopPropagation();
             hideFileHoverMenu();
             if (cat.isDb) {
               openDatabaseModal(path, tabId);
+            } else if (cat.isPdf) {
+              openPdfModal(path, tabId);
             } else {
               openFileContentModal(path, tabId, null, (cat.isHtml || cat.isMarkdown) ? 'preview' : 'code');
             }
@@ -5233,6 +5248,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           cat && cat.isVideo ? '🎬' :
           cat && cat.isAudio ? '🎵' :
           cat && cat.isDb ? '🗄️' :
+          cat && cat.isPdf ? '📕' :
           cat && cat.isHtml ? '🌐' :
           cat && cat.isMarkdown ? '📖' :
           cat && cat.badge === 'ARCHIVE' ? '📦' :
@@ -5278,6 +5294,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               openImagePreviewModal(fullPath, currentModalFileTabId);
             } else if (cat && cat.isDb) {
               openDatabaseModal(fullPath, currentModalFileTabId);
+            } else if (cat && cat.isPdf) {
+              openPdfModal(fullPath, currentModalFileTabId);
             } else {
               openFileContentModal(fullPath, currentModalFileTabId, null, (cat && (cat.isHtml || cat.isMarkdown)) ? 'preview' : 'code');
             }
@@ -5294,6 +5312,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const catCheck = getFileCategory(path);
       if (catCheck.isDb) {
         return openDatabaseModal(path, tabId, statData);
+      }
+      if (catCheck.isPdf) {
+        return openPdfModal(path, tabId);
       }
       hideFileHoverMenu();
       closeImagePreviewModal();
@@ -5483,9 +5504,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const codeEditor = document.getElementById('file-modal-code-editor');
       const codeTextEl = document.getElementById('file-modal-code-text');
 
+      const pdfWrap = document.getElementById('file-modal-pdf-wrap');
+      const pdfFrame = document.getElementById('file-modal-pdf-frame');
       if (modal) modal.classList.add('hidden');
       if (dirWrap) dirWrap.classList.add('hidden');
       if (dbWrap) dbWrap.classList.add('hidden');
+      if (pdfWrap) pdfWrap.classList.add('hidden');
+      if (pdfFrame) pdfFrame.src = '';
       if (cdBtn) cdBtn.classList.add('hidden');
       if (editBtn) editBtn.classList.remove('hidden');
       if (nanoBtn) nanoBtn.classList.remove('hidden');
@@ -5531,6 +5556,83 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let currentDbColumns = [];
     let currentDbRows = [];
     let isDbTableWrap = false;
+
+    function openPdfModal(path, tabId) {
+      if (!path) return;
+      path = cleanCandidatePath(path);
+      hideFileHoverMenu();
+      closeImagePreviewModal();
+      currentModalIsDir = false;
+      currentModalDirPath = '';
+      currentModalFilePath = path;
+      currentModalFileTabId = tabId || activeTabId;
+      currentModalFileType = 'pdf';
+      isModalEditing = false;
+
+      const modal = document.getElementById('file-content-modal');
+      const titleEl = document.getElementById('file-modal-title');
+      const pathEl = document.getElementById('file-modal-path');
+      const iconEl = document.getElementById('file-modal-icon');
+      const lineBadge = document.getElementById('file-modal-line-badge');
+      const sizeBadge = document.getElementById('file-modal-size-badge');
+      const codeWrap = document.getElementById('file-modal-code-wrap');
+      const previewWrap = document.getElementById('file-modal-preview-wrap');
+      const mdWrap = document.getElementById('file-modal-markdown-wrap');
+      const dirWrap = document.getElementById('file-modal-dir-wrap');
+      const dbWrap = document.getElementById('file-modal-db-wrap');
+      const pdfWrap = document.getElementById('file-modal-pdf-wrap');
+      const pdfFrame = document.getElementById('file-modal-pdf-frame');
+      const viewModeGroup = document.getElementById('file-modal-view-mode');
+      const openTabBtn = document.getElementById('file-modal-open-tab-btn');
+      const cdBtn = document.getElementById('file-modal-cd-btn');
+      const editBtn = document.getElementById('file-modal-edit-btn');
+      const nanoBtn = document.getElementById('file-modal-nano-btn');
+      const saveBtn = document.getElementById('file-modal-save-btn');
+      const cancelBtn = document.getElementById('file-modal-cancel-edit-btn');
+      const copyBtn = document.getElementById('file-modal-copy-btn');
+      const dlBtn = document.getElementById('file-modal-dl-btn');
+      const metaEncoding = document.getElementById('file-modal-meta-encoding');
+      const metaLines = document.getElementById('file-modal-meta-lines');
+      const metaSize = document.getElementById('file-modal-meta-size');
+
+      const fileName = path.split('/').pop() || path;
+      if (titleEl) titleEl.textContent = fileName;
+      if (pathEl) pathEl.textContent = path;
+      if (iconEl) iconEl.textContent = '📕';
+      if (lineBadge) lineBadge.classList.add('hidden');
+      if (sizeBadge) sizeBadge.classList.add('hidden');
+
+      if (viewModeGroup) { viewModeGroup.classList.add('hidden'); viewModeGroup.classList.remove('flex'); }
+      if (openTabBtn) openTabBtn.classList.add('hidden');
+      if (cdBtn) cdBtn.classList.add('hidden');
+      if (editBtn) editBtn.classList.add('hidden');
+      if (nanoBtn) nanoBtn.classList.add('hidden');
+      if (saveBtn) saveBtn.classList.add('hidden');
+      if (cancelBtn) cancelBtn.classList.add('hidden');
+      if (copyBtn) copyBtn.classList.add('hidden');
+      if (dlBtn) dlBtn.classList.remove('hidden');
+
+      if (codeWrap) codeWrap.classList.add('hidden');
+      if (previewWrap) previewWrap.classList.add('hidden');
+      if (mdWrap) mdWrap.classList.add('hidden');
+      if (dirWrap) dirWrap.classList.add('hidden');
+      if (dbWrap) dbWrap.classList.add('hidden');
+      if (pdfWrap) pdfWrap.classList.remove('hidden');
+      if (modal) modal.classList.remove('hidden');
+
+      if (metaLines) metaLines.textContent = 'PDF Document';
+      if (metaSize) metaSize.textContent = '';
+      if (metaEncoding) metaEncoding.textContent = 'Mode: PDF Viewer';
+
+      // Build the inline URL and load into iframe
+      if (pdfFrame) {
+        const fileParam = `file=${encodeURIComponent(path)}`;
+        const tabParam = (tabId || activeTabId) ? `tab=${encodeURIComponent(tabId || activeTabId)}` : '';
+        const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+        const qs = [fileParam, tabParam, tokenParam].filter(Boolean).join('&');
+        pdfFrame.src = `/api/view?${qs}`;
+      }
+    }
 
     async function openDatabaseModal(path, tabId, statData) {
       if (!path) return;
