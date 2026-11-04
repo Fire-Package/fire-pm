@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 ## [Unreleased]
 
 ### Fixed
+* Fix `ReferenceError: metaEncoding is not defined` in file content modal by declaring `metaEncoding` in `openFileContentModal` ([#136](https://github.com/Fire-Package/fire-pm/issues/136)).
 * Fix blank white screen when toggling between Code and Preview modes in file content modal by tracking explicit modal file types, stripping fragments/queries universally in path cleaning, ensuring reliable iframe srcdoc reloading, and scoping dark theme wrapper styles ([#132](https://github.com/Fire-Package/fire-pm/issues/132)).
 * Prevent media preview modal error listener leaks and async request collisions by nullifying callbacks, resetting media sources via attribute removal, and sequencing preview requests ([#124](https://github.com/Fire-Package/fire-pm/issues/124)).
 * Verify filesystem path existence asynchronously before registering terminal links, treating non-existent files and colon-prefixed text (e.g. `h:AGENT.md`) as normal text, and remove redundant `cat` tab spawning in favor of the in-tab file viewer ([#120](https://github.com/Fire-Package/fire-pm/issues/120)).

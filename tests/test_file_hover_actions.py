@@ -99,6 +99,9 @@ class TestFileHoverComponents:
         assert 'function getLanguageFromPath(' in HTML_TEMPLATE
         assert 'function getLanguageLabel(' in HTML_TEMPLATE
         assert '#file-modal-code-text .hljs' in HTML_TEMPLATE
+        match = re.search(r'async function openFileContentModal\(.*?\n    \}', HTML_TEMPLATE, re.DOTALL)
+        assert match is not None
+        assert "const metaEncoding = document.getElementById('file-modal-meta-encoding');" in match.group(0)
 
     def test_hover_menu_javascript_functions(self):
         assert 'function registerFileLinkProvider(' in HTML_TEMPLATE
