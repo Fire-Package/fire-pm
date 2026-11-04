@@ -23,6 +23,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 * Prevent dual split terminal panes from physically flipping positions on screen when clicking panes or switching tabs ([#98](https://github.com/Fire-Package/fire-pm/issues/98), [#99](https://github.com/Fire-Package/fire-pm/pull/99)).
 
 ### Added
+* Add flexible table layout, text wrap/expand toggle, click-to-copy cell values, and CSV/JSON query result export with quick LIMIT selectors (50, 100, 500) to SQLite database explorer ([#144](https://github.com/Fire-Package/fire-pm/issues/144)).
 * Add live syntax highlighting while typing/editing in file modal code editor with synchronized dual-layer syntax rendering, and introduce interactive SQLite database explorer for .db/.sqlite/.sqlite3 files featuring table listing, schema inspection, tabular row data, and read-only query runner ([#142](https://github.com/Fire-Package/fire-pm/issues/142)).
 * Add direct in-modal file editor in file content modal with `[ ✏️ Edit ]`, `[ 💾 Save ]` (Ctrl+S), `[ ✕ Cancel ]`, dynamic line numbering textarea, and authenticated atomic `POST /api/save` endpoint, alongside dedicated `[ 📟 nano ]` terminal tab button ([#140](https://github.com/Fire-Package/fire-pm/issues/140)).
 * Add active tab CWD directory entry cache and bare directory/file name recognition in terminal output, allowing folders like `Desktop` or `fire-package-pm` without slashes to be hovered and browsed ([#138](https://github.com/Fire-Package/fire-pm/issues/138)).

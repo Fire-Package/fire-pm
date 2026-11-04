@@ -126,11 +126,18 @@ class TestFileHoverComponents:
         assert 'id="file-modal-db-thead"' in HTML_TEMPLATE
         assert 'id="file-modal-db-tbody"' in HTML_TEMPLATE
         assert 'id="file-modal-db-empty"' in HTML_TEMPLATE
+        assert 'id="file-modal-db-wrap-btn"' in HTML_TEMPLATE
+        assert 'id="file-modal-db-export-csv-btn"' in HTML_TEMPLATE
+        assert 'id="file-modal-db-export-json-btn"' in HTML_TEMPLATE
         assert 'function openDatabaseModal(' in HTML_TEMPLATE
         assert 'function renderDbTablesList(' in HTML_TEMPLATE
         assert 'function selectDbTable(' in HTML_TEMPLATE
         assert 'function runCurrentDbQuery(' in HTML_TEMPLATE
         assert 'function renderDbResults(' in HTML_TEMPLATE
+        assert 'function toggleDbTableWrap(' in HTML_TEMPLATE
+        assert 'function setDbQueryLimit(' in HTML_TEMPLATE
+        assert 'function exportDbResultsCsv(' in HTML_TEMPLATE
+        assert 'function exportDbResultsJson(' in HTML_TEMPLATE
 
     def test_hover_menu_javascript_functions(self):
         assert 'function registerFileLinkProvider(' in HTML_TEMPLATE
@@ -976,3 +983,43 @@ class TestFileHoverLogicWithNode:
         assert res["bash"] == "Shell / Bash"
         assert res["unknown"] == "XYZ"
         assert res["plain"] == "Plain Text"
+
+    def test_db_csv_escape_and_limit_replacer(self):
+        script = """
+        (() => {
+            const escapeCsvCell = (val) => {
+                if (val === null || val === undefined) return '';
+                const str = String(val);
+                if (str.includes(',') || str.includes('"') || str.includes('\\n') || str.includes('\\r')) {
+                    return '"' + str.replace(/"/g, '""') + '"';
+                }
+                return str;
+            };
+
+            const replaceLimit = (sql, limit) => {
+                if (/LIMIT\\s+\\d+/i.test(sql)) {
+                    return sql.replace(/LIMIT\\s+\\d+/i, `LIMIT ${limit}`);
+                } else {
+                    return sql.replace(/;?\\s*$/, ` LIMIT ${limit};`);
+                }
+            };
+
+            return {
+                simple: escapeCsvCell('hello'),
+                withComma: escapeCsvCell('hello, world'),
+                withQuotes: escapeCsvCell('say "hi"'),
+                withNewline: escapeCsvCell("line1\\nline2"),
+                withNull: escapeCsvCell(null),
+                limitReplaced: replaceLimit('SELECT * FROM users LIMIT 50;', 100),
+                limitAppended: replaceLimit('SELECT * FROM users', 500)
+            };
+        })()
+        """
+        res = self._eval_js(script)
+        assert res["simple"] == "hello"
+        assert res["withComma"] == '"hello, world"'
+        assert res["withQuotes"] == '"say ""hi"""'
+        assert res["withNewline"] == '"line1\nline2"'
+        assert res["withNull"] == ""
+        assert res["limitReplaced"] == "SELECT * FROM users LIMIT 100;"
+        assert res["limitAppended"] == "SELECT * FROM users LIMIT 500;"
