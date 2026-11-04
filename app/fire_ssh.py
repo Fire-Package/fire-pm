@@ -4918,6 +4918,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const codeTextEl = document.getElementById('file-modal-code-text');
       const metaLines = document.getElementById('file-modal-meta-lines');
       const metaSize = document.getElementById('file-modal-meta-size');
+      const metaEncoding = document.getElementById('file-modal-meta-encoding');
       const viewModeGroup = document.getElementById('file-modal-view-mode');
       const openTabBtn = document.getElementById('file-modal-open-tab-btn');
       const cdBtn = document.getElementById('file-modal-cd-btn');
