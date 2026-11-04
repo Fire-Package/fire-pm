@@ -109,9 +109,28 @@ class TestFileHoverComponents:
         assert 'id="file-modal-cancel-edit-btn"' in HTML_TEMPLATE
         assert 'id="file-modal-nano-btn"' in HTML_TEMPLATE
         assert 'id="file-modal-code-editor"' in HTML_TEMPLATE
+        assert 'id="file-modal-editor-container"' in HTML_TEMPLATE
         assert 'function toggleFileModalEditor(' in HTML_TEMPLATE
         assert 'function saveModalFile(' in HTML_TEMPLATE
         assert 'function updateEditorLineCount(' in HTML_TEMPLATE
+        assert 'function onModalEditorInput(' in HTML_TEMPLATE
+        assert 'caret-color: #38bdf8' in HTML_TEMPLATE
+
+    def test_sqlite_modal_components(self):
+        assert 'id="file-modal-db-wrap"' in HTML_TEMPLATE
+        assert 'id="file-modal-db-tables-list"' in HTML_TEMPLATE
+        assert 'id="file-modal-db-query-input"' in HTML_TEMPLATE
+        assert 'id="file-modal-db-run-btn"' in HTML_TEMPLATE
+        assert 'id="file-modal-db-status"' in HTML_TEMPLATE
+        assert 'id="file-modal-db-table"' in HTML_TEMPLATE
+        assert 'id="file-modal-db-thead"' in HTML_TEMPLATE
+        assert 'id="file-modal-db-tbody"' in HTML_TEMPLATE
+        assert 'id="file-modal-db-empty"' in HTML_TEMPLATE
+        assert 'function openDatabaseModal(' in HTML_TEMPLATE
+        assert 'function renderDbTablesList(' in HTML_TEMPLATE
+        assert 'function selectDbTable(' in HTML_TEMPLATE
+        assert 'function runCurrentDbQuery(' in HTML_TEMPLATE
+        assert 'function renderDbResults(' in HTML_TEMPLATE
 
     def test_hover_menu_javascript_functions(self):
         assert 'function registerFileLinkProvider(' in HTML_TEMPLATE
@@ -350,6 +369,169 @@ class TestFileStatEndpoint:
         handler.do_POST()
         handler.send_json.assert_called_once_with({"success": False, "error": "Unauthorized session"}, status=401)
 
+    def test_db_tables_endpoint_authenticated(self):
+        import sqlite3
+        handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.headers = {}
+        handler.is_authenticated = MagicMock(return_value=True)
+        handler.get_auth_token = MagicMock(return_value="valid-token")
+        handler.send_json = MagicMock()
+        handler.server = MagicMock()
+        handler.server.terminals.get.return_value = None
+
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
+            db_path = tmp.name
+
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT);")
+            conn.execute("INSERT INTO users (name, email) VALUES ('Alice', 'alice@test.com'), ('Bob', 'bob@test.com');")
+            conn.execute("CREATE TABLE posts (id INTEGER PRIMARY KEY, title TEXT);")
+            conn.commit()
+            conn.close()
+
+            handler.path = f"/api/db/tables?file={urllib.parse.quote(db_path)}"
+            handler.do_GET()
+
+            handler.send_json.assert_called_once()
+            call_args = handler.send_json.call_args[0][0]
+            assert call_args["success"] is True
+            assert call_args["path"] == db_path
+            assert len(call_args["tables"]) == 2
+
+            table_names = [t["name"] for t in call_args["tables"]]
+            assert "posts" in table_names
+            assert "users" in table_names
+
+            users_tbl = next(t for t in call_args["tables"] if t["name"] == "users")
+            assert users_tbl["count"] == 2
+            col_names = [c["name"] for c in users_tbl["columns"]]
+            assert col_names == ["id", "name", "email"]
+        finally:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+
+    def test_db_tables_endpoint_unauthorized(self):
+        handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.headers = {}
+        handler.is_authenticated = MagicMock(return_value=False)
+        handler.send_json = MagicMock()
+
+        handler.path = "/api/db/tables?file=/tmp/test.db"
+        handler.do_GET()
+        handler.send_json.assert_called_once_with({"success": False, "error": "Unauthorized session"}, status=401)
+
+    def test_db_query_endpoint_authenticated(self):
+        import sqlite3
+        handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.is_authenticated = MagicMock(return_value=True)
+        handler.get_auth_token = MagicMock(return_value="valid-token")
+        handler.send_json = MagicMock()
+        handler.server = MagicMock()
+        handler.server.terminals.get.return_value = None
+
+        with tempfile.NamedTemporaryFile(suffix='.sqlite', delete=False) as tmp:
+            db_path = tmp.name
+
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.execute("CREATE TABLE products (id INTEGER PRIMARY KEY, title TEXT, price REAL);")
+            conn.execute("INSERT INTO products (title, price) VALUES ('Widget', 19.99), ('Gadget', 49.50);")
+            conn.commit()
+            conn.close()
+
+            handler.path = "/api/db/query"
+            payload = json.dumps({"file": db_path, "query": "SELECT id, title, price FROM products ORDER BY id ASC;"}).encode('utf-8')
+            handler.headers = {"Content-Length": str(len(payload))}
+            handler.rfile = MagicMock()
+            handler.rfile.read.return_value = payload
+            handler.do_POST()
+
+            handler.send_json.assert_called_once()
+            call_args = handler.send_json.call_args[0][0]
+            assert call_args["success"] is True
+            assert call_args["columns"] == ["id", "title", "price"]
+            assert call_args["count"] == 2
+            assert len(call_args["rows"]) == 2
+            assert call_args["rows"][0]["title"] == "Widget"
+            assert call_args["rows"][1]["title"] == "Gadget"
+            assert call_args["execution_time_ms"] >= 0
+        finally:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+
+    def test_db_query_endpoint_invalid_sql(self):
+        import sqlite3
+        handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.is_authenticated = MagicMock(return_value=True)
+        handler.get_auth_token = MagicMock(return_value="valid-token")
+        handler.send_json = MagicMock()
+        handler.server = MagicMock()
+        handler.server.terminals.get.return_value = None
+
+        with tempfile.NamedTemporaryFile(suffix='.sqlite3', delete=False) as tmp:
+            db_path = tmp.name
+
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.execute("CREATE TABLE items (id INTEGER);")
+            conn.commit()
+            conn.close()
+
+            handler.path = "/api/db/query"
+            payload = json.dumps({"file": db_path, "query": "SELECT * FROM missing_table_123;"}).encode('utf-8')
+            handler.headers = {"Content-Length": str(len(payload))}
+            handler.rfile = MagicMock()
+            handler.rfile.read.return_value = payload
+            handler.do_POST()
+
+            handler.send_json.assert_called_once()
+            call_args = handler.send_json.call_args[0][0]
+            assert call_args["success"] is False
+            assert "Query execution failed" in call_args["error"]
+        finally:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+
+    def test_db_query_read_only_safeguard(self):
+        import sqlite3
+        handler = FireSSHServerHandler.__new__(FireSSHServerHandler)
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.is_authenticated = MagicMock(return_value=True)
+        handler.get_auth_token = MagicMock(return_value="valid-token")
+        handler.send_json = MagicMock()
+        handler.server = MagicMock()
+        handler.server.terminals.get.return_value = None
+
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
+            db_path = tmp.name
+
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.execute("CREATE TABLE logs (msg TEXT);")
+            conn.commit()
+            conn.close()
+
+            # Attempt a write query
+            handler.path = "/api/db/query"
+            payload = json.dumps({"file": db_path, "query": "INSERT INTO logs (msg) VALUES ('hacked');"}).encode('utf-8')
+            handler.headers = {"Content-Length": str(len(payload))}
+            handler.rfile = MagicMock()
+            handler.rfile.read.return_value = payload
+            handler.do_POST()
+
+            handler.send_json.assert_called_once()
+            call_args = handler.send_json.call_args[0][0]
+            assert call_args["success"] is False
+            assert "readonly" in call_args["error"].lower() or "failed" in call_args["error"].lower()
+        finally:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+
 
 class TestFileHoverLogicWithNode:
     """Execute the exact JS helper functions extracted from HTML_TEMPLATE in Node.js to verify behavior."""
@@ -412,6 +594,15 @@ class TestFileHoverLogicWithNode:
             assert res["badge"] == "AUDIO", f"{fn} should have AUDIO badge"
             assert res["canCat"] is False, f"{fn} must be blocked from cat"
             assert res["canEdit"] is False, f"{fn} must be blocked from nano"
+
+    def test_file_category_database_support(self):
+        db_files = ["database.db", "users.sqlite", "cache.sqlite3", "store.db3", "local.s3db", "index.sl3"]
+        for fn in db_files:
+            res = self._eval_js(f"getFileCategory('{fn}')")
+            assert res["isDb"] is True, f"{fn} should be identified as isDb"
+            assert res["badge"] == "DATABASE", f"{fn} should have DATABASE badge"
+            assert res["canCat"] is False, f"{fn} must not be dumped as raw text with cat"
+            assert res["canEdit"] is False, f"{fn} must not be opened in text nano"
 
     def test_file_category_blocked_binaries_and_executables(self):
         binaries = ["program.exe", "library.so", "lib.dll", "module.dylib", "kernel.bin", "main.o", "libstatic.a", "compiled.pyc", "engine.wasm"]

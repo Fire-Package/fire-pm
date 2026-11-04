@@ -960,6 +960,33 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       font-size: inherit !important;
       line-height: inherit !important;
     }
+    #file-modal-code-text, #file-modal-code-editor {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+      font-size: 0.8125rem !important;
+      line-height: 1.5rem !important;
+      letter-spacing: normal !important;
+      tab-size: 2 !important;
+      -moz-tab-size: 2 !important;
+      box-sizing: border-box !important;
+      padding-top: 0 !important;
+      padding-bottom: 0 !important;
+      padding-left: 1rem !important;
+      padding-right: 1rem !important;
+      margin: 0 !important;
+      border: 0 !important;
+    }
+    #file-modal-code-editor {
+      color: transparent !important;
+      caret-color: #38bdf8 !important;
+      background: transparent !important;
+      outline: none !important;
+      resize: none !important;
+      overflow: hidden !important;
+    }
+    #file-modal-code-editor::selection {
+      background: rgba(56, 189, 248, 0.25) !important;
+      color: transparent !important;
+    }
     /* GitHub Markdown Container styling */
     .markdown-body {
       box-sizing: border-box;
@@ -1888,8 +1915,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <!-- Code Container with line numbers and text -->
         <div id="file-modal-code-wrap" class="min-w-full inline-flex font-mono text-xs sm:text-sm leading-6">
           <div id="file-modal-line-numbers" class="select-none text-right pr-4 text-slate-500 font-mono shrink-0 border-r border-slate-800/80 whitespace-pre leading-6 min-w-[3.5rem] sticky left-0 bg-slate-950 z-10"></div>
-          <pre id="file-modal-code-text" class="flex-1 pl-4 m-0 whitespace-pre font-mono text-slate-200 select-text outline-none leading-6"></pre>
-          <textarea id="file-modal-code-editor" oninput="updateEditorLineCount()" onkeydown="handleEditorKeydown.call(this, event)" class="hidden flex-1 pl-4 m-0 whitespace-pre font-mono text-slate-200 bg-transparent border-0 outline-none resize-none leading-6 overflow-hidden p-0" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+          <div id="file-modal-editor-container" class="relative flex-1 min-w-0">
+            <pre id="file-modal-code-text" class="m-0 pl-4 whitespace-pre font-mono text-slate-200 select-text outline-none leading-6"></pre>
+            <textarea id="file-modal-code-editor" oninput="onModalEditorInput()" onkeydown="handleEditorKeydown.call(this, event)" class="hidden absolute inset-0 w-full h-full pl-4 m-0 whitespace-pre font-mono leading-6" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+          </div>
         </div>
 
         <!-- HTML Render Preview Container -->
@@ -1913,6 +1942,46 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <div class="text-center">
               <div class="text-3xl mb-2">📂</div>
               <div>Empty directory</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SQLite Database Explorer Container -->
+        <div id="file-modal-db-wrap" class="hidden absolute inset-0 z-0 flex flex-col bg-slate-950 overflow-hidden">
+          <!-- Top bar: Table selector & Query Input -->
+          <div class="p-3 border-b border-slate-800/80 bg-slate-900/70 flex flex-col gap-2 shrink-0">
+            <!-- Table Pills -->
+            <div class="flex items-center gap-2 overflow-x-auto pb-1 text-xs font-mono" id="file-modal-db-tables-bar">
+              <span class="text-slate-500 font-medium shrink-0 flex items-center gap-1"><span>🗄️</span> <span>Tables:</span></span>
+              <div id="file-modal-db-tables-list" class="flex items-center gap-1.5 flex-nowrap"></div>
+            </div>
+            <!-- Query runner bar -->
+            <div class="flex items-center gap-2">
+              <div class="relative flex-1">
+                <input type="text" id="file-modal-db-query-input" placeholder="SELECT * FROM table LIMIT 50;" onkeydown="if(event.key==='Enter') runCurrentDbQuery();" class="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-3 py-1.5 text-xs font-mono text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500/60" spellcheck="false" autocomplete="off" />
+              </div>
+              <button type="button" onclick="runCurrentDbQuery()" id="file-modal-db-run-btn" class="px-3 py-1.5 bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/30 text-sky-300 hover:text-sky-200 rounded-xl text-xs font-mono font-medium flex items-center gap-1.5 transition shrink-0">
+                <span>▶</span> <span>Run</span>
+              </button>
+            </div>
+          </div>
+          <!-- Query Status / Stats Bar -->
+          <div id="file-modal-db-status" class="px-4 py-1.5 bg-slate-900/40 border-b border-slate-800/60 text-[11px] font-mono text-slate-400 flex items-center justify-between shrink-0">
+            <span id="file-modal-db-status-text">Select a table or enter a SQL query</span>
+            <span id="file-modal-db-status-stats" class="text-slate-500"></span>
+          </div>
+          <!-- Results Table or Empty/Error State -->
+          <div id="file-modal-db-table-container" class="flex-1 overflow-auto p-4">
+            <div id="file-modal-db-results-wrap" class="overflow-x-auto border border-slate-800 rounded-xl bg-slate-900/50">
+              <table id="file-modal-db-table" class="min-w-full text-left border-collapse text-xs font-mono">
+                <thead id="file-modal-db-thead" class="bg-slate-900/90 border-b border-slate-800 text-slate-300 sticky top-0"></thead>
+                <tbody id="file-modal-db-tbody" class="divide-y divide-slate-800/60 text-slate-300"></tbody>
+              </table>
+            </div>
+            <!-- Empty state -->
+            <div id="file-modal-db-empty" class="hidden py-16 flex flex-col items-center justify-center text-slate-500 text-xs">
+              <span class="text-3xl mb-2">📭</span>
+              <span id="file-modal-db-empty-msg">No results to display</span>
             </div>
           </div>
         </div>
@@ -3903,7 +3972,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       'exe', 'bin', 'dll', 'so', 'dylib', 'o', 'a', 'obj', 'pyc', 'pyo', 'class', 'wasm',
       'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst', 'iso', 'dmg', 'deb', 'rpm', 'apk', 'msi',
       'mkv', 'avi', 'mov', 'flv', 'wmv',
-      'pdf', 'docx', 'xlsx', 'pptx', 'sqlite', 'db', 'sqlite3'
+      'pdf', 'docx', 'xlsx', 'pptx'
+    ]);
+
+    const DB_EXTENSIONS = new Set([
+      'db', 'sqlite', 'sqlite3', 'db3', 's3db', 'sl3'
     ]);
 
     const IMAGE_EXTENSIONS = new Set([
@@ -4055,20 +4128,23 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         return { type: 'video', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: true, isAudio: false, isHtml: false, isMarkdown: false, badge: 'VIDEO' };
       }
       if (AUDIO_EXTENSIONS.has(ext)) {
-        return { type: 'audio', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: true, isHtml: false, isMarkdown: false, badge: 'AUDIO' };
+        return { type: 'audio', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: true, isHtml: false, isMarkdown: false, isDb: false, badge: 'AUDIO' };
+      }
+      if (DB_EXTENSIONS.has(ext)) {
+        return { type: 'db', ext: ext, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: false, isHtml: false, isMarkdown: false, isDb: true, badge: 'DATABASE' };
       }
       if (BLOCKED_EXTENSIONS.has(ext)) {
         let badge = 'BINARY';
         if (['zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst', 'iso', 'dmg', 'deb', 'rpm', 'apk', 'msi'].includes(ext)) badge = 'ARCHIVE';
         else if (['mkv', 'avi', 'mov', 'flv', 'wmv'].includes(ext)) badge = 'VIDEO';
-        return { type: 'blocked', ext: ext, badge: badge, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: false, isHtml: false, isMarkdown: false };
+        return { type: 'blocked', ext: ext, badge: badge, canEdit: false, canCat: false, isImage: false, isVideo: false, isAudio: false, isHtml: false, isMarkdown: false, isDb: false };
       }
       const isHtml = ['html', 'htm', 'xhtml'].includes(ext);
       const isMarkdown = ['md', 'markdown'].includes(ext);
       let badge = undefined;
       if (isHtml) badge = 'HTML';
       else if (isMarkdown) badge = 'MARKDOWN';
-      return { type: 'text', ext: ext, canEdit: true, canCat: true, isImage: false, isVideo: false, isAudio: false, isHtml: isHtml, isMarkdown: isMarkdown, badge: badge };
+      return { type: 'text', ext: ext, canEdit: true, canCat: true, isImage: false, isVideo: false, isAudio: false, isHtml: isHtml, isMarkdown: isMarkdown, isDb: false, badge: badge };
     }
 
     function quoteShellArg(arg) {
@@ -4176,6 +4252,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 const cat = getFileCategory(targetClean);
                 if (cat.isImage || cat.isVideo || cat.isAudio) {
                   openImagePreviewModal(targetClean, tabId);
+                } else if (cat.isDb) {
+                  openDatabaseModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId);
                 } else if (cat.canCat || (targetStat && targetStat.is_file)) {
                   openFileContentModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId, targetStat, (cat.isHtml || cat.isMarkdown) ? 'preview' : 'code');
                 } else {
@@ -4239,6 +4317,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           if (cat.badge === 'ARCHIVE') iconEl.textContent = '📦';
           else if (cat.badge === 'VIDEO') iconEl.textContent = '🎬';
           else if (cat.badge === 'AUDIO') iconEl.textContent = '🎵';
+          else if (cat.badge === 'DATABASE') iconEl.textContent = '🗄️';
           else if (cat.badge === 'BINARY') iconEl.textContent = '⚙️';
           else if (cat.isHtml) iconEl.textContent = '🌐';
           else iconEl.textContent = '📄';
@@ -4255,17 +4334,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
       }
 
-      // View File (in-tab modal)
+      // View File / Explore DB (in-tab modal)
       if (btnCat) {
-        if (cat.canCat) {
+        if (cat.canCat || cat.isDb) {
           btnCat.classList.remove('hidden');
-          const previewLabel = cat.isHtml ? 'Preview HTML' : (cat.isMarkdown ? 'Preview Markdown' : 'View File');
+          const previewLabel = cat.isDb ? 'Explore DB' : (cat.isHtml ? 'Preview HTML' : (cat.isMarkdown ? 'Preview Markdown' : 'View File'));
           if (btnCatText) btnCatText.textContent = previewLabel;
-          btnCat.title = (cat.isHtml || cat.isMarkdown) ? `Preview rendered ${cat.isMarkdown ? 'Markdown' : 'HTML'} or view code` : 'View file content in modal';
+          btnCat.title = cat.isDb ? 'Explore SQLite database tables and run queries' : ((cat.isHtml || cat.isMarkdown) ? `Preview rendered ${cat.isMarkdown ? 'Markdown' : 'HTML'} or view code` : 'View file content in modal');
           btnCat.onclick = (e) => {
             e.stopPropagation();
             hideFileHoverMenu();
-            openFileContentModal(path, tabId, null, (cat.isHtml || cat.isMarkdown) ? 'preview' : 'code');
+            if (cat.isDb) {
+              openDatabaseModal(path, tabId);
+            } else {
+              openFileContentModal(path, tabId, null, (cat.isHtml || cat.isMarkdown) ? 'preview' : 'code');
+            }
           };
         } else {
           btnCat.classList.add('hidden');
@@ -4274,7 +4357,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       // Edit (nano)
       if (btnEdit) {
-        if (cat.canEdit) {
+        if (cat.canEdit && !cat.isDb) {
           btnEdit.classList.remove('hidden');
           btnEdit.onclick = (e) => {
             e.stopPropagation();
@@ -4723,35 +4806,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const end = this.selectionEnd;
         this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
         this.selectionStart = this.selectionEnd = start + 2;
-        updateEditorLineCount();
+        onModalEditorInput();
       }
     }
 
-    function updateEditorLineCount() {
+    function onModalEditorInput() {
       const codeEditor = document.getElementById('file-modal-code-editor');
-      const lineNumEl = document.getElementById('file-modal-line-numbers');
-      const lineBadge = document.getElementById('file-modal-line-badge');
-      const metaLines = document.getElementById('file-modal-meta-lines');
-      const metaSize = document.getElementById('file-modal-meta-size');
       if (!codeEditor) return;
+      renderModalCodeContent(codeEditor.value, currentModalFilePath);
+    }
 
-      const text = codeEditor.value;
-      const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-      const rawLines = normalized.split('\n');
-      const hasTrailingNewline = normalized.endsWith('\n');
-      const contentLines = (hasTrailingNewline && rawLines.length > 1) ? rawLines.slice(0, -1) : rawLines;
-      const lineCount = normalized.length === 0 ? 0 : contentLines.length;
-      const byteSize = new Blob([text]).size;
-
-      if (lineBadge) lineBadge.textContent = `${lineCount} line${lineCount === 1 ? '' : 's'}`;
-      if (metaLines) metaLines.textContent = `Lines: ${lineCount}`;
-      if (metaSize) metaSize.textContent = `Size: ${formatBytes(byteSize)}`;
-
-      let lineNums = '';
-      for (let i = 1; i <= Math.max(1, lineCount); i++) {
-        lineNums += (i === 1 ? '' : '\n') + i;
-      }
-      if (lineNumEl) lineNumEl.textContent = lineNums;
+    function updateEditorLineCount() {
+      onModalEditorInput();
     }
 
     function renderModalCodeContent(text, filePath) {
@@ -4775,12 +4841,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (metaSize) metaSize.textContent = `Size: ${formatBytes(byteSize)}`;
 
       let lineNums = '';
-      for (let i = 1; i <= lineCount; i++) {
+      for (let i = 1; i <= Math.max(1, lineCount); i++) {
         lineNums += (i === 1 ? '' : '\n') + i;
       }
       if (lineNumEl) lineNumEl.textContent = lineNums;
 
-      const displayCode = (hasTrailingNewline && rawLines.length > 1) ? normalized.slice(0, -1) : normalized;
+      let displayCode = normalized;
+      if (isModalEditing && displayCode.endsWith('\n')) {
+        displayCode += ' ';
+      } else if (!isModalEditing && hasTrailingNewline && rawLines.length > 1) {
+        displayCode = normalized.slice(0, -1);
+      }
       const detectedLang = getLanguageFromPath(filePath);
 
       if (codeTextEl) {
@@ -4838,14 +4909,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (saveBtn) saveBtn.classList.remove('hidden');
         if (cancelBtn) cancelBtn.classList.remove('hidden');
 
-        if (codeTextEl) codeTextEl.classList.add('hidden');
         if (codeEditor) {
           codeEditor.classList.remove('hidden');
           codeEditor.value = currentModalFileContent;
-          updateEditorLineCount();
+          onModalEditorInput();
           setTimeout(() => {
             codeEditor.focus();
           }, 50);
+        }
+        if (codeTextEl) {
+          codeTextEl.style.pointerEvents = 'none';
         }
 
         if (metaEncoding) metaEncoding.textContent = `Mode: Editing (${langLabel})`;
@@ -4866,7 +4939,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         if (codeEditor) codeEditor.classList.add('hidden');
-        if (codeTextEl) codeTextEl.classList.remove('hidden');
+        if (codeTextEl) {
+          codeTextEl.style.pointerEvents = 'auto';
+        }
 
         renderModalCodeContent(currentModalFileContent, currentModalFilePath);
         if (metaEncoding) metaEncoding.textContent = `Mode: Source Code (${langLabel})`;
@@ -5016,6 +5091,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (dlBtn) dlBtn.classList.add('hidden');
 
       // Hide file content panels, show dir panel
+      const dbWrap = document.getElementById('file-modal-db-wrap');
+      if (dbWrap) dbWrap.classList.add('hidden');
       if (codeWrap) codeWrap.classList.add('hidden');
       if (previewWrap) previewWrap.classList.add('hidden');
       if (mdWrap) mdWrap.classList.add('hidden');
@@ -5133,6 +5210,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           cat && cat.isImage ? '🖼️' :
           cat && cat.isVideo ? '🎬' :
           cat && cat.isAudio ? '🎵' :
+          cat && cat.isDb ? '🗄️' :
           cat && cat.isHtml ? '🌐' :
           cat && cat.isMarkdown ? '📖' :
           cat && cat.badge === 'ARCHIVE' ? '📦' :
@@ -5176,6 +5254,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             if (cat && (cat.isImage || cat.isVideo || cat.isAudio)) {
               closeFileContentModal();
               openImagePreviewModal(fullPath, currentModalFileTabId);
+            } else if (cat && cat.isDb) {
+              openDatabaseModal(fullPath, currentModalFileTabId);
             } else {
               openFileContentModal(fullPath, currentModalFileTabId, null, (cat && (cat.isHtml || cat.isMarkdown)) ? 'preview' : 'code');
             }
@@ -5189,6 +5269,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     async function openFileContentModal(path, tabId, statData, initialMode = null) {
       if (!path) return;
       path = cleanCandidatePath(path);
+      const catCheck = getFileCategory(path);
+      if (catCheck.isDb) {
+        return openDatabaseModal(path, tabId, statData);
+      }
       hideFileHoverMenu();
       closeImagePreviewModal();
       currentModalIsDir = false;
@@ -5216,7 +5300,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const editBtn = document.getElementById('file-modal-edit-btn');
       const copyBtn = document.getElementById('file-modal-copy-btn');
       const dlBtn = document.getElementById('file-modal-dl-btn');
+      const codeWrap = document.getElementById('file-modal-code-wrap');
       const dirWrap = document.getElementById('file-modal-dir-wrap');
+      const dbWrap = document.getElementById('file-modal-db-wrap');
       const previewFrame = document.getElementById('file-modal-preview-frame');
       const mdBody = document.getElementById('file-modal-markdown-body');
 
@@ -5246,11 +5332,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (copyBtn) copyBtn.classList.remove('hidden');
       if (dlBtn) dlBtn.classList.remove('hidden');
       if (dirWrap) dirWrap.classList.add('hidden');
+      if (dbWrap) dbWrap.classList.add('hidden');
+      if (codeWrap) codeWrap.classList.remove('hidden');
       if (codeEditor) {
         codeEditor.classList.add('hidden');
         codeEditor.value = '';
       }
-      if (codeTextEl) codeTextEl.classList.remove('hidden');
+      if (codeTextEl) {
+        codeTextEl.classList.remove('hidden');
+        codeTextEl.style.pointerEvents = 'auto';
+      }
       if (modal) modal.classList.remove('hidden');
 
       if (hasPreview) {
@@ -5357,6 +5448,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const previewFrame = document.getElementById('file-modal-preview-frame');
       const mdBody = document.getElementById('file-modal-markdown-body');
       const dirWrap = document.getElementById('file-modal-dir-wrap');
+      const dbWrap = document.getElementById('file-modal-db-wrap');
       const cdBtn = document.getElementById('file-modal-cd-btn');
       const editBtn = document.getElementById('file-modal-edit-btn');
       const copyBtn = document.getElementById('file-modal-copy-btn');
@@ -5371,6 +5463,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       if (modal) modal.classList.add('hidden');
       if (dirWrap) dirWrap.classList.add('hidden');
+      if (dbWrap) dbWrap.classList.add('hidden');
       if (cdBtn) cdBtn.classList.add('hidden');
       if (editBtn) editBtn.classList.remove('hidden');
       if (nanoBtn) nanoBtn.classList.remove('hidden');
@@ -5382,19 +5475,338 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         codeEditor.classList.add('hidden');
         codeEditor.value = '';
       }
-      if (codeTextEl) codeTextEl.classList.remove('hidden');
+      if (codeTextEl) {
+        codeTextEl.classList.remove('hidden');
+        codeTextEl.style.pointerEvents = 'auto';
+      }
 
       if (previewFrame) {
         previewFrame.removeAttribute('srcdoc');
         previewFrame.srcdoc = '';
       }
       if (mdBody) mdBody.innerHTML = '';
+
+      const tablesListEl = document.getElementById('file-modal-db-tables-list');
+      const queryInput = document.getElementById('file-modal-db-query-input');
+      const thead = document.getElementById('file-modal-db-thead');
+      const tbody = document.getElementById('file-modal-db-tbody');
+      if (tablesListEl) tablesListEl.innerHTML = '';
+      if (queryInput) queryInput.value = '';
+      if (thead) thead.innerHTML = '';
+      if (tbody) tbody.innerHTML = '';
+
       currentModalFileContent = '';
       currentModalFilePath = '';
       currentModalDirPath = '';
       currentModalIsDir = false;
       currentModalFileType = 'text';
       setFileModalViewMode('code');
+    }
+
+    async function openDatabaseModal(path, tabId, statData) {
+      if (!path) return;
+      path = cleanCandidatePath(path);
+      hideFileHoverMenu();
+      closeImagePreviewModal();
+
+      currentModalIsDir = false;
+      currentModalDirPath = '';
+      currentModalFilePath = path;
+      currentModalFileTabId = tabId || activeTabId;
+      currentModalFileType = 'database';
+      isModalEditing = false;
+
+      const modal = document.getElementById('file-content-modal');
+      const titleEl = document.getElementById('file-modal-title');
+      const pathEl = document.getElementById('file-modal-path');
+      const iconEl = document.getElementById('file-modal-icon');
+      const lineBadge = document.getElementById('file-modal-line-badge');
+      const sizeBadge = document.getElementById('file-modal-size-badge');
+      const spinner = document.getElementById('file-modal-spinner');
+      const errorEl = document.getElementById('file-modal-error');
+      const errorMsg = document.getElementById('file-modal-error-msg');
+      const codeWrap = document.getElementById('file-modal-code-wrap');
+      const previewWrap = document.getElementById('file-modal-preview-wrap');
+      const mdWrap = document.getElementById('file-modal-markdown-wrap');
+      const dirWrap = document.getElementById('file-modal-dir-wrap');
+      const dbWrap = document.getElementById('file-modal-db-wrap');
+      const viewModeGroup = document.getElementById('file-modal-view-mode');
+      const openTabBtn = document.getElementById('file-modal-open-tab-btn');
+      const cdBtn = document.getElementById('file-modal-cd-btn');
+      const editBtn = document.getElementById('file-modal-edit-btn');
+      const nanoBtn = document.getElementById('file-modal-nano-btn');
+      const saveBtn = document.getElementById('file-modal-save-btn');
+      const cancelBtn = document.getElementById('file-modal-cancel-edit-btn');
+      const copyBtn = document.getElementById('file-modal-copy-btn');
+      const dlBtn = document.getElementById('file-modal-dl-btn');
+      const metaLines = document.getElementById('file-modal-meta-lines');
+      const metaSize = document.getElementById('file-modal-meta-size');
+      const metaEncoding = document.getElementById('file-modal-meta-encoding');
+
+      const fileName = path.split('/').pop() || path;
+      if (titleEl) titleEl.textContent = fileName;
+      if (pathEl) pathEl.textContent = path;
+      if (iconEl) iconEl.textContent = '🗄️';
+
+      // Hide non-DB controls
+      if (viewModeGroup) { viewModeGroup.classList.add('hidden'); viewModeGroup.classList.remove('flex'); }
+      if (openTabBtn) openTabBtn.classList.add('hidden');
+      if (cdBtn) cdBtn.classList.add('hidden');
+      if (editBtn) editBtn.classList.add('hidden');
+      if (nanoBtn) nanoBtn.classList.add('hidden');
+      if (saveBtn) saveBtn.classList.add('hidden');
+      if (cancelBtn) cancelBtn.classList.add('hidden');
+      if (copyBtn) copyBtn.classList.add('hidden');
+      if (dlBtn) dlBtn.classList.remove('hidden');
+
+      if (codeWrap) codeWrap.classList.add('hidden');
+      if (previewWrap) previewWrap.classList.add('hidden');
+      if (mdWrap) mdWrap.classList.add('hidden');
+      if (dirWrap) dirWrap.classList.add('hidden');
+      if (dbWrap) dbWrap.classList.remove('hidden');
+      if (modal) modal.classList.remove('hidden');
+
+      if (spinner) spinner.classList.remove('hidden');
+      if (errorEl) errorEl.classList.add('hidden');
+
+      if (metaEncoding) metaEncoding.textContent = 'Mode: SQLite Database';
+
+      // Reset DB UI elements
+      const tablesListEl = document.getElementById('file-modal-db-tables-list');
+      const queryInput = document.getElementById('file-modal-db-query-input');
+      const thead = document.getElementById('file-modal-db-thead');
+      const tbody = document.getElementById('file-modal-db-tbody');
+      const emptyEl = document.getElementById('file-modal-db-empty');
+      const statusText = document.getElementById('file-modal-db-status-text');
+      const statusStats = document.getElementById('file-modal-db-status-stats');
+
+      if (tablesListEl) tablesListEl.innerHTML = '';
+      if (queryInput) queryInput.value = '';
+      if (thead) thead.innerHTML = '';
+      if (tbody) tbody.innerHTML = '';
+      if (emptyEl) emptyEl.classList.add('hidden');
+      if (statusText) statusText.textContent = 'Loading database schema...';
+      if (statusStats) statusStats.textContent = '';
+
+      try {
+        const fileParam = `file=${encodeURIComponent(path)}`;
+        const tabParam = (tabId || activeTabId) ? `tab=${encodeURIComponent(tabId || activeTabId)}` : '';
+        const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+        const qs = [fileParam, tabParam, tokenParam].filter(Boolean).join('&');
+        const res = await fetch(`/api/db/tables?${qs}`);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `HTTP ${res.status}: Failed to inspect database`);
+        }
+        const data = await res.json();
+        if (!data.success) {
+          throw new Error(data.error || 'Failed to inspect database');
+        }
+
+        const tables = data.tables || [];
+        if (lineBadge) lineBadge.textContent = `${tables.length} table${tables.length === 1 ? '' : 's'}`;
+        if (metaLines) metaLines.textContent = `Tables: ${tables.length}`;
+
+        renderDbTablesList(tables);
+
+        if (tables.length > 0) {
+          selectDbTable(tables[0].name);
+        } else {
+          if (statusText) statusText.textContent = 'No user tables found in database';
+          if (emptyEl) {
+            emptyEl.classList.remove('hidden');
+            const emptyMsg = document.getElementById('file-modal-db-empty-msg');
+            if (emptyMsg) emptyMsg.textContent = 'This database has no tables.';
+          }
+        }
+      } catch (err) {
+        if (errorEl) errorEl.classList.remove('hidden');
+        if (errorMsg) errorMsg.textContent = err.message || 'Unable to load database';
+        if (statusText) statusText.textContent = `Error: ${err.message}`;
+      } finally {
+        if (spinner) spinner.classList.add('hidden');
+      }
+    }
+
+    function renderDbTablesList(tables) {
+      const container = document.getElementById('file-modal-db-tables-list');
+      if (!container) return;
+      container.innerHTML = '';
+
+      if (!tables || tables.length === 0) {
+        container.innerHTML = '<span class="text-slate-500 italic text-[11px]">No tables</span>';
+        return;
+      }
+
+      tables.forEach((tbl) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'db-table-pill px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 hover:text-white text-slate-300 font-mono text-xs transition flex items-center gap-1.5 whitespace-nowrap shrink-0 border border-slate-700/60';
+        btn.dataset.table = tbl.name;
+        btn.innerHTML = `<span>📋</span> <span class="font-medium">${escapeHtml(tbl.name)}</span> <span class="text-[10px] text-slate-400 bg-slate-900/80 px-1.5 py-0.2 rounded-full border border-slate-700/40">${tbl.count}</span>`;
+        btn.onclick = () => selectDbTable(tbl.name);
+        container.appendChild(btn);
+      });
+    }
+
+    function selectDbTable(tableName) {
+      const pills = document.querySelectorAll('.db-table-pill');
+      pills.forEach(p => {
+        if (p.dataset.table === tableName) {
+          p.classList.add('bg-sky-500/20', 'text-sky-300', 'border-sky-500/40');
+          p.classList.remove('bg-slate-800', 'text-slate-300', 'border-slate-700/60');
+        } else {
+          p.classList.remove('bg-sky-500/20', 'text-sky-300', 'border-sky-500/40');
+          p.classList.add('bg-slate-800', 'text-slate-300', 'border-slate-700/60');
+        }
+      });
+
+      const queryInput = document.getElementById('file-modal-db-query-input');
+      if (queryInput) {
+        queryInput.value = `SELECT * FROM "${tableName}" LIMIT 50;`;
+      }
+      runCurrentDbQuery();
+    }
+
+    async function runCurrentDbQuery() {
+      const queryInput = document.getElementById('file-modal-db-query-input');
+      const runBtn = document.getElementById('file-modal-db-run-btn');
+      const statusText = document.getElementById('file-modal-db-status-text');
+      const statusStats = document.getElementById('file-modal-db-status-stats');
+      const thead = document.getElementById('file-modal-db-thead');
+      const tbody = document.getElementById('file-modal-db-tbody');
+      const emptyEl = document.getElementById('file-modal-db-empty');
+      const emptyMsg = document.getElementById('file-modal-db-empty-msg');
+
+      if (!queryInput || !currentModalFilePath) return;
+      const sql = queryInput.value.trim();
+      if (!sql) return;
+
+      const origBtnHtml = runBtn ? runBtn.innerHTML : '';
+      if (runBtn) {
+        runBtn.disabled = true;
+        runBtn.innerHTML = '<span class="animate-spin">⟳</span> <span>Running...</span>';
+      }
+      if (statusText) statusText.textContent = 'Executing query...';
+      if (statusStats) statusStats.textContent = '';
+      if (emptyEl) emptyEl.classList.add('hidden');
+
+      try {
+        const payload = {
+          file: currentModalFilePath,
+          query: sql,
+          tab: currentModalFileTabId || activeTabId
+        };
+        const tokenParam = sessionToken ? `?token=${encodeURIComponent(sessionToken)}` : '';
+        const res = await fetch(`/api/db/query${tokenParam}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || `HTTP ${res.status}: Query failed`);
+        }
+
+        renderDbResults(data.columns || [], data.rows || []);
+
+        if (statusText) {
+          statusText.innerHTML = `<span class="text-emerald-400">✓ Query OK:</span> <span class="text-slate-300 font-mono">${escapeHtml(sql.length > 60 ? sql.slice(0, 57) + '...' : sql)}</span>`;
+        }
+        if (statusStats) {
+          statusStats.textContent = `${data.count} row${data.count === 1 ? '' : 's'} (${data.execution_time_ms} ms)`;
+        }
+      } catch (err) {
+        if (thead) thead.innerHTML = '';
+        if (tbody) tbody.innerHTML = '';
+        if (emptyEl) {
+          emptyEl.classList.remove('hidden');
+          if (emptyMsg) emptyMsg.textContent = err.message || 'Query execution failed';
+        }
+        if (statusText) {
+          statusText.innerHTML = `<span class="text-red-400 font-semibold">✕ Error:</span> <span class="text-red-300">${escapeHtml(err.message)}</span>`;
+        }
+      } finally {
+        if (runBtn) {
+          runBtn.disabled = false;
+          runBtn.innerHTML = origBtnHtml;
+        }
+      }
+    }
+
+    function renderDbResults(columns, rows) {
+      const thead = document.getElementById('file-modal-db-thead');
+      const tbody = document.getElementById('file-modal-db-tbody');
+      const emptyEl = document.getElementById('file-modal-db-empty');
+      const emptyMsg = document.getElementById('file-modal-db-empty-msg');
+      if (!thead || !tbody) return;
+
+      thead.innerHTML = '';
+      tbody.innerHTML = '';
+
+      if (!columns || columns.length === 0) {
+        if (emptyEl) {
+          emptyEl.classList.remove('hidden');
+          if (emptyMsg) emptyMsg.textContent = 'Query executed successfully. (0 columns)';
+        }
+        return;
+      }
+
+      // Render Header
+      const headerRow = document.createElement('tr');
+      headerRow.className = 'border-b border-slate-700/80 bg-slate-900/90';
+
+      const thIdx = document.createElement('th');
+      thIdx.className = 'px-3 py-2 text-slate-500 font-semibold text-[11px] select-none text-right w-12 border-r border-slate-800/80';
+      thIdx.textContent = '#';
+      headerRow.appendChild(thIdx);
+
+      columns.forEach(col => {
+        const th = document.createElement('th');
+        th.className = 'px-3 py-2 text-slate-300 font-semibold text-xs tracking-wider whitespace-nowrap border-r border-slate-800/80 last:border-r-0';
+        th.textContent = col;
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+
+      if (!rows || rows.length === 0) {
+        if (emptyEl) {
+          emptyEl.classList.remove('hidden');
+          if (emptyMsg) emptyMsg.textContent = 'Query returned 0 rows.';
+        }
+        return;
+      }
+
+      if (emptyEl) emptyEl.classList.add('hidden');
+
+      // Render Rows
+      rows.forEach((row, idx) => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-slate-800/40 transition border-b border-slate-800/60 font-mono text-xs';
+
+        const tdIdx = document.createElement('td');
+        tdIdx.className = 'px-3 py-1.5 text-slate-500 select-none text-right border-r border-slate-800/80 bg-slate-950/30';
+        tdIdx.textContent = idx + 1;
+        tr.appendChild(tdIdx);
+
+        columns.forEach(col => {
+          const td = document.createElement('td');
+          td.className = 'px-3 py-1.5 whitespace-nowrap overflow-hidden text-ellipsis max-w-xs border-r border-slate-800/80 last:border-r-0 text-slate-200 select-text';
+          const val = row[col];
+          if (val === null || val === undefined) {
+            td.innerHTML = '<span class="text-slate-500 italic select-none">NULL</span>';
+          } else if (typeof val === 'boolean') {
+            td.innerHTML = `<span class="text-amber-400 font-semibold">${val}</span>`;
+          } else if (typeof val === 'number') {
+            td.innerHTML = `<span class="text-emerald-400 font-mono">${val}</span>`;
+          } else {
+            td.textContent = String(val);
+          }
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
     }
 
     function copyModalFilePath() {
@@ -8524,7 +8936,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         parsed = urllib.parse.urlparse(self.path)
         norm_path = parsed.path.rstrip('/') or '/'
-        if norm_path in ('/api/download', '/api/preview', '/api/view', '/api/stat'):
+        if norm_path in ('/api/download', '/api/preview', '/api/view', '/api/stat', '/api/db/tables'):
             if not self.is_authenticated():
                 self.send_response(401)
                 self.send_header("Content-Type", "application/json")
@@ -8813,6 +9225,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             size = 0
             lines = None
             is_text = False
+            is_db = False
 
             try:
                 stat_res = os.stat(target_path)
@@ -8822,10 +9235,11 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
 
             if is_file:
                 ext = (os.path.basename(target_path).split('.').pop() if '.' in os.path.basename(target_path) else '').lower()
+                is_db = ext in {'db', 'sqlite', 'sqlite3', 'db3', 's3db', 'sl3'}
                 BLOCKED_SET = {'exe', 'bin', 'dll', 'so', 'dylib', 'o', 'a', 'obj', 'pyc', 'pyo', 'class', 'wasm',
                                'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst', 'iso', 'dmg', 'deb', 'rpm', 'apk', 'msi',
                                'mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv', 'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a',
-                               'pdf', 'docx', 'xlsx', 'pptx', 'sqlite', 'db', 'sqlite3',
+                               'pdf', 'docx', 'xlsx', 'pptx', 'sqlite', 'db', 'sqlite3', 'db3', 's3db', 'sl3',
                                'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'tiff'}
                 if ext not in BLOCKED_SET and size <= 5 * 1024 * 1024:
                     try:
@@ -8843,6 +9257,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 "exists": True,
                 "is_dir": is_dir,
                 "is_file": is_file,
+                "is_db": is_db,
                 "size": size,
                 "lines": lines,
                 "is_text": is_text,
@@ -9023,6 +9438,62 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                     self.send_json({"success": False, "error": f"Failed reading file: {e}"}, status=500)
                 except Exception:
                     pass
+            return
+
+        elif parsed.path == '/api/db/tables':
+            if not self.is_authenticated():
+                self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
+                return
+
+            token = self.get_auth_token()
+            query = urllib.parse.parse_qs(parsed.query)
+            tab_id = query.get('tab', [None])[0]
+            session = self.server.terminals.get(token, tab_id)
+            cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
+
+            file_param = query.get('file', [None])[0] or query.get('path', [None])[0]
+            if not file_param:
+                self.send_json({"success": False, "error": "Missing file parameter"}, status=400)
+                return
+
+            target_path = resolve_fs_path(cwd, file_param)
+            if not os.path.exists(target_path) or not os.path.isfile(target_path):
+                self.send_json({"success": False, "error": f"Database file not found: {file_param}"}, status=404)
+                return
+
+            import sqlite3
+            try:
+                conn = sqlite3.connect(f"file:{target_path}?mode=ro", uri=True, timeout=5.0)
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;")
+                table_names = [row[0] for row in cursor.fetchall()]
+
+                tables = []
+                for tbl in table_names:
+                    cursor.execute(f'PRAGMA table_info("{tbl}");')
+                    cols = cursor.fetchall()
+                    columns = [{"name": c[1], "type": c[2] or "TEXT", "pk": bool(c[5])} for c in cols]
+                    row_count = 0
+                    try:
+                        cursor.execute(f'SELECT COUNT(*) FROM "{tbl}";')
+                        cnt_row = cursor.fetchone()
+                        row_count = cnt_row[0] if cnt_row else 0
+                    except Exception:
+                        pass
+                    tables.append({
+                        "name": tbl,
+                        "columns": columns,
+                        "count": row_count
+                    })
+                conn.close()
+                self.send_json({
+                    "success": True,
+                    "file": file_param,
+                    "path": target_path,
+                    "tables": tables
+                })
+            except Exception as e:
+                self.send_json({"success": False, "error": f"SQLite error: {e}"}, status=400)
             return
 
         elif parsed.path == '/health':
@@ -9406,6 +9877,76 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
                 self.send_json({"success": False, "error": f"Failed to save file: {e}"}, status=500)
+            return
+
+        elif parsed.path == '/api/db/query':
+            if not self.is_authenticated():
+                self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
+                return
+
+            content_len = int(self.headers.get('Content-Length', 0))
+            if content_len > 1024 * 1024:
+                self.send_json({"success": False, "error": "Query payload too large"}, status=413)
+                return
+
+            try:
+                body = self.rfile.read(content_len).decode('utf-8', errors='replace')
+                data = json.loads(body)
+            except Exception as e:
+                self.send_json({"success": False, "error": f"Invalid JSON payload: {e}"}, status=400)
+                return
+
+            token = self.get_auth_token()
+            tab_id = data.get('tab')
+            file_param = data.get('file') or data.get('path')
+            sql_query = (data.get('query') or '').strip()
+
+            if not file_param or not sql_query:
+                self.send_json({"success": False, "error": "Missing file or query parameter"}, status=400)
+                return
+
+            session = self.server.terminals.get(token, tab_id)
+            cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
+            target_path = resolve_fs_path(cwd, file_param)
+
+            if not os.path.exists(target_path) or not os.path.isfile(target_path):
+                self.send_json({"success": False, "error": f"Database file not found: {file_param}"}, status=404)
+                return
+
+            import sqlite3
+            import time
+            start_t = time.time()
+            try:
+                conn = sqlite3.connect(f"file:{target_path}?mode=ro", uri=True, timeout=5.0)
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute(sql_query)
+
+                rows_raw = cursor.fetchmany(500)
+                col_names = [d[0] for d in cursor.description] if cursor.description else []
+
+                rows = []
+                for r in rows_raw:
+                    row_dict = {}
+                    for col in col_names:
+                        val = r[col]
+                        if isinstance(val, bytes):
+                            val = f"<BLOB {len(val)} bytes>"
+                        row_dict[col] = val
+                    rows.append(row_dict)
+
+                elapsed_ms = round((time.time() - start_t) * 1000, 2)
+                conn.close()
+
+                self.send_json({
+                    "success": True,
+                    "columns": col_names,
+                    "rows": rows,
+                    "count": len(rows),
+                    "execution_time_ms": elapsed_ms
+                })
+            except Exception as e:
+                self.send_json({"success": False, "error": f"Query execution failed: {e}"}, status=400)
             return
 
         elif parsed.path == '/api/logout':
