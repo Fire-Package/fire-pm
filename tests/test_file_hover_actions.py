@@ -94,11 +94,11 @@ class TestFileHoverComponents:
         assert 'function renderDirListing(' in HTML_TEMPLATE
 
     def test_file_modal_syntax_highlighting_components(self):
-        assert 'highlight.js@11.9.0' in HTML_TEMPLATE
-        assert 'github-dark.min.css' in HTML_TEMPLATE
+        assert 'cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js' in HTML_TEMPLATE
+        assert 'cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css' in HTML_TEMPLATE
         assert 'function getLanguageFromPath(' in HTML_TEMPLATE
         assert 'function getLanguageLabel(' in HTML_TEMPLATE
-        assert '#file-modal-code-text .hljs' in HTML_TEMPLATE
+        assert '#file-modal-code-text code.hljs' in HTML_TEMPLATE
         match = re.search(r'async function openFileContentModal\(.*?\n    \}', HTML_TEMPLATE, re.DOTALL)
         assert match is not None
         assert "const metaEncoding = document.getElementById('file-modal-meta-encoding');" in match.group(0)
@@ -481,6 +481,25 @@ class TestFileHoverLogicWithNode:
         ]
         for p in invalid_paths:
             assert self._eval_js(f"isPathValidCandidate({json.dumps(p)})") is False, f"{p} should be rejected as path candidate"
+
+    def test_bare_directory_candidate_with_cwd_cache(self):
+        script = """
+        (() => {
+            cwdEntriesCache.set('tab-1', {
+                names: new Set(['Desktop', 'fire-package-pm', 'myenv']),
+                ts: Date.now()
+            });
+            return {
+                desktop: isPathValidCandidate('Desktop', 'tab-1'),
+                firepm: isPathValidCandidate('fire-package-pm', 'tab-1'),
+                random: isPathValidCandidate('random-unknown-dir', 'tab-1')
+            };
+        })()
+        """
+        res = self._eval_js(script)
+        assert res["desktop"] is True
+        assert res["firepm"] is True
+        assert res["random"] is False
 
     def test_quote_shell_arg(self):
         assert self._eval_js("quoteShellArg('simple.txt')") == '"simple.txt"'
