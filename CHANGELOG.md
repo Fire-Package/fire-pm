@@ -21,6 +21,8 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 * Prevent dual split terminal panes from physically flipping positions on screen when clicking panes or switching tabs ([#98](https://github.com/Fire-Package/fire-pm/issues/98), [#99](https://github.com/Fire-Package/fire-pm/pull/99)).
 
 ### Added
+* Add syntax highlighting in file content modal using Highlight.js for Python, JavaScript/Node.js, TypeScript, JSON, Bash, YAML, HTML, CSS, C/C++, Rust, Go, and more, with GitHub Dark theme and Markdown fenced code blocks highlighting support.
+* Add interactive folder browser to file content modal: clicking a directory in the terminal opens an in-modal file browser with breadcrumb navigation, sortable file/folder listing, subfolder navigation, and direct file preview on click ([#134](https://github.com/Fire-Package/fire-pm/issues/134)).
 * Support GitHub-style Markdown rendering in file content modal with Code/Preview segmented toggle, GitHub Flavored Markdown (tables, checklists, code fences), GitHub alert callouts ([!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION]), and offline fallback parser ([#130](https://github.com/Fire-Package/fire-pm/issues/130)).
 * Add interactive HTML render preview in file content modal with Code/Preview segmented toggle, sandboxed iframe viewport, Open in Tab action, and backend `/api/view?raw=1` support ([#128](https://github.com/Fire-Package/fire-pm/issues/128)).
 * Support `file://` (and `file://localhost/`) URI schemes across terminal link providers, media output detection chips, and backend filesystem endpoints ([#126](https://github.com/Fire-Package/fire-pm/issues/126)).

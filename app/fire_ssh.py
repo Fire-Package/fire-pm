@@ -949,7 +949,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-webgl@0.16.0/lib/xterm-addon-webgl.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.5.1/github-markdown-dark.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
   <style>
+    /* Syntax Highlighting overrides for file modal */
+    #file-modal-code-text .hljs,
+    #file-modal-code-text code.hljs {
+      background: transparent !important;
+      padding: 0 !important;
+      font-family: inherit !important;
+      font-size: inherit !important;
+      line-height: inherit !important;
+      color: inherit;
+    }
     /* GitHub Markdown Container styling */
     .markdown-body {
       box-sizing: border-box;
@@ -1693,8 +1705,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <span>✏️</span> <span>Edit</span>
         </button>
 
-        <button type="button" id="file-hover-btn-dir" class="hidden px-2.5 py-1 text-xs bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 hover:text-sky-200 rounded-xl transition flex items-center gap-1.5 font-medium border border-sky-500/30 shadow-sm" title="Open directory in new tab (cd)">
-          <span>📁</span> <span>Open in Tab</span>
+        <button type="button" id="file-hover-btn-dir" class="hidden px-2.5 py-1 text-xs bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 hover:text-sky-200 rounded-xl transition flex items-center gap-1.5 font-medium border border-sky-500/30 shadow-sm" title="Browse folder contents in modal">
+          <span>📁</span> <span>Browse</span>
         </button>
 
         <button type="button" id="file-hover-btn-img" class="hidden px-2.5 py-1 text-xs bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 hover:text-sky-200 rounded-xl transition flex items-center gap-1.5 font-medium border border-sky-500/30 shadow-sm" title="Preview image in Lightbox viewer">
@@ -1835,13 +1847,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <button type="button" id="file-modal-open-tab-btn" onclick="openModalFileInBrowser()" class="hidden px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Open rendered HTML in new browser tab">
             <span>↗</span> <span class="hidden sm:inline">Open in Tab</span>
           </button>
+          <button type="button" id="file-modal-cd-btn" onclick="openModalDirInTab()" class="hidden px-2.5 py-1.5 bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/30 rounded-xl text-xs text-sky-300 hover:text-sky-200 transition flex items-center gap-1" title="cd into this directory in a new terminal tab">
+            <span>⇥</span> <span class="hidden sm:inline">cd in Tab</span>
+          </button>
           <button type="button" id="file-modal-edit-btn" onclick="editModalFileInNewTab()" class="px-2.5 py-1.5 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-xl text-xs text-orange-300 hover:text-orange-200 transition flex items-center gap-1 font-medium" title="Edit file with nano in a new tab">
             <span>✏️</span> <span class="hidden sm:inline">Edit (nano)</span>
           </button>
-          <button type="button" onclick="copyModalFileContent()" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Copy file content to clipboard">
+          <button type="button" id="file-modal-copy-btn" onclick="copyModalFileContent()" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Copy file content to clipboard">
             <span>📋</span> <span id="file-modal-copy-label" class="hidden sm:inline">Copy Content</span>
           </button>
-          <button type="button" onclick="downloadModalFile()" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Download file">
+          <button type="button" id="file-modal-dl-btn" onclick="downloadModalFile()" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Download file">
             <span>↓</span> <span class="hidden sm:inline">Download</span>
           </button>
           <button type="button" onclick="closeFileContentModal()" class="ml-2 p-1.5 px-2 bg-slate-800 hover:bg-red-500/20 hover:text-red-400 rounded-xl text-slate-400 hover:border-red-500/30 border border-slate-700 text-sm transition" title="Close (Escape)">✕</button>
@@ -1877,6 +1892,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <!-- Markdown Render Preview Container -->
         <div id="file-modal-markdown-wrap" class="hidden min-w-full z-0 p-2 sm:p-4 select-text">
           <div id="file-modal-markdown-body" class="markdown-body"></div>
+        </div>
+
+        <!-- Directory Browser Container -->
+        <div id="file-modal-dir-wrap" class="hidden absolute inset-0 z-0 flex flex-col bg-slate-950 overflow-auto">
+          <!-- Breadcrumb -->
+          <div id="file-modal-breadcrumb" class="flex items-center gap-1 px-4 py-2.5 border-b border-slate-800/80 text-xs font-mono text-slate-400 shrink-0 flex-wrap select-none bg-slate-900/60 overflow-x-auto"></div>
+          <!-- File list -->
+          <div id="file-modal-dir-list" class="flex-1 overflow-auto p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1 content-start"></div>
+          <!-- Empty state -->
+          <div id="file-modal-dir-empty" class="hidden absolute inset-0 flex items-center justify-center text-slate-500 text-sm select-none pointer-events-none">
+            <div class="text-center">
+              <div class="text-3xl mb-2">📂</div>
+              <div>Empty directory</div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -4089,7 +4119,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 const targetClean = cleanCandidatePath(text);
                 const targetStat = await fetchPathStat(targetClean, tabId);
                 if (targetStat && targetStat.is_dir) {
-                  openTabWithCommand(`cd ${targetStat.name || targetClean.split('/').pop() || targetClean}`, `cd ${quoteShellArg(targetStat.path || targetClean)}`);
+                  openFolderInModal(targetStat.path || targetClean, tabId);
                   return;
                 }
                 const cat = getFileCategory(targetClean);
@@ -4294,7 +4324,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             btnDir.onclick = (e) => {
               e.stopPropagation();
               hideFileHoverMenu();
-              openTabWithCommand(`cd ${stat.name || fileName}`, `cd ${quoteShellArg(stat.path || path)}`);
+              openFolderInModal(stat.path || path, tabId);
             };
           }
         } else if (stat.is_file) {
@@ -4337,6 +4367,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let currentModalFileContent = '';
     let currentModalFileMode = 'code';
     let currentModalFileType = 'text';
+    let currentModalDirPath = '';
+    let currentModalIsDir = false;
 
     function parseGitHubAlerts(html) {
       if (!html) return '';
@@ -4415,11 +4447,130 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       return `<p>${text}</p>`;
     }
 
+    function getLanguageFromPath(filePath) {
+      if (!filePath) return null;
+      const clean = filePath.split('?')[0].split('#')[0].replace(/\\/g, '/');
+      const fileName = clean.split('/').filter(Boolean).pop() || clean;
+      const lower = fileName.toLowerCase();
+
+      // Special filenames
+      if (lower === 'dockerfile') return 'dockerfile';
+      if (lower === 'makefile') return 'makefile';
+      if (lower === 'cmakelists.txt') return 'cmake';
+      if (['.bashrc', '.zshrc', '.bash_profile', '.profile'].includes(lower)) return 'bash';
+      if (lower.startsWith('.env')) return 'ini';
+
+      const dotIdx = lower.lastIndexOf('.');
+      if (dotIdx === -1 || dotIdx === lower.length - 1) return null;
+      const ext = lower.slice(dotIdx + 1);
+
+      const map = {
+        py: 'python',
+        pyw: 'python',
+        wsgi: 'python',
+        js: 'javascript',
+        mjs: 'javascript',
+        cjs: 'javascript',
+        jsx: 'javascript',
+        ts: 'typescript',
+        mts: 'typescript',
+        cts: 'typescript',
+        tsx: 'typescript',
+        json: 'json',
+        jsonc: 'json',
+        json5: 'json',
+        sh: 'bash',
+        bash: 'bash',
+        zsh: 'bash',
+        fish: 'bash',
+        yaml: 'yaml',
+        yml: 'yaml',
+        html: 'xml',
+        htm: 'xml',
+        xml: 'xml',
+        svg: 'xml',
+        css: 'css',
+        scss: 'scss',
+        less: 'less',
+        c: 'c',
+        h: 'c',
+        cpp: 'cpp',
+        cc: 'cpp',
+        cxx: 'cpp',
+        hpp: 'cpp',
+        rs: 'rust',
+        go: 'go',
+        sql: 'sql',
+        md: 'markdown',
+        markdown: 'markdown',
+        toml: 'ini',
+        ini: 'ini',
+        conf: 'ini',
+        cfg: 'ini',
+        java: 'java',
+        php: 'php',
+        rb: 'ruby',
+        swift: 'swift',
+        kt: 'kotlin',
+        dart: 'dart',
+        lua: 'lua'
+      };
+
+      return map[ext] || null;
+    }
+
+    function getLanguageLabel(lang, filePath) {
+      const labels = {
+        python: 'Python',
+        javascript: 'JavaScript (Node.js)',
+        typescript: 'TypeScript',
+        json: 'JSON',
+        bash: 'Shell / Bash',
+        yaml: 'YAML',
+        xml: 'HTML / XML',
+        css: 'CSS',
+        scss: 'SCSS',
+        c: 'C',
+        cpp: 'C++',
+        rust: 'Rust',
+        go: 'Go',
+        sql: 'SQL',
+        markdown: 'Markdown',
+        dockerfile: 'Dockerfile',
+        makefile: 'Makefile',
+        ini: 'Config / INI'
+      };
+      if (lang && labels[lang]) return labels[lang];
+      if (filePath) {
+        const clean = filePath.split('?')[0].split('#')[0];
+        const ext = clean.split('.').pop();
+        if (ext && ext !== clean) return ext.toUpperCase();
+      }
+      return 'Plain Text';
+    }
+
     function renderMarkdownContent(md) {
       if (!md) return '';
       let rendered = '';
       if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
         try {
+          if (typeof hljs !== 'undefined' && !window._markedHljsConfigured) {
+            window._markedHljsConfigured = true;
+            marked.use({
+              renderer: {
+                code(code, lang) {
+                  const language = (lang && hljs.getLanguage(lang)) ? lang : null;
+                  let highlighted = code;
+                  try {
+                    highlighted = language ? hljs.highlight(code, { language, ignoreIllegals: true }).value : (hljs.highlightAuto(code).value || code);
+                  } catch (_) {
+                    highlighted = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                  }
+                  return `<pre><code class="hljs ${language ? `language-${language}` : ''}">${highlighted}</code></pre>`;
+                }
+              }
+            });
+          }
           rendered = marked.parse(md, { gfm: true, breaks: true });
         } catch(e) {
           console.debug('marked.parse error, using fallback', e);
@@ -4440,6 +4591,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const previewFrame = document.getElementById('file-modal-preview-frame');
       const mdWrap = document.getElementById('file-modal-markdown-wrap');
       const mdBody = document.getElementById('file-modal-markdown-body');
+      const dirWrap = document.getElementById('file-modal-dir-wrap');
       const metaEncoding = document.getElementById('file-modal-meta-encoding');
 
       let isHtml = currentModalFileType === 'html';
@@ -4452,6 +4604,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (isMd) currentModalFileType = 'markdown';
         else if (isHtml) currentModalFileType = 'html';
       }
+
+      // Always hide dir wrap when switching to a file mode
+      if (dirWrap) dirWrap.classList.add('hidden');
 
       if (mode === 'preview') {
         if (btnCode) {
@@ -4492,7 +4647,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (previewWrap) previewWrap.classList.add('hidden');
         if (mdWrap) mdWrap.classList.add('hidden');
         if (codeWrap) codeWrap.classList.remove('hidden');
-        if (metaEncoding) metaEncoding.textContent = 'Mode: Source Code';
+        const detectedLang = getLanguageFromPath(currentModalFilePath);
+        const langLabel = getLanguageLabel(detectedLang, currentModalFilePath);
+        if (metaEncoding) metaEncoding.textContent = `Mode: Source Code (${langLabel})`;
       }
     }
 
@@ -4506,11 +4663,245 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       window.open(url, '_blank');
     }
 
+    function openModalDirInTab() {
+      if (!currentModalDirPath) return;
+      const parts = currentModalDirPath.split('/').filter(Boolean);
+      const dirName = parts.pop() || currentModalDirPath;
+      closeFileContentModal();
+      openTabWithCommand(`cd ${dirName}`, `cd ${quoteShellArg(currentModalDirPath)}`);
+    }
+
+    async function openFolderInModal(path, tabId) {
+      if (!path) return;
+      path = cleanCandidatePath(path);
+      hideFileHoverMenu();
+      closeImagePreviewModal();
+
+      currentModalIsDir = true;
+      currentModalDirPath = path;
+      currentModalFileTabId = tabId || activeTabId;
+      currentModalFilePath = '';
+      currentModalFileContent = '';
+      currentModalFileType = 'text';
+
+      const modal = document.getElementById('file-content-modal');
+      const titleEl = document.getElementById('file-modal-title');
+      const pathEl = document.getElementById('file-modal-path');
+      const iconEl = document.getElementById('file-modal-icon');
+      const lineBadge = document.getElementById('file-modal-line-badge');
+      const sizeBadge = document.getElementById('file-modal-size-badge');
+      const spinner = document.getElementById('file-modal-spinner');
+      const errorEl = document.getElementById('file-modal-error');
+      const errorMsg = document.getElementById('file-modal-error-msg');
+      const codeWrap = document.getElementById('file-modal-code-wrap');
+      const previewWrap = document.getElementById('file-modal-preview-wrap');
+      const mdWrap = document.getElementById('file-modal-markdown-wrap');
+      const dirWrap = document.getElementById('file-modal-dir-wrap');
+      const viewModeGroup = document.getElementById('file-modal-view-mode');
+      const openTabBtn = document.getElementById('file-modal-open-tab-btn');
+      const cdBtn = document.getElementById('file-modal-cd-btn');
+      const editBtn = document.getElementById('file-modal-edit-btn');
+      const copyBtn = document.getElementById('file-modal-copy-btn');
+      const dlBtn = document.getElementById('file-modal-dl-btn');
+      const metaLines = document.getElementById('file-modal-meta-lines');
+      const metaSize = document.getElementById('file-modal-meta-size');
+      const metaEncoding = document.getElementById('file-modal-meta-encoding');
+
+      const parts = path.split('/').filter(Boolean);
+      const dirName = parts.pop() || path;
+      if (titleEl) titleEl.textContent = dirName.endsWith('/') ? dirName : (dirName + '/');
+      if (pathEl) pathEl.textContent = path;
+      if (iconEl) iconEl.textContent = '📁';
+      if (lineBadge) lineBadge.classList.add('hidden');
+      if (sizeBadge) sizeBadge.classList.add('hidden');
+      if (modal) modal.classList.remove('hidden');
+
+      // Hide file-only toolbar elements, show dir elements
+      if (viewModeGroup) { viewModeGroup.classList.add('hidden'); viewModeGroup.classList.remove('flex'); }
+      if (openTabBtn) openTabBtn.classList.add('hidden');
+      if (cdBtn) cdBtn.classList.remove('hidden');
+      if (editBtn) editBtn.classList.add('hidden');
+      if (copyBtn) copyBtn.classList.add('hidden');
+      if (dlBtn) dlBtn.classList.add('hidden');
+
+      // Hide file content panels, show dir panel
+      if (codeWrap) codeWrap.classList.add('hidden');
+      if (previewWrap) previewWrap.classList.add('hidden');
+      if (mdWrap) mdWrap.classList.add('hidden');
+      if (dirWrap) dirWrap.classList.remove('hidden');
+
+      if (spinner) spinner.classList.remove('hidden');
+      if (errorEl) errorEl.classList.add('hidden');
+
+      if (metaEncoding) metaEncoding.textContent = 'Mode: Directory Browser';
+
+      try {
+        const dirParam = `dir=${encodeURIComponent(path)}`;
+        const tabParam = (tabId || activeTabId) ? `tab=${encodeURIComponent(tabId || activeTabId)}` : '';
+        const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+        const qs = [dirParam, tabParam, tokenParam].filter(Boolean).join('&');
+        const res = await fetch(`/api/suggest?${qs}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to list directory`);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Failed to list directory');
+
+        currentModalDirPath = data.dir || path;
+        if (pathEl) pathEl.textContent = currentModalDirPath;
+        buildBreadcrumb(currentModalDirPath);
+        renderDirListing(data.items || [], currentModalDirPath);
+
+        const count = (data.items || []).length;
+        if (metaLines) metaLines.textContent = `${count} item${count !== 1 ? 's' : ''}`;
+        if (metaSize) metaSize.textContent = '';
+      } catch (err) {
+        if (errorEl) errorEl.classList.remove('hidden');
+        if (errorMsg) errorMsg.textContent = err.message || 'Unable to list directory';
+      } finally {
+        if (spinner) spinner.classList.add('hidden');
+      }
+    }
+
+    function buildBreadcrumb(dirPath) {
+      const breadcrumb = document.getElementById('file-modal-breadcrumb');
+      if (!breadcrumb) return;
+      breadcrumb.innerHTML = '';
+
+      if (!dirPath) return;
+
+      const isAbs = dirPath.startsWith('/');
+      const cleanPath = dirPath.replace(/\/+$/, '');
+      const parts = cleanPath.split('/').filter(Boolean);
+
+      const items = [];
+      if (isAbs) {
+        items.push({ name: '/', path: '/' });
+      }
+
+      let curAcc = '';
+      for (let i = 0; i < parts.length; i++) {
+        const seg = parts[i];
+        curAcc = isAbs ? `${curAcc}/${seg}` : (curAcc ? `${curAcc}/${seg}` : seg);
+        items.push({ name: seg, path: curAcc });
+      }
+
+      if (items.length === 0) {
+        items.push({ name: '/', path: '/' });
+      }
+
+      items.forEach((item, idx) => {
+        const isLast = idx === items.length - 1;
+        if (idx > 0) {
+          const sep = document.createElement('span');
+          sep.textContent = '/';
+          sep.className = 'text-slate-600 select-none mx-1 text-[11px]';
+          breadcrumb.appendChild(sep);
+        }
+
+        if (isLast) {
+          const span = document.createElement('span');
+          span.textContent = item.name;
+          span.className = 'text-orange-300 font-semibold truncate max-w-[14rem]';
+          span.title = item.path;
+          breadcrumb.appendChild(span);
+        } else {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.textContent = item.name;
+          btn.className = 'hover:text-orange-300 text-slate-400 transition truncate max-w-[12rem] cursor-pointer underline-offset-2 hover:underline';
+          btn.title = item.path;
+          btn.onclick = () => openFolderInModal(item.path, currentModalFileTabId);
+          breadcrumb.appendChild(btn);
+        }
+      });
+    }
+
+    function renderDirListing(items, dirPath) {
+      const list = document.getElementById('file-modal-dir-list');
+      const emptyEl = document.getElementById('file-modal-dir-empty');
+      if (!list) return;
+      list.innerHTML = '';
+
+      if (!items || items.length === 0) {
+        if (emptyEl) emptyEl.classList.remove('hidden');
+        return;
+      }
+      if (emptyEl) emptyEl.classList.add('hidden');
+
+      const sorted = [...items].sort((a, b) => {
+        if (a.is_dir && !b.is_dir) return -1;
+        if (!a.is_dir && b.is_dir) return 1;
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      });
+
+      const baseClean = dirPath.replace(/\/+$/, '');
+
+      sorted.forEach(item => {
+        const fullPath = (baseClean === '' || baseClean === '/') ? `/${item.name}` : `${baseClean}/${item.name}`;
+        const cat = item.is_dir ? null : getFileCategory(item.name);
+        const icon = item.is_dir ? '📁' : (
+          cat && cat.isImage ? '🖼️' :
+          cat && cat.isVideo ? '🎬' :
+          cat && cat.isAudio ? '🎵' :
+          cat && cat.isHtml ? '🌐' :
+          cat && cat.isMarkdown ? '📖' :
+          cat && cat.badge === 'ARCHIVE' ? '📦' :
+          cat && cat.badge === 'BINARY' ? '⚙️' : '📄'
+        );
+
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = `w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-xl bg-slate-900/60 hover:bg-slate-800/90 border border-slate-800/80 transition group select-none ${item.is_dir ? 'hover:border-sky-500/40' : 'hover:border-orange-500/30'}`;
+
+        const iconSpan = document.createElement('span');
+        iconSpan.textContent = icon;
+        iconSpan.className = 'text-base shrink-0';
+
+        const info = document.createElement('div');
+        info.className = 'min-w-0 flex-1';
+
+        const nameSpan = document.createElement('div');
+        nameSpan.textContent = item.name + (item.is_dir ? '/' : '');
+        nameSpan.className = `text-xs font-mono truncate ${item.is_dir ? 'text-sky-300 group-hover:text-sky-200 font-medium' : 'text-slate-200 group-hover:text-white'}`;
+        info.appendChild(nameSpan);
+
+        if (!item.is_dir && item.size !== undefined && item.size !== null) {
+          const sizeSpan = document.createElement('div');
+          sizeSpan.textContent = formatBytes(item.size);
+          sizeSpan.className = 'text-[10px] text-slate-500 font-mono';
+          info.appendChild(sizeSpan);
+        }
+
+        card.appendChild(iconSpan);
+        card.appendChild(info);
+
+        if (item.is_dir) {
+          const arrow = document.createElement('span');
+          arrow.textContent = '›';
+          arrow.className = 'text-slate-600 group-hover:text-sky-400 font-bold text-sm transition shrink-0';
+          card.appendChild(arrow);
+          card.onclick = () => openFolderInModal(fullPath, currentModalFileTabId);
+        } else {
+          card.onclick = () => {
+            if (cat && (cat.isImage || cat.isVideo || cat.isAudio)) {
+              closeFileContentModal();
+              openImagePreviewModal(fullPath, currentModalFileTabId);
+            } else {
+              openFileContentModal(fullPath, currentModalFileTabId, null, (cat && (cat.isHtml || cat.isMarkdown)) ? 'preview' : 'code');
+            }
+          };
+        }
+
+        list.appendChild(card);
+      });
+    }
+
     async function openFileContentModal(path, tabId, statData, initialMode = null) {
       if (!path) return;
       path = cleanCandidatePath(path);
       hideFileHoverMenu();
       closeImagePreviewModal();
+      currentModalIsDir = false;
+      currentModalDirPath = '';
       currentModalFilePath = path;
       currentModalFileTabId = tabId || activeTabId;
 
@@ -4529,6 +4920,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const metaSize = document.getElementById('file-modal-meta-size');
       const viewModeGroup = document.getElementById('file-modal-view-mode');
       const openTabBtn = document.getElementById('file-modal-open-tab-btn');
+      const cdBtn = document.getElementById('file-modal-cd-btn');
+      const editBtn = document.getElementById('file-modal-edit-btn');
+      const copyBtn = document.getElementById('file-modal-copy-btn');
+      const dlBtn = document.getElementById('file-modal-dl-btn');
+      const dirWrap = document.getElementById('file-modal-dir-wrap');
       const previewFrame = document.getElementById('file-modal-preview-frame');
       const mdBody = document.getElementById('file-modal-markdown-body');
 
@@ -4542,6 +4938,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (titleEl) titleEl.textContent = fileName;
       if (pathEl) pathEl.textContent = path;
       if (iconEl) iconEl.textContent = isHtml ? '🌐' : (isMd ? '📖' : '📄');
+      if (lineBadge) lineBadge.classList.remove('hidden');
+      if (sizeBadge) sizeBadge.classList.remove('hidden');
+      if (cdBtn) cdBtn.classList.add('hidden');
+      if (editBtn) editBtn.classList.remove('hidden');
+      if (copyBtn) copyBtn.classList.remove('hidden');
+      if (dlBtn) dlBtn.classList.remove('hidden');
+      if (dirWrap) dirWrap.classList.add('hidden');
       if (modal) modal.classList.remove('hidden');
 
       if (hasPreview) {
@@ -4600,8 +5003,31 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           lineNums += (i === 1 ? '' : '\n') + i;
         }
         if (lineNumEl) lineNumEl.textContent = lineNums;
+
+        const displayCode = (hasTrailingNewline && rawLines.length > 1) ? normalized.slice(0, -1) : normalized;
+        const detectedLang = getLanguageFromPath(path);
+        const langLabel = getLanguageLabel(detectedLang, path);
+        if (metaEncoding && currentModalFileMode === 'code') {
+          metaEncoding.textContent = `Mode: Source Code (${langLabel})`;
+        }
+
         if (codeTextEl) {
-          codeTextEl.textContent = (hasTrailingNewline && rawLines.length > 1) ? normalized.slice(0, -1) : normalized;
+          if (typeof hljs !== 'undefined' && displayCode) {
+            try {
+              let highlightedVal = '';
+              if (detectedLang && hljs.getLanguage(detectedLang)) {
+                highlightedVal = hljs.highlight(displayCode, { language: detectedLang, ignoreIllegals: true }).value;
+              } else {
+                highlightedVal = hljs.highlightAuto(displayCode).value;
+              }
+              codeTextEl.innerHTML = `<code class="hljs ${detectedLang ? `language-${detectedLang}` : ''}">${highlightedVal}</code>`;
+            } catch (err) {
+              console.debug('hljs highlight error', err);
+              codeTextEl.textContent = displayCode;
+            }
+          } else {
+            codeTextEl.textContent = displayCode;
+          }
         }
 
         if (hasPreview && currentModalFileMode === 'preview') {
@@ -4624,7 +5050,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const modal = document.getElementById('file-content-modal');
       const previewFrame = document.getElementById('file-modal-preview-frame');
       const mdBody = document.getElementById('file-modal-markdown-body');
+      const dirWrap = document.getElementById('file-modal-dir-wrap');
+      const cdBtn = document.getElementById('file-modal-cd-btn');
+      const editBtn = document.getElementById('file-modal-edit-btn');
+      const copyBtn = document.getElementById('file-modal-copy-btn');
+      const dlBtn = document.getElementById('file-modal-dl-btn');
+
       if (modal) modal.classList.add('hidden');
+      if (dirWrap) dirWrap.classList.add('hidden');
+      if (cdBtn) cdBtn.classList.add('hidden');
+      if (editBtn) editBtn.classList.remove('hidden');
+      if (copyBtn) copyBtn.classList.remove('hidden');
+      if (dlBtn) dlBtn.classList.remove('hidden');
+
       if (previewFrame) {
         previewFrame.removeAttribute('srcdoc');
         previewFrame.srcdoc = '';
@@ -4632,13 +5070,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (mdBody) mdBody.innerHTML = '';
       currentModalFileContent = '';
       currentModalFilePath = '';
+      currentModalDirPath = '';
+      currentModalIsDir = false;
       currentModalFileType = 'text';
       setFileModalViewMode('code');
     }
 
     function copyModalFilePath() {
-      if (!currentModalFilePath) return;
-      navigator.clipboard.writeText(currentModalFilePath).then(() => {
+      const p = currentModalDirPath || currentModalFilePath;
+      if (!p) return;
+      navigator.clipboard.writeText(p).then(() => {
         showToast('Path copied to clipboard!');
       }).catch(() => {
         showToast(currentModalFilePath);
