@@ -80,6 +80,26 @@ class TestFileHoverComponents:
         assert 'function parseGitHubAlerts(' in HTML_TEMPLATE
         assert 'function renderMarkdownFallback(' in HTML_TEMPLATE
 
+    def test_file_modal_dir_components(self):
+        assert 'id="file-modal-dir-wrap"' in HTML_TEMPLATE
+        assert 'id="file-modal-breadcrumb"' in HTML_TEMPLATE
+        assert 'id="file-modal-dir-list"' in HTML_TEMPLATE
+        assert 'id="file-modal-dir-empty"' in HTML_TEMPLATE
+        assert 'id="file-modal-cd-btn"' in HTML_TEMPLATE
+        assert 'id="file-modal-copy-btn"' in HTML_TEMPLATE
+        assert 'id="file-modal-dl-btn"' in HTML_TEMPLATE
+        assert 'function openModalDirInTab(' in HTML_TEMPLATE
+        assert 'function openFolderInModal(' in HTML_TEMPLATE
+        assert 'function buildBreadcrumb(' in HTML_TEMPLATE
+        assert 'function renderDirListing(' in HTML_TEMPLATE
+
+    def test_file_modal_syntax_highlighting_components(self):
+        assert 'highlight.js@11.9.0' in HTML_TEMPLATE
+        assert 'github-dark.min.css' in HTML_TEMPLATE
+        assert 'function getLanguageFromPath(' in HTML_TEMPLATE
+        assert 'function getLanguageLabel(' in HTML_TEMPLATE
+        assert '#file-modal-code-text .hljs' in HTML_TEMPLATE
+
     def test_hover_menu_javascript_functions(self):
         assert 'function registerFileLinkProvider(' in HTML_TEMPLATE
         assert 'function getFileCategory(' in HTML_TEMPLATE
@@ -555,3 +575,137 @@ class TestFileHoverLogicWithNode:
         assert res["state3"]["mdWrapHidden"] is False
         assert res["state3"]["codeWrapHidden"] is True
         assert res["state3"]["hasMd"] is True
+
+    def test_build_breadcrumb_segments(self):
+        script = """
+        (() => {
+            function getBreadcrumbItems(dirPath) {
+                if (!dirPath) return [];
+                const isAbs = dirPath.startsWith('/');
+                const cleanPath = dirPath.replace(/\\/+$/, '');
+                const parts = cleanPath.split('/').filter(Boolean);
+
+                const items = [];
+                if (isAbs) {
+                    items.push({ name: '/', path: '/' });
+                }
+
+                let curAcc = '';
+                for (let i = 0; i < parts.length; i++) {
+                    const seg = parts[i];
+                    curAcc = isAbs ? `${curAcc}/${seg}` : (curAcc ? `${curAcc}/${seg}` : seg);
+                    items.push({ name: seg, path: curAcc });
+                }
+
+                if (items.length === 0) {
+                    items.push({ name: '/', path: '/' });
+                }
+                return items;
+            }
+
+            return {
+                root: getBreadcrumbItems('/'),
+                absPath: getBreadcrumbItems('/root/fire-package-pm'),
+                relPath: getBreadcrumbItems('app/components')
+            };
+        })()
+        """
+        res = self._eval_js(script)
+        assert res["root"] == [{"name": "/", "path": "/"}]
+        assert res["absPath"] == [
+            {"name": "/", "path": "/"},
+            {"name": "root", "path": "/root"},
+            {"name": "fire-package-pm", "path": "/root/fire-package-pm"}
+        ]
+        assert res["relPath"] == [
+            {"name": "app", "path": "app"},
+            {"name": "components", "path": "app/components"}
+        ]
+
+    def test_dir_listing_sort_order(self):
+        script = """
+        (() => {
+            const items = [
+                { name: 'README.md', is_dir: false },
+                { name: 'src', is_dir: true },
+                { name: 'package.json', is_dir: false },
+                { name: 'app', is_dir: true },
+                { name: '.gitignore', is_dir: false }
+            ];
+
+            const sorted = [...items].sort((a, b) => {
+                if (a.is_dir && !b.is_dir) return -1;
+                if (!a.is_dir && b.is_dir) return 1;
+                return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+            });
+
+            return sorted.map(i => ({ name: i.name, is_dir: i.is_dir }));
+        })()
+        """
+        res = self._eval_js(script)
+        names = [item["name"] for item in res]
+        assert names == ["app", "src", ".gitignore", "package.json", "README.md"]
+
+    def test_get_language_from_path(self):
+        script = """
+        (() => {
+            return {
+                py: getLanguageFromPath('/root/server.py'),
+                wsgi: getLanguageFromPath('app/wsgi.pyw'),
+                js: getLanguageFromPath('index.js'),
+                mjs: getLanguageFromPath('/app/module.mjs'),
+                ts: getLanguageFromPath('src/main.ts'),
+                tsx: getLanguageFromPath('components/App.tsx'),
+                json: getLanguageFromPath('package.json'),
+                sh: getLanguageFromPath('deploy.sh'),
+                bashrc: getLanguageFromPath('/root/.bashrc'),
+                env: getLanguageFromPath('.env.production'),
+                docker: getLanguageFromPath('Dockerfile'),
+                makefile: getLanguageFromPath('Makefile'),
+                yaml: getLanguageFromPath('docker-compose.yml'),
+                rust: getLanguageFromPath('main.rs'),
+                go: getLanguageFromPath('server.go'),
+                unknown: getLanguageFromPath('notes.txt')
+            };
+        })()
+        """
+        res = self._eval_js(script)
+        assert res["py"] == "python"
+        assert res["wsgi"] == "python"
+        assert res["js"] == "javascript"
+        assert res["mjs"] == "javascript"
+        assert res["ts"] == "typescript"
+        assert res["tsx"] == "typescript"
+        assert res["json"] == "json"
+        assert res["sh"] == "bash"
+        assert res["bashrc"] == "bash"
+        assert res["env"] == "ini"
+        assert res["docker"] == "dockerfile"
+        assert res["makefile"] == "makefile"
+        assert res["yaml"] == "yaml"
+        assert res["rust"] == "rust"
+        assert res["go"] == "go"
+        assert res["unknown"] is None
+
+    def test_get_language_label(self):
+        script = """
+        (() => {
+            return {
+                py: getLanguageLabel('python', 'test.py'),
+                js: getLanguageLabel('javascript', 'app.js'),
+                ts: getLanguageLabel('typescript', 'types.ts'),
+                json: getLanguageLabel('json', 'data.json'),
+                bash: getLanguageLabel('bash', 'run.sh'),
+                unknown: getLanguageLabel(null, 'file.xyz'),
+                plain: getLanguageLabel(null, 'plain')
+            };
+        })()
+        """
+        res = self._eval_js(script)
+        assert res["py"] == "Python"
+        assert res["js"] == "JavaScript (Node.js)"
+        assert res["ts"] == "TypeScript"
+        assert res["json"] == "JSON"
+        assert res["bash"] == "Shell / Bash"
+        assert res["unknown"] == "XYZ"
+        assert res["plain"] == "Plain Text"
