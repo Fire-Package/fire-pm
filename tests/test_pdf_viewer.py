@@ -37,6 +37,13 @@ class TestPdfViewerModal(unittest.TestCase):
         self.assertIn("const pct = Math.min(100, Math.round((receivedBytes / totalBytes) * 100));", self.content)
         self.assertIn("URL.createObjectURL(pdfBlob)", self.content)
 
+    def test_pdf_modal_located_inside_file_content_modal(self):
+        """Verify #file-modal-pdf-wrap is inside #file-content-modal viewport and not inside image preview modal."""
+        file_modal_start = self.content.find('id="file-content-modal"')
+        file_modal_end = self.content.find('id="term-context-menu"')
+        pdf_wrap_pos = self.content.find('id="file-modal-pdf-wrap"')
+        self.assertTrue(file_modal_start < pdf_wrap_pos < file_modal_end, "PDF wrap must be inside #file-content-modal")
+
     def test_open_tab_and_fallback_actions_available(self):
         """Verify openTabBtn is not hidden in PDF mode, giving users an escape hatch."""
         self.assertIn("if (openTabBtn) openTabBtn.classList.remove('hidden');", self.content)

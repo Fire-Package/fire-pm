@@ -1884,27 +1884,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <div id="image-modal-audio-meta" class="text-xs text-slate-400 font-mono mb-5">Audio Track</div>
           <audio id="image-modal-audio" class="w-full focus:outline-none rounded" controls autoplay preload="metadata"></audio>
         </div>
-
-        <!-- PDF Viewer Container -->
-        <div id="file-modal-pdf-wrap" class="hidden absolute inset-0 z-0 flex flex-col bg-slate-950">
-          <!-- Loading overlay -->
-          <div id="file-modal-pdf-loading" class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950 select-none p-6 text-center">
-            <div class="text-3xl mb-4">📕</div>
-            <div class="text-sm text-slate-300 font-mono mb-4">Loading PDF<span id="file-modal-pdf-loading-name" class="text-orange-400 font-semibold"></span>…</div>
-            <!-- Progress bar track -->
-            <div id="file-modal-pdf-bar-track" class="w-64 max-w-full h-2 bg-slate-800 rounded-full overflow-hidden relative shadow-inner">
-              <div id="file-modal-pdf-progress" class="h-full bg-orange-500 rounded-full transition-all duration-150 ease-out" style="width:0%"></div>
-            </div>
-            <div id="file-modal-pdf-loading-hint" class="text-xs text-slate-400 font-mono mt-3">Connecting to server…</div>
-            <!-- Fallback & Error Actions (hidden by default) -->
-            <div id="file-modal-pdf-actions" class="hidden flex flex-wrap items-center justify-center gap-2 mt-5">
-              <button type="button" id="file-modal-pdf-retry-btn" class="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs font-mono rounded-lg transition">Retry</button>
-              <button type="button" onclick="openModalFileInBrowser()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono rounded-lg transition">Open in Tab</button>
-              <button type="button" onclick="downloadModalFile()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono rounded-lg transition">Download</button>
-            </div>
-          </div>
-          <iframe id="file-modal-pdf-frame" class="w-full flex-1 border-0 opacity-0 transition-opacity duration-300" title="PDF Viewer" allow="fullscreen"></iframe>
-        </div>
       </div>
 
       <!-- Bottom Status Bar -->
@@ -2085,6 +2064,27 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               <span id="file-modal-db-empty-msg">No results to display</span>
             </div>
           </div>
+        </div>
+
+        <!-- PDF Viewer Container -->
+        <div id="file-modal-pdf-wrap" class="hidden absolute inset-0 z-0 flex flex-col bg-slate-950">
+          <!-- Loading overlay -->
+          <div id="file-modal-pdf-loading" class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950 select-none p-6 text-center">
+            <div class="text-3xl mb-4">📕</div>
+            <div class="text-sm text-slate-300 font-mono mb-4">Loading PDF<span id="file-modal-pdf-loading-name" class="text-orange-400 font-semibold"></span>…</div>
+            <!-- Progress bar track -->
+            <div id="file-modal-pdf-bar-track" class="w-64 max-w-full h-2 bg-slate-800 rounded-full overflow-hidden relative shadow-inner">
+              <div id="file-modal-pdf-progress" class="h-full bg-orange-500 rounded-full transition-all duration-150 ease-out" style="width:0%"></div>
+            </div>
+            <div id="file-modal-pdf-loading-hint" class="text-xs text-slate-400 font-mono mt-3">Connecting to server…</div>
+            <!-- Fallback & Error Actions (hidden by default) -->
+            <div id="file-modal-pdf-actions" class="hidden flex flex-wrap items-center justify-center gap-2 mt-5">
+              <button type="button" id="file-modal-pdf-retry-btn" class="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs font-mono rounded-lg transition">Retry</button>
+              <button type="button" onclick="openModalFileInBrowser()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono rounded-lg transition">Open in Tab</button>
+              <button type="button" onclick="downloadModalFile()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono rounded-lg transition">Download</button>
+            </div>
+          </div>
+          <iframe id="file-modal-pdf-frame" class="w-full flex-1 border-0 opacity-0 transition-opacity duration-300" title="PDF Viewer" allow="fullscreen"></iframe>
         </div>
       </div>
 
