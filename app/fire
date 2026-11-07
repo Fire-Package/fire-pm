@@ -3143,6 +3143,40 @@ action_ssh_close() {
     done
   done
 
+  # Fallback: sweep and terminate any untracked or orphan fire_ssh.py processes
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    local opid oport otitle
+    opid=$(echo "$line" | awk '{print $1}')
+    oport=$(echo "$line" | grep -o -- '--port [0-9]\+' | awk '{print $2}')
+    otitle=$(echo "$line" | grep -o -- '--title [^ ]\+' | awk '{print $2}')
+    [[ -z "$oport" ]] && oport=$(echo "$line" | grep -o -- '-p [0-9]\+' | awk '{print $2}')
+
+    local matches=0
+    if [[ -z "$target_port" || "$target_port" == "all" ]]; then
+      matches=1
+    elif [[ -n "$oport" && "$target_port" == "$oport" ]]; then
+      matches=1
+    elif [[ -n "$otitle" && "$target_port" == "$otitle" ]]; then
+      matches=1
+    fi
+
+    if [[ $matches -eq 1 && -n "$opid" ]]; then
+      kill "$opid" 2>/dev/null || true
+      sleep 0.2
+      [[ -n "$oport" ]] && action_tunnel_close "$oport" >/dev/null 2>&1 || true
+      for sdir in "${state_dirs[@]}"; do
+        [[ -n "$oport" ]] && rm -f "$sdir/${oport}.json" "$sdir/${oport}.log"
+      done
+      if [[ $json_mode -eq 0 ]]; then
+        local disp_label="${oport:-PID $opid}"
+        [[ -n "$otitle" ]] && disp_label="$disp_label (name: $otitle)"
+        success "Closed SSH web terminal on port ${CYAN}$disp_label${NC}"
+      fi
+      closed=$((closed + 1))
+    fi
+  done < <(ps -eo pid,args 2>/dev/null | grep "[f]ire_ssh\.py start")
+
   if [[ $json_mode -eq 1 ]]; then
     echo "{\"success\":true,\"closed\":$closed}"
     return 0
@@ -3401,6 +3435,15 @@ action_ssh_start() {
     title_args+=("--title" "$session_title")
   fi
 
+  # Check and clean up any orphan daemon already bound to target port
+  local orphan_ssh_pid
+  orphan_ssh_pid=$(ps -eo pid,args 2>/dev/null | grep "[f]ire_ssh\.py start.*--port $port" | awk '{print $1}')
+  if [[ -n "$orphan_ssh_pid" ]]; then
+    warn "Detected orphan SSH daemon on port $port (PID $orphan_ssh_pid). Cleaning up..."
+    kill "$orphan_ssh_pid" 2>/dev/null || true
+    sleep 0.2
+  fi
+
   # Start Python Web Terminal daemon without exposing plaintext password in argv
   if [[ -n "$password" ]]; then
     if command -v setsid &>/dev/null; then
@@ -3433,6 +3476,20 @@ action_ssh_start() {
   fi
 
   local public_url="http://localhost:$port"
+  local title_json
+  title_json=$(printf '%s' "$session_title" | python3 -c 'import sys, json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo "\"$session_title\"")
+
+  # Record session state file immediately so PID is tracked before tunnel operations
+  cat << JSONEOF > "$SSH_STATE_DIR/${port}.json"
+{
+  "port": "$port",
+  "pid": $server_pid,
+  "url": "$public_url",
+  "title": $title_json,
+  "name": $title_json,
+  "created_at": $(date +%s)
+}
+JSONEOF
 
   if [[ $no_tunnel -eq 0 ]]; then
     local chosen_provider="$provider_opt"
@@ -3458,13 +3515,7 @@ action_ssh_start() {
 
     if read_tunnel_state "$port"; then
       public_url="$TUNNEL_STATE_URL"
-    fi
-  fi
-
-  local title_json
-  title_json=$(printf '%s' "$session_title" | python3 -c 'import sys, json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo "\"$session_title\"")
-
-  cat << JSONEOF > "$SSH_STATE_DIR/${port}.json"
+      cat << JSONEOF > "$SSH_STATE_DIR/${port}.json"
 {
   "port": "$port",
   "pid": $server_pid,
@@ -3474,6 +3525,8 @@ action_ssh_start() {
   "created_at": $(date +%s)
 }
 JSONEOF
+    fi
+  fi
 
   echo ""
   echo -e "  ${BOLD}🔥 Fire PM Remote Web Terminal (SSH)${NC}"
