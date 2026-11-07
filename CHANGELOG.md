@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 ## [Unreleased]
 
 ### Fixed
+* Fix PDF viewer loading hang on Chromium browsers and replace fake interval loading bar with real-time chunked stream progress tracking and in-memory Blob rendering ([#147](https://github.com/Fire-Package/fire-pm/issues/147)).
 * Fix video preview backdrop stuck in foreground when toggling Picture-in-Picture (`PiP`) mode by automatically closing modal and clearing blocking backdrops on `enterpictureinpicture` while keeping PiP active.
 * Prevent fatal operating-system-wide `kill(-1, SIGTERM)` signal broadcast in process management by enforcing strict `proc.pid > 1` and `pgid > 1` checks before executing `os.killpg()`, falling back safely to `proc.terminate()`.
 * Fix Highlight.js CDN URLs using cdnjs and remove CSS color override to enable syntax highlighting in file modal ([#138](https://github.com/Fire-Package/fire-pm/issues/138)).

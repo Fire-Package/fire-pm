@@ -1888,14 +1888,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <!-- PDF Viewer Container -->
         <div id="file-modal-pdf-wrap" class="hidden absolute inset-0 z-0 flex flex-col bg-slate-950">
           <!-- Loading overlay -->
-          <div id="file-modal-pdf-loading" class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950 select-none">
+          <div id="file-modal-pdf-loading" class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950 select-none p-6 text-center">
             <div class="text-3xl mb-4">📕</div>
-            <div class="text-sm text-slate-300 font-mono mb-5">Loading PDF<span id="file-modal-pdf-loading-name" class="text-orange-400"></span>…</div>
+            <div class="text-sm text-slate-300 font-mono mb-4">Loading PDF<span id="file-modal-pdf-loading-name" class="text-orange-400 font-semibold"></span>…</div>
             <!-- Progress bar track -->
-            <div class="w-64 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-              <div id="file-modal-pdf-progress" class="h-full bg-orange-500 rounded-full transition-all duration-300" style="width:0%"></div>
+            <div id="file-modal-pdf-bar-track" class="w-64 max-w-full h-2 bg-slate-800 rounded-full overflow-hidden relative shadow-inner">
+              <div id="file-modal-pdf-progress" class="h-full bg-orange-500 rounded-full transition-all duration-150 ease-out" style="width:0%"></div>
             </div>
-            <div id="file-modal-pdf-loading-hint" class="text-[11px] text-slate-500 font-mono mt-3">Fetching from server…</div>
+            <div id="file-modal-pdf-loading-hint" class="text-xs text-slate-400 font-mono mt-3">Connecting to server…</div>
+            <!-- Fallback & Error Actions (hidden by default) -->
+            <div id="file-modal-pdf-actions" class="hidden flex flex-wrap items-center justify-center gap-2 mt-5">
+              <button type="button" id="file-modal-pdf-retry-btn" class="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs font-mono rounded-lg transition">Retry</button>
+              <button type="button" onclick="openModalFileInBrowser()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono rounded-lg transition">Open in Tab</button>
+              <button type="button" onclick="downloadModalFile()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono rounded-lg transition">Download</button>
+            </div>
           </div>
           <iframe id="file-modal-pdf-frame" class="w-full flex-1 border-0 opacity-0 transition-opacity duration-300" title="PDF Viewer" allow="fullscreen"></iframe>
         </div>
@@ -5572,6 +5578,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const codeEditor = document.getElementById('file-modal-code-editor');
       const codeTextEl = document.getElementById('file-modal-code-text');
 
+      if (currentPdfAbortController) {
+        try { currentPdfAbortController.abort(); } catch (e) {}
+        currentPdfAbortController = null;
+      }
+      if (currentPdfBlobUrl) {
+        URL.revokeObjectURL(currentPdfBlobUrl);
+        currentPdfBlobUrl = null;
+      }
+
       const pdfWrap = document.getElementById('file-modal-pdf-wrap');
       const pdfFrame = document.getElementById('file-modal-pdf-frame');
       if (modal) modal.classList.add('hidden');
@@ -5581,8 +5596,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (pdfFrame) { pdfFrame.onload = null; pdfFrame.onerror = null; pdfFrame.src = ''; pdfFrame.classList.remove('opacity-100'); }
       const pdfLoading = document.getElementById('file-modal-pdf-loading');
       const pdfProgress = document.getElementById('file-modal-pdf-progress');
+      const pdfActions = document.getElementById('file-modal-pdf-actions');
+      const pdfBarTrack = document.getElementById('file-modal-pdf-bar-track');
       if (pdfLoading) pdfLoading.classList.remove('hidden');
       if (pdfProgress) pdfProgress.style.width = '0%';
+      if (pdfActions) pdfActions.classList.add('hidden');
+      if (pdfBarTrack) pdfBarTrack.classList.remove('hidden');
       if (cdBtn) cdBtn.classList.add('hidden');
       if (editBtn) editBtn.classList.remove('hidden');
       if (nanoBtn) nanoBtn.classList.remove('hidden');
@@ -5628,8 +5647,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let currentDbColumns = [];
     let currentDbRows = [];
     let isDbTableWrap = false;
+    let currentPdfAbortController = null;
+    let currentPdfBlobUrl = null;
 
-    function openPdfModal(path, tabId) {
+    async function openPdfModal(path, tabId) {
       if (!path) return;
       path = cleanCandidatePath(path);
       hideFileHoverMenu();
@@ -5640,6 +5661,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       currentModalFileTabId = tabId || activeTabId;
       currentModalFileType = 'pdf';
       isModalEditing = false;
+
+      if (currentPdfAbortController) {
+        try { currentPdfAbortController.abort(); } catch (e) {}
+        currentPdfAbortController = null;
+      }
+      if (currentPdfBlobUrl) {
+        URL.revokeObjectURL(currentPdfBlobUrl);
+        currentPdfBlobUrl = null;
+      }
 
       const modal = document.getElementById('file-content-modal');
       const titleEl = document.getElementById('file-modal-title');
@@ -5675,7 +5705,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (sizeBadge) sizeBadge.classList.add('hidden');
 
       if (viewModeGroup) { viewModeGroup.classList.add('hidden'); viewModeGroup.classList.remove('flex'); }
-      if (openTabBtn) openTabBtn.classList.add('hidden');
+      if (openTabBtn) openTabBtn.classList.remove('hidden');
       if (cdBtn) cdBtn.classList.add('hidden');
       if (editBtn) editBtn.classList.add('hidden');
       if (nanoBtn) nanoBtn.classList.add('hidden');
@@ -5696,57 +5726,119 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (metaSize) metaSize.textContent = '';
       if (metaEncoding) metaEncoding.textContent = 'Mode: PDF Viewer';
 
-      // Build the inline URL and load into iframe with progress animation
       const pdfLoading = document.getElementById('file-modal-pdf-loading');
       const pdfProgress = document.getElementById('file-modal-pdf-progress');
       const pdfLoadingName = document.getElementById('file-modal-pdf-loading-name');
       const pdfLoadingHint = document.getElementById('file-modal-pdf-loading-hint');
+      const pdfActions = document.getElementById('file-modal-pdf-actions');
+      const pdfBarTrack = document.getElementById('file-modal-pdf-bar-track');
 
       if (pdfLoading) pdfLoading.classList.remove('hidden');
-      if (pdfFrame) pdfFrame.classList.remove('opacity-100');
-
-      // Animate progress bar: 0→70% quickly, then slow crawl to 90%
-      let pdfProgressVal = 0;
-      let pdfProgressTimer = null;
-      function advancePdfProgress() {
-        if (pdfProgressVal < 70) {
-          pdfProgressVal += 4 + Math.random() * 6;
-        } else if (pdfProgressVal < 90) {
-          pdfProgressVal += 0.4 + Math.random() * 0.6;
-        } else {
-          pdfProgressVal = 90;
-          clearInterval(pdfProgressTimer);
-          return;
-        }
-        pdfProgressVal = Math.min(90, pdfProgressVal);
-        if (pdfProgress) pdfProgress.style.width = pdfProgressVal + '%';
-      }
-
-      function finishPdfProgress(success) {
-        clearInterval(pdfProgressTimer);
-        if (pdfProgress) pdfProgress.style.width = '100%';
-        if (pdfLoadingHint) pdfLoadingHint.textContent = success ? 'Rendering…' : 'Error loading PDF';
-        setTimeout(() => {
-          if (pdfLoading) pdfLoading.classList.add('hidden');
-          if (pdfFrame) pdfFrame.classList.add('opacity-100');
-          if (pdfProgress) pdfProgress.style.width = '0%';
-        }, 300);
-      }
-
-      if (pdfLoadingName) pdfLoadingName.textContent = ` ${fileName}`;
-      if (pdfLoadingHint) pdfLoadingHint.textContent = 'Fetching from server…';
-      pdfProgressVal = 0;
       if (pdfProgress) pdfProgress.style.width = '0%';
-      pdfProgressTimer = setInterval(advancePdfProgress, 120);
+      if (pdfActions) pdfActions.classList.add('hidden');
+      if (pdfBarTrack) pdfBarTrack.classList.remove('hidden');
+      if (pdfLoadingName) pdfLoadingName.textContent = ` ${fileName}`;
+      if (pdfLoadingHint) pdfLoadingHint.textContent = 'Connecting to server…';
 
       if (pdfFrame) {
-        pdfFrame.onload = () => finishPdfProgress(true);
-        pdfFrame.onerror = () => finishPdfProgress(false);
-        const fileParam = `file=${encodeURIComponent(path)}`;
-        const tabParam = (tabId || activeTabId) ? `tab=${encodeURIComponent(tabId || activeTabId)}` : '';
-        const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
-        const qs = [fileParam, tabParam, tokenParam].filter(Boolean).join('&');
-        pdfFrame.src = `/api/view?${qs}`;
+        pdfFrame.onload = null;
+        pdfFrame.onerror = null;
+        pdfFrame.src = '';
+        pdfFrame.classList.remove('opacity-100');
+      }
+
+      currentPdfAbortController = new AbortController();
+      const signal = currentPdfAbortController.signal;
+
+      const fileParam = `file=${encodeURIComponent(path)}`;
+      const tabParam = (tabId || activeTabId) ? `tab=${encodeURIComponent(tabId || activeTabId)}` : '';
+      const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+      const qs = [fileParam, tabParam, tokenParam].filter(Boolean).join('&');
+      const url = `/api/view?${qs}`;
+
+      try {
+        const response = await fetch(url, { signal });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText || 'Unable to fetch file'}`);
+        }
+
+        const contentLengthHeader = response.headers.get('content-length');
+        const totalBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : 0;
+        if (totalBytes && metaSize) {
+          metaSize.textContent = formatBytes(totalBytes);
+        }
+        if (totalBytes && sizeBadge) {
+          sizeBadge.textContent = formatBytes(totalBytes);
+          sizeBadge.classList.remove('hidden');
+        }
+
+        const reader = response.body ? response.body.getReader() : null;
+        let receivedBytes = 0;
+        let chunks = [];
+
+        if (reader) {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) {
+              chunks.push(value);
+              receivedBytes += value.length;
+              if (totalBytes > 0) {
+                const pct = Math.min(100, Math.round((receivedBytes / totalBytes) * 100));
+                if (pdfProgress) pdfProgress.style.width = `${pct}%`;
+                if (pdfLoadingHint) {
+                  pdfLoadingHint.textContent = `${formatBytes(receivedBytes)} / ${formatBytes(totalBytes)} (${pct}%)`;
+                }
+              } else {
+                if (pdfLoadingHint) {
+                  pdfLoadingHint.textContent = `${formatBytes(receivedBytes)} downloaded`;
+                }
+              }
+            }
+          }
+        } else {
+          const blobData = await response.blob();
+          chunks = [blobData];
+          receivedBytes = blobData.size;
+        }
+
+        if (pdfProgress) pdfProgress.style.width = '100%';
+        if (pdfLoadingHint) pdfLoadingHint.textContent = 'Rendering PDF…';
+
+        const pdfBlob = new Blob(chunks, { type: 'application/pdf' });
+        currentPdfBlobUrl = URL.createObjectURL(pdfBlob);
+
+        if (pdfFrame) {
+          let hasRendered = false;
+          const showPdf = () => {
+            if (hasRendered) return;
+            hasRendered = true;
+            if (pdfLoading) pdfLoading.classList.add('hidden');
+            if (pdfFrame) pdfFrame.classList.add('opacity-100');
+          };
+
+          pdfFrame.onload = showPdf;
+          pdfFrame.onerror = () => {
+            if (pdfLoadingHint) pdfLoadingHint.textContent = 'Browser blocked embedded preview. Open in tab or download below.';
+            if (pdfBarTrack) pdfBarTrack.classList.add('hidden');
+            if (pdfActions) pdfActions.classList.remove('hidden');
+          };
+
+          pdfFrame.src = currentPdfBlobUrl;
+
+          // Seamless reveal fallback for Chromium's PDF plugin where onload might not bubble
+          setTimeout(showPdf, 250);
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        console.error('[Fire SSH] Error loading PDF:', err);
+        if (pdfLoadingHint) pdfLoadingHint.textContent = `Failed to load PDF: ${err.message || err}`;
+        if (pdfBarTrack) pdfBarTrack.classList.add('hidden');
+        if (pdfActions) {
+          pdfActions.classList.remove('hidden');
+          const retryBtn = document.getElementById('file-modal-pdf-retry-btn');
+          if (retryBtn) retryBtn.onclick = () => openPdfModal(path, tabId);
+        }
       }
     }
 
