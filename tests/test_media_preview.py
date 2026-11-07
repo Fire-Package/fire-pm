@@ -203,3 +203,10 @@ class TestMediaPreviewFrontendIntegration:
         assert 'img.removeAttribute(\'src\');' in HTML_TEMPLATE
         assert 'videoEl.removeAttribute(\'src\');' in HTML_TEMPLATE
         assert 'reqId !== activePreviewSeq' in HTML_TEMPLATE
+
+    def test_pip_lifecycle_and_non_blocking_backdrop(self):
+        assert 'function closeImagePreviewModal(exitPip = false)' in HTML_TEMPLATE
+        assert 'onenterpictureinpicture' in HTML_TEMPLATE
+        assert 'onleavepictureinpicture' in HTML_TEMPLATE
+        assert 'Video playing in Picture-in-Picture' in HTML_TEMPLATE
+        assert 'Exit Picture in Picture' in HTML_TEMPLATE

@@ -94,6 +94,11 @@ class CustomNameRegressionTests(unittest.TestCase):
         self.assertIn('open_custom_tunnel "$port" "$start_ts" "$session_title"', self.cli_content)
         self.assertIn('open_quick_tunnel "$port" "$start_ts" "$session_title"', self.cli_content)
 
+    def test_cli_ssh_close_orphan_process_fallback(self):
+        """Verify action_ssh_close contains fallback to sweep and kill orphan fire_ssh.py processes."""
+        self.assertIn('ps -eo pid,args 2>/dev/null | grep "[f]ire_ssh\\.py start"', self.cli_content)
+        self.assertIn('kill "$opid" 2>/dev/null || true', self.cli_content)
+
 
 if __name__ == "__main__":
     unittest.main()

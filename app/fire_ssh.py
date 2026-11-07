@@ -16,6 +16,8 @@ import struct
 import fcntl
 import termios
 import signal
+import uuid
+import subprocess
 import socket
 import secrets
 import hashlib
@@ -695,13 +697,13 @@ class TerminalSession:
         if self.master_fd and not self.closed:
             try:
                 pgrp = os.tcgetpgrp(self.master_fd)
-                if pgrp > 0:
+                if pgrp > 1:
                     os.killpg(pgrp, sig)
                     signaled = True
             except Exception:
                 pass
         
-        if not signaled and self.pid and not self.closed:
+        if not signaled and self.pid and self.pid > 1 and not self.closed:
             try:
                 os.kill(self.pid, sig)
                 signaled = True
@@ -788,7 +790,7 @@ class TerminalSession:
                 pass
             self.master_fd = None
 
-        if self.pid:
+        if self.pid and self.pid > 1:
             try:
                 os.kill(self.pid, signal.SIGTERM)
                 time.sleep(0.05)
@@ -1745,6 +1747,62 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <button type="button" id="file-hover-btn-dl" class="px-2 py-1 text-xs bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition flex items-center gap-1 border border-slate-700/60" title="Download">
           <span>↓</span> <span>Download</span>
         </button>
+      </div>
+    </div>
+
+    <!-- Terminal Selection Quick Actions Drop-up Menu -->
+    <div id="terminal-selection-menu" class="hidden fixed z-50 bg-slate-900/95 border border-slate-700/80 rounded-xl shadow-2xl backdrop-blur-md p-1 flex items-center gap-1 select-none font-mono text-xs transition-opacity duration-150">
+      <button type="button" id="term-sel-btn-run" onclick="runSelectionCommand()" class="px-2.5 py-1 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 hover:text-orange-200 border border-orange-500/30 transition flex items-center gap-1.5 font-medium" title="Execute command in active tab directory">
+        <span>▶</span> <span>Run Command</span>
+      </button>
+      <button type="button" id="term-sel-btn-copy" onclick="copySelectionText()" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1.5" title="Copy text to clipboard">
+        <span>📋</span> <span>Copy</span>
+      </button>
+    </div>
+
+    <!-- Quick Command Execution Dialog -->
+    <div id="quick-exec-modal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 font-mono select-none">
+      <div class="relative w-full max-w-3xl bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden select-text">
+        <!-- Header -->
+        <div class="p-3 bg-slate-900/80 border-b border-slate-800 flex flex-col gap-2 shrink-0 select-none">
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="text-base">⚡</span>
+              <span class="text-xs font-semibold text-white tracking-wide">Quick Command</span>
+              <span id="quick-exec-badge" class="px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-sky-500/20 text-sky-300 border border-sky-500/30">Ready</span>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <button type="button" id="quick-exec-kill-btn" onclick="killQuickExec()" class="hidden px-2.5 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30 text-xs font-medium transition flex items-center gap-1" title="Stop process">
+                <span>⏹</span> <span>Stop</span>
+              </button>
+              <button type="button" onclick="copyQuickExecOutput()" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs transition flex items-center gap-1" title="Copy output">
+                <span>📋</span> <span class="hidden sm:inline">Copy</span>
+              </button>
+              <button type="button" onclick="closeQuickExecModal()" class="p-1 px-2 rounded-lg bg-slate-800 hover:bg-red-500/20 hover:text-red-400 text-slate-400 border border-slate-700 text-xs transition" title="Close (Escape)">✕</button>
+            </div>
+          </div>
+          <!-- Edit & Re-run Bar -->
+          <div class="flex items-center gap-2">
+            <div class="relative flex-1">
+              <input type="text" id="quick-exec-input" placeholder="Enter command to run..." onkeydown="if(event.key==='Enter') rerunQuickExec();" class="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-3 py-1.5 text-xs font-mono text-orange-300 placeholder-slate-500 focus:outline-none focus:border-orange-500/60" spellcheck="false" autocomplete="off" />
+            </div>
+            <button type="button" onclick="rerunQuickExec()" id="quick-exec-run-btn" class="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-mono font-medium flex items-center gap-1.5 transition shrink-0 shadow-sm">
+              <span>↻</span> <span>Re-run</span>
+            </button>
+          </div>
+          <div class="text-[10px] text-slate-400 truncate flex items-center gap-2">
+            <span class="text-slate-500">Directory:</span>
+            <span id="quick-exec-cwd" class="text-slate-300 font-mono truncate">/root</span>
+          </div>
+        </div>
+
+        <!-- Output Body -->
+        <div id="quick-exec-viewport" class="flex-1 overflow-auto p-4 bg-slate-950 font-mono text-xs text-slate-200 select-text leading-5">
+          <pre id="quick-exec-output" class="m-0 whitespace-pre-wrap break-words font-mono"></pre>
+          <div id="quick-exec-spinner" class="hidden mt-2 text-orange-400 text-xs flex items-center gap-2">
+            <span class="animate-spin">⟳</span> <span>Executing...</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -6179,8 +6237,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
 
       if (videoEl) {
+        if (document.pictureInPictureElement === videoEl) {
+          try { document.exitPictureInPicture(); } catch(e) {}
+        }
         videoEl.onloadedmetadata = null;
         videoEl.onerror = null;
+        videoEl.onenterpictureinpicture = null;
+        videoEl.onleavepictureinpicture = null;
         videoEl.pause();
         videoEl.removeAttribute('src');
         try { videoEl.load(); } catch(e) {}
@@ -6324,6 +6387,39 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               errBox.classList.remove('hidden');
             }
           };
+          videoEl.onenterpictureinpicture = () => {
+            const pipBtn = document.getElementById('image-modal-pip-btn');
+            if (pipBtn) {
+              pipBtn.innerHTML = '<span>↩</span> <span class="hidden sm:inline">In PiP</span>';
+              pipBtn.title = 'Exit Picture in Picture';
+            }
+            closeImagePreviewModal(false);
+            showToast('Video playing in Picture-in-Picture');
+          };
+          videoEl.onleavepictureinpicture = () => {
+            const pipBtn = document.getElementById('image-modal-pip-btn');
+            if (pipBtn) {
+              pipBtn.innerHTML = '<span>⧉</span> <span class="hidden sm:inline">PiP</span>';
+              pipBtn.title = 'Picture in Picture';
+            }
+            const modal = document.getElementById('image-preview-modal');
+            if (!modal || modal.classList.contains('hidden')) {
+              resetMediaModalState();
+            }
+          };
+
+          if (document.pictureInPictureElement === videoEl) {
+            if (pipBtn) {
+              pipBtn.innerHTML = '<span>↩</span> <span class="hidden sm:inline">In PiP</span>';
+              pipBtn.title = 'Exit Picture in Picture';
+            }
+          } else {
+            if (pipBtn) {
+              pipBtn.innerHTML = '<span>⧉</span> <span class="hidden sm:inline">PiP</span>';
+              pipBtn.title = 'Picture in Picture';
+            }
+          }
+
           videoEl.src = previewUrl;
           try { videoEl.play().catch(() => {}); } catch(e) {}
         }
@@ -6372,7 +6468,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
     }
 
-    function closeImagePreviewModal(exitPip = true) {
+    function closeImagePreviewModal(exitPip = false) {
       ++activePreviewSeq;
       const modal = document.getElementById('image-preview-modal');
       const videoEl = document.getElementById('image-modal-video');
@@ -8792,6 +8888,230 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
     }
 
+    // Terminal Selection Quick Actions & Zero-Latency Command Runner
+    let currentSelectedText = '';
+    let selMenuHideTimer = null;
+    let quickExecAbortController = null;
+    let currentQuickExecId = '';
+
+    function showTerminalSelectionMenu(x, y, text) {
+      clearTimeout(selMenuHideTimer);
+      const menu = document.getElementById('terminal-selection-menu');
+      if (!menu || !text) return;
+      currentSelectedText = text;
+
+      const menuWidth = 230;
+      const menuHeight = 36;
+      let posX = Math.max(10, Math.min(x - menuWidth / 2, window.innerWidth - menuWidth - 10));
+      let posY = y - menuHeight - 10;
+      if (posY < 10) {
+        posY = y + 18;
+      }
+      menu.style.left = `${posX}px`;
+      menu.style.top = `${posY}px`;
+      menu.classList.remove('hidden');
+    }
+
+    function hideTerminalSelectionMenu() {
+      selMenuHideTimer = setTimeout(() => {
+        const menu = document.getElementById('terminal-selection-menu');
+        if (menu) menu.classList.add('hidden');
+      }, 100);
+    }
+
+    function handleTerminalMouseUp(e) {
+      setTimeout(() => {
+        const cur = getActiveTab();
+        if (cur && cur.term && cur.term.hasSelection()) {
+          const text = cur.term.getSelection().trim();
+          if (text.length > 0) {
+            currentSelectedText = text;
+            showTerminalSelectionMenu(e.clientX, e.clientY, text);
+            return;
+          }
+        }
+        hideTerminalSelectionMenu();
+      }, 15);
+    }
+
+    function runSelectionCommand() {
+      const text = currentSelectedText;
+      hideTerminalSelectionMenu();
+      if (!text) return;
+      openQuickExecModal(text);
+    }
+
+    function copySelectionText() {
+      const text = currentSelectedText;
+      hideTerminalSelectionMenu();
+      if (!text) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          showToast('Copied to clipboard');
+        }).catch(() => {
+          fallbackCopyText(text);
+          showToast('Copied to clipboard');
+        });
+      } else {
+        fallbackCopyText(text);
+        showToast('Copied to clipboard');
+      }
+    }
+
+    function openQuickExecModal(initialCmd = '') {
+      const modal = document.getElementById('quick-exec-modal');
+      const input = document.getElementById('quick-exec-input');
+      const cwdEl = document.getElementById('quick-exec-cwd');
+      if (modal) modal.classList.remove('hidden');
+
+      const curTab = getActiveTab();
+      const cwd = curTab ? (curTab.cwd || '/root') : '/root';
+      if (cwdEl) cwdEl.textContent = cwd;
+
+      if (input) {
+        input.value = initialCmd;
+        input.focus();
+      }
+
+      if (initialCmd) {
+        executeQuickCommand(initialCmd);
+      }
+    }
+
+    function closeQuickExecModal() {
+      const modal = document.getElementById('quick-exec-modal');
+      if (modal) modal.classList.add('hidden');
+      killQuickExec();
+    }
+
+    function rerunQuickExec() {
+      const input = document.getElementById('quick-exec-input');
+      if (input && input.value.trim()) {
+        executeQuickCommand(input.value.trim());
+      }
+    }
+
+    async function executeQuickCommand(cmd) {
+      if (!cmd) return;
+      killQuickExec();
+
+      const output = document.getElementById('quick-exec-output');
+      const badge = document.getElementById('quick-exec-badge');
+      const killBtn = document.getElementById('quick-exec-kill-btn');
+      const spinner = document.getElementById('quick-exec-spinner');
+      const curTab = getActiveTab();
+      const tabId = curTab ? curTab.id : (activeTabId || 'default');
+
+      if (output) output.textContent = '';
+      if (spinner) spinner.classList.remove('hidden');
+      if (killBtn) killBtn.classList.remove('hidden');
+      if (badge) {
+        badge.textContent = 'Running...';
+        badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-amber-500/20 text-amber-300 border border-amber-500/30';
+      }
+
+      quickExecAbortController = new AbortController();
+      currentQuickExecId = 'exec_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+
+      try {
+        const tokenParam = sessionToken ? `?token=${encodeURIComponent(sessionToken)}` : '';
+        const res = await fetch(`/api/quick-exec${tokenParam}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(sessionToken ? { 'X-Auth-Token': sessionToken } : {})
+          },
+          body: JSON.stringify({
+            command: cmd,
+            tab: tabId,
+            id: currentQuickExecId
+          }),
+          signal: quickExecAbortController.signal
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          let msg = errText;
+          try { const j = JSON.parse(errText); if (j.error) msg = j.error; } catch(e) {}
+          if (output) output.textContent = `[Error ${res.status}: ${msg}]\n`;
+          if (badge) {
+            badge.textContent = 'Failed';
+            badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-red-500/20 text-red-300 border border-red-500/30';
+          }
+          return;
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        const viewport = document.getElementById('quick-exec-viewport');
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const text = decoder.decode(value, { stream: true });
+          if (output) {
+            output.textContent += text;
+            if (viewport) viewport.scrollTop = viewport.scrollHeight;
+          }
+        }
+
+        if (badge) {
+          badge.textContent = 'Completed';
+          badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          if (output) output.textContent += '\n[Execution stopped by user]\n';
+          if (badge) {
+            badge.textContent = 'Stopped';
+            badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-slate-500/20 text-slate-300 border border-slate-500/30';
+          }
+        } else {
+          if (output) output.textContent += `\n[Error: ${err.message}]\n`;
+          if (badge) {
+            badge.textContent = 'Error';
+            badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-red-500/20 text-red-300 border border-red-500/30';
+          }
+        }
+      } finally {
+        if (spinner) spinner.classList.add('hidden');
+        if (killBtn) killBtn.classList.add('hidden');
+        quickExecAbortController = null;
+      }
+    }
+
+    function killQuickExec() {
+      if (quickExecAbortController) {
+        quickExecAbortController.abort();
+        quickExecAbortController = null;
+      }
+      if (currentQuickExecId) {
+        const tokenParam = sessionToken ? `?token=${encodeURIComponent(sessionToken)}` : '';
+        fetch(`/api/quick-exec/kill${tokenParam}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(sessionToken ? { 'X-Auth-Token': sessionToken } : {})
+          },
+          body: JSON.stringify({ id: currentQuickExecId })
+        }).catch(() => {});
+        currentQuickExecId = '';
+      }
+    }
+
+    function copyQuickExecOutput() {
+      const output = document.getElementById('quick-exec-output');
+      if (!output || !output.textContent) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(output.textContent).then(() => {
+          showToast('Output copied to clipboard');
+        }).catch(() => fallbackCopyText(output.textContent));
+      } else {
+        fallbackCopyText(output.textContent);
+        showToast('Output copied to clipboard');
+      }
+    }
+
     function initGlobalShortcuts() {
       if (typeof setupImageViewerInteractions === 'function') {
         setupImageViewerInteractions();
@@ -8831,6 +9151,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             cur.lastSentRows = null;
             sendResize(cur);
           }
+        }
+      });
+
+      // Terminal Selection Quick Actions
+      const termContainer = document.getElementById('terminal-container');
+      if (termContainer) {
+        termContainer.addEventListener('mouseup', handleTerminalMouseUp);
+      }
+      document.addEventListener('mousedown', (e) => {
+        const selMenu = document.getElementById('terminal-selection-menu');
+        if (selMenu && !selMenu.classList.contains('hidden') && !selMenu.contains(e.target)) {
+          hideTerminalSelectionMenu();
         }
       });
 
@@ -8880,6 +9212,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
           hideContextMenu();
+          hideTerminalSelectionMenu();
+          const quickModal = document.getElementById('quick-exec-modal');
+          if (quickModal && !quickModal.classList.contains('hidden')) {
+            e.preventDefault();
+            closeQuickExecModal();
+            return;
+          }
         }
 
         // Alt+T or Ctrl+Shift+T: New Tab
@@ -9197,6 +9536,8 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
         self.sessions = SessionManager()
         self.terminals = TerminalSessionManager()
         self.shares = ShareTokenManager()
+        self.quick_procs = {}
+        self.quick_procs_lock = threading.Lock()
 
 
 class FireSSHServerHandler(BaseHTTPRequestHandler):
@@ -10219,7 +10560,6 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 return
 
             import sqlite3
-            import time
             start_t = time.time()
             try:
                 conn = sqlite3.connect(f"file:{target_path}?mode=ro", uri=True, timeout=5.0)
@@ -10252,6 +10592,172 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 self.send_json({"success": False, "error": f"Query execution failed: {e}"}, status=400)
+            return
+
+        elif parsed.path == '/api/quick-exec':
+            if not self.is_authenticated():
+                self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
+                return
+
+            content_len = int(self.headers.get('Content-Length', 0))
+            if content_len > 1024 * 1024:
+                self.send_json({"success": False, "error": "Payload too large"}, status=413)
+                return
+
+            try:
+                body = self.rfile.read(content_len).decode('utf-8', errors='replace')
+                data = json.loads(body)
+            except Exception as e:
+                self.send_json({"success": False, "error": f"Invalid JSON payload: {e}"}, status=400)
+                return
+
+            cmd = (data.get('command') or '').strip()
+            if not cmd:
+                self.send_json({"success": False, "error": "Command is required"}, status=400)
+                return
+
+            token = self.get_auth_token()
+            tab_id = data.get('tab')
+            session = self.server.terminals.get(token, tab_id)
+            cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
+            if not os.path.exists(cwd) or not os.path.isdir(cwd):
+                cwd = os.environ.get("HOME", "/root")
+
+            exec_id = data.get('id') or uuid.uuid4().hex[:12]
+
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    shell=True,
+                    executable='/bin/bash',
+                    cwd=cwd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    bufsize=0,
+                    preexec_fn=os.setsid
+                )
+            except Exception as e:
+                self.send_json({"success": False, "error": f"Failed to execute command: {e}"}, status=500)
+                return
+
+            quick_procs = getattr(self.server, 'quick_procs', None)
+            quick_lock = getattr(self.server, 'quick_procs_lock', None)
+            if quick_procs is not None:
+                if quick_lock:
+                    with quick_lock:
+                        quick_procs[exec_id] = proc
+                else:
+                    quick_procs[exec_id] = proc
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.send_header('Transfer-Encoding', 'chunked')
+            self.send_header('X-Exec-Id', exec_id)
+            self.send_header('X-Exec-Pid', str(proc.pid))
+            self.end_headers()
+
+            def write_chunk(data_bytes: bytes):
+                if not data_bytes:
+                    return
+                header = f"{len(data_bytes):X}\r\n".encode('ascii')
+                self.wfile.write(header + data_bytes + b"\r\n")
+                self.wfile.flush()
+
+            start_time = time.time()
+            try:
+                while True:
+                    chunk = proc.stdout.read1(4096) if hasattr(proc.stdout, 'read1') else proc.stdout.read(4096)
+                    if not chunk:
+                        break
+                    write_chunk(chunk)
+                proc.wait()
+            except (BrokenPipeError, ConnectionResetError):
+                if proc.poll() is None:
+                    try:
+                        proc_pid = getattr(proc, 'pid', None)
+                        if isinstance(proc_pid, int) and proc_pid > 1:
+                            pgid = os.getpgid(proc_pid)
+                            if pgid > 1:
+                                os.killpg(pgid, signal.SIGTERM)
+                            else:
+                                proc.terminate()
+                        else:
+                            proc.terminate()
+                    except Exception:
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            finally:
+                elapsed_ms = round((time.time() - start_time) * 1000, 1)
+                exit_code = proc.returncode if proc.returncode is not None else -1
+                summary = f"\n[Process completed: exit code {exit_code} in {elapsed_ms}ms]\n".encode('utf-8')
+                try:
+                    write_chunk(summary)
+                    self.wfile.write(b"0\r\n\r\n")
+                    self.wfile.flush()
+                except Exception:
+                    pass
+
+                if quick_procs is not None:
+                    if quick_lock:
+                        with quick_lock:
+                            quick_procs.pop(exec_id, None)
+                    else:
+                        quick_procs.pop(exec_id, None)
+            return
+
+        elif parsed.path == '/api/quick-exec/kill':
+            if not self.is_authenticated():
+                self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
+                return
+
+            content_len = int(self.headers.get('Content-Length', 0))
+            try:
+                body = self.rfile.read(content_len).decode('utf-8', errors='replace')
+                data = json.loads(body)
+            except Exception:
+                data = {}
+
+            exec_id = data.get('id')
+            if not exec_id:
+                self.send_json({"success": False, "error": "Missing id"}, status=400)
+                return
+
+            quick_procs = getattr(self.server, 'quick_procs', None)
+            quick_lock = getattr(self.server, 'quick_procs_lock', None)
+            killed = False
+            if quick_procs is not None:
+                if quick_lock:
+                    with quick_lock:
+                        proc = quick_procs.get(exec_id)
+                else:
+                    proc = quick_procs.get(exec_id)
+
+                if proc and proc.poll() is None:
+                    try:
+                        proc_pid = getattr(proc, 'pid', None)
+                        if isinstance(proc_pid, int) and proc_pid > 1:
+                            pgid = os.getpgid(proc_pid)
+                            if pgid > 1:
+                                os.killpg(pgid, signal.SIGTERM)
+                                killed = True
+                            else:
+                                proc.terminate()
+                                killed = True
+                        else:
+                            proc.terminate()
+                            killed = True
+                    except Exception:
+                        try:
+                            proc.terminate()
+                            killed = True
+                        except Exception:
+                            pass
+
+            self.send_json({"success": True, "killed": killed})
             return
 
         elif parsed.path == '/api/logout':

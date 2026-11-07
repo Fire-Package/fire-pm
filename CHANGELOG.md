@@ -9,6 +9,8 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 ## [Unreleased]
 
 ### Fixed
+* Fix video preview backdrop stuck in foreground when toggling Picture-in-Picture (`PiP`) mode by automatically closing modal and clearing blocking backdrops on `enterpictureinpicture` while keeping PiP active.
+* Prevent fatal operating-system-wide `kill(-1, SIGTERM)` signal broadcast in process management by enforcing strict `proc.pid > 1` and `pgid > 1` checks before executing `os.killpg()`, falling back safely to `proc.terminate()`.
 * Fix Highlight.js CDN URLs using cdnjs and remove CSS color override to enable syntax highlighting in file modal ([#138](https://github.com/Fire-Package/fire-pm/issues/138)).
 * Fix `ReferenceError: metaEncoding is not defined` in file content modal by declaring `metaEncoding` in `openFileContentModal` ([#136](https://github.com/Fire-Package/fire-pm/issues/136)).
 * Fix blank white screen when toggling between Code and Preview modes in file content modal by tracking explicit modal file types, stripping fragments/queries universally in path cleaning, ensuring reliable iframe srcdoc reloading, and scoping dark theme wrapper styles ([#132](https://github.com/Fire-Package/fire-pm/issues/132)).
@@ -23,6 +25,8 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 * Prevent dual split terminal panes from physically flipping positions on screen when clicking panes or switching tabs ([#98](https://github.com/Fire-Package/fire-pm/issues/98), [#99](https://github.com/Fire-Package/fire-pm/pull/99)).
 
 ### Added
+* Add text selection quick-actions menu ("Run Command" and "Copy") in Fire SSH web terminal and lightweight non-PTY command runner dialog with streamed output via `POST /api/quick-exec` and cancellation via `POST /api/quick-exec/kill`.
+* Add orphan daemon auto-sweep in `fire ssh close` and pre-emptive port recovery in `fire ssh start`, reliably terminating unrecorded `fire_ssh.py` processes and persisting session PIDs immediately upon startup.
 * Add flexible table layout, text wrap/expand toggle, click-to-copy cell values, and CSV/JSON query result export with quick LIMIT selectors (50, 100, 500) to SQLite database explorer ([#144](https://github.com/Fire-Package/fire-pm/issues/144)).
 * Add live syntax highlighting while typing/editing in file modal code editor with synchronized dual-layer syntax rendering, and introduce interactive SQLite database explorer for .db/.sqlite/.sqlite3 files featuring table listing, schema inspection, tabular row data, and read-only query runner ([#142](https://github.com/Fire-Package/fire-pm/issues/142)).
 * Add direct in-modal file editor in file content modal with `[ ✏️ Edit ]`, `[ 💾 Save ]` (Ctrl+S), `[ ✕ Cancel ]`, dynamic line numbering textarea, and authenticated atomic `POST /api/save` endpoint, alongside dedicated `[ 📟 nano ]` terminal tab button ([#140](https://github.com/Fire-Package/fire-pm/issues/140)).
