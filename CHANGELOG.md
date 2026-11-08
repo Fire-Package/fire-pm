@@ -27,6 +27,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 * Prevent dual split terminal panes from physically flipping positions on screen when clicking panes or switching tabs ([#98](https://github.com/Fire-Package/fire-pm/issues/98), [#99](https://github.com/Fire-Package/fire-pm/pull/99)).
 
 ### Added
+* Return to folder preview when closing a file opened from directory browser instead of closing the entire modal window ([#152](https://github.com/Fire-Package/fire-pm/issues/152)).
 * Add text selection quick-actions menu ("Run Command" and "Copy") in Fire SSH web terminal and lightweight non-PTY command runner dialog with streamed output via `POST /api/quick-exec` and cancellation via `POST /api/quick-exec/kill`.
 * Add orphan daemon auto-sweep in `fire ssh close` and pre-emptive port recovery in `fire ssh start`, reliably terminating unrecorded `fire_ssh.py` processes and persisting session PIDs immediately upon startup.
 * Add flexible table layout, text wrap/expand toggle, click-to-copy cell values, and CSV/JSON query result export with quick LIMIT selectors (50, 100, 500) to SQLite database explorer ([#144](https://github.com/Fire-Package/fire-pm/issues/144)).
