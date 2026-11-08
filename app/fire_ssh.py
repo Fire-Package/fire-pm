@@ -4614,6 +4614,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let currentModalFileType = 'text';
     let currentModalDirPath = '';
     let currentModalIsDir = false;
+    let modalParentDirPath = null;
+    let mediaModalParentDirPath = null;
 
     function parseGitHubAlerts(html) {
       if (!html) return '';
@@ -5138,7 +5140,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (!currentModalDirPath) return;
       const parts = currentModalDirPath.split('/').filter(Boolean);
       const dirName = parts.pop() || currentModalDirPath;
-      closeFileContentModal();
+      closeFileContentModal(true);
       openTabWithCommand(`cd ${dirName}`, `cd ${quoteShellArg(currentModalDirPath)}`);
     }
 
@@ -5146,10 +5148,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (!path) return;
       path = cleanCandidatePath(path);
       hideFileHoverMenu();
-      closeImagePreviewModal();
+      closeImagePreviewModal(false, true);
 
       currentModalIsDir = true;
       currentModalDirPath = path;
+      modalParentDirPath = null;
+      mediaModalParentDirPath = null;
       currentModalFileTabId = tabId || activeTabId;
       currentModalFilePath = '';
       currentModalFileContent = '';
@@ -5363,15 +5367,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           card.onclick = () => openFolderInModal(fullPath, currentModalFileTabId);
         } else {
           card.onclick = () => {
+            const originFolder = currentModalDirPath;
             if (cat && (cat.isImage || cat.isVideo || cat.isAudio)) {
-              closeFileContentModal();
-              openImagePreviewModal(fullPath, currentModalFileTabId);
+              closeFileContentModal(true);
+              openImagePreviewModal(fullPath, currentModalFileTabId, originFolder);
             } else if (cat && cat.isDb) {
-              openDatabaseModal(fullPath, currentModalFileTabId);
+              openDatabaseModal(fullPath, currentModalFileTabId, null, originFolder);
             } else if (cat && cat.isPdf) {
-              openPdfModal(fullPath, currentModalFileTabId);
+              openPdfModal(fullPath, currentModalFileTabId, originFolder);
             } else {
-              openFileContentModal(fullPath, currentModalFileTabId, null, (cat && (cat.isHtml || cat.isMarkdown)) ? 'preview' : 'code');
+              openFileContentModal(fullPath, currentModalFileTabId, null, (cat && (cat.isHtml || cat.isMarkdown)) ? 'preview' : 'code', originFolder);
             }
           };
         }
@@ -5380,20 +5385,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       });
     }
 
-    async function openFileContentModal(path, tabId, statData, initialMode = null) {
+    async function openFileContentModal(path, tabId, statData, initialMode = null, parentDir = null) {
       if (!path) return;
       path = cleanCandidatePath(path);
       const catCheck = getFileCategory(path);
       if (catCheck.isDb) {
-        return openDatabaseModal(path, tabId, statData);
+        return openDatabaseModal(path, tabId, statData, parentDir);
       }
       if (catCheck.isPdf) {
-        return openPdfModal(path, tabId);
+        return openPdfModal(path, tabId, parentDir);
       }
       hideFileHoverMenu();
-      closeImagePreviewModal();
+      closeImagePreviewModal(false, true);
       currentModalIsDir = false;
       currentModalDirPath = '';
+      modalParentDirPath = (parentDir !== undefined && parentDir !== null) ? parentDir : null;
       currentModalFilePath = path;
       currentModalFileTabId = tabId || activeTabId;
 
@@ -5560,8 +5566,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
     }
 
-    function closeFileContentModal() {
-      const modal = document.getElementById('file-content-modal');
+    function cleanupFileModalView() {
       const previewFrame = document.getElementById('file-modal-preview-frame');
       const mdBody = document.getElementById('file-modal-markdown-body');
       const dirWrap = document.getElementById('file-modal-dir-wrap');
@@ -5589,7 +5594,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       const pdfWrap = document.getElementById('file-modal-pdf-wrap');
       const pdfFrame = document.getElementById('file-modal-pdf-frame');
-      if (modal) modal.classList.add('hidden');
       if (dirWrap) dirWrap.classList.add('hidden');
       if (dbWrap) dbWrap.classList.add('hidden');
       if (pdfWrap) pdfWrap.classList.add('hidden');
@@ -5644,19 +5648,35 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       setFileModalViewMode('code');
     }
 
+    function closeFileContentModal(forceCloseAll = false) {
+      if (!forceCloseAll && modalParentDirPath && !currentModalIsDir) {
+        const returnDir = modalParentDirPath;
+        const returnTab = currentModalFileTabId;
+        modalParentDirPath = null;
+        cleanupFileModalView();
+        openFolderInModal(returnDir, returnTab);
+        return;
+      }
+      modalParentDirPath = null;
+      cleanupFileModalView();
+      const modal = document.getElementById('file-content-modal');
+      if (modal) modal.classList.add('hidden');
+    }
+
     let currentDbColumns = [];
     let currentDbRows = [];
     let isDbTableWrap = false;
     let currentPdfAbortController = null;
     let currentPdfBlobUrl = null;
 
-    async function openPdfModal(path, tabId) {
+    async function openPdfModal(path, tabId, parentDir = null) {
       if (!path) return;
       path = cleanCandidatePath(path);
       hideFileHoverMenu();
-      closeImagePreviewModal();
+      closeImagePreviewModal(false, true);
       currentModalIsDir = false;
       currentModalDirPath = '';
+      modalParentDirPath = (parentDir !== undefined && parentDir !== null) ? parentDir : null;
       currentModalFilePath = path;
       currentModalFileTabId = tabId || activeTabId;
       currentModalFileType = 'pdf';
@@ -5837,19 +5857,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (pdfActions) {
           pdfActions.classList.remove('hidden');
           const retryBtn = document.getElementById('file-modal-pdf-retry-btn');
-          if (retryBtn) retryBtn.onclick = () => openPdfModal(path, tabId);
+          if (retryBtn) retryBtn.onclick = () => openPdfModal(path, tabId, parentDir);
         }
       }
     }
 
-    async function openDatabaseModal(path, tabId, statData) {
+    async function openDatabaseModal(path, tabId, statData, parentDir = null) {
       if (!path) return;
       path = cleanCandidatePath(path);
       hideFileHoverMenu();
-      closeImagePreviewModal();
+      closeImagePreviewModal(false, true);
 
       currentModalIsDir = false;
       currentModalDirPath = '';
+      modalParentDirPath = (parentDir !== undefined && parentDir !== null) ? parentDir : null;
       currentModalFilePath = path;
       currentModalFileTabId = tabId || activeTabId;
       currentModalFileType = 'database';
@@ -6293,7 +6314,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (!currentModalFilePath) return;
       const p = currentModalFilePath;
       const fileName = p.split('/').pop() || p;
-      closeFileContentModal();
+      closeFileContentModal(true);
       openTabWithCommand(`edit ${fileName}`, `nano ${quoteShellArg(p)}`);
     }
 
@@ -6352,7 +6373,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (audioBox) audioBox.classList.add('hidden');
     }
 
-    function openImagePreviewModal(path, tabId) {
+    function openImagePreviewModal(path, tabId, parentDir = null) {
       if (!path) return;
       path = cleanCandidatePath(path);
       hideFileHoverMenu();
@@ -6362,6 +6383,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       currentPreviewPath = path;
       currentPreviewTabId = tabId || activeTabId;
+      mediaModalParentDirPath = (parentDir !== undefined && parentDir !== null) ? parentDir : null;
 
       const modal = document.getElementById('image-preview-modal');
       const img = document.getElementById('image-modal-img');
@@ -6561,6 +6583,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function closeImagePreviewModal(exitPip = false) {
+      const forceCloseAll = Boolean(arguments[1]);
       ++activePreviewSeq;
       const modal = document.getElementById('image-preview-modal');
       const videoEl = document.getElementById('image-modal-video');
@@ -6582,7 +6605,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (audioBox) audioBox.classList.add('hidden');
       }
 
+      const returnDir = (!forceCloseAll) ? mediaModalParentDirPath : null;
+      const returnTab = currentPreviewTabId;
+      mediaModalParentDirPath = null;
       currentPreviewPath = '';
+
+      if (returnDir) {
+        openFolderInModal(returnDir, returnTab);
+      }
     }
 
     function updateImageTransform() {
