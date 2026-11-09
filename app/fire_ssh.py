@@ -2086,6 +2086,26 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           </div>
           <iframe id="file-modal-pdf-frame" class="w-full flex-1 border-0 opacity-0 transition-opacity duration-300" title="PDF Viewer" allow="fullscreen"></iframe>
         </div>
+
+        <!-- Binary / Executable / Large File Placeholder Card -->
+        <div id="file-modal-binary-wrap" class="hidden absolute inset-0 z-0 flex flex-col items-center justify-center bg-slate-950 p-6 select-none text-center">
+          <div class="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-md w-full shadow-2xl flex flex-col items-center">
+            <span id="file-modal-binary-icon" class="text-5xl mb-3">⚙️</span>
+            <div id="file-modal-binary-title" class="text-base font-semibold text-white font-mono truncate max-w-xs mb-1">file.exe</div>
+            <div id="file-modal-binary-badge" class="px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30 mb-4">BINARY EXECUTABLE</div>
+            <p id="file-modal-binary-msg" class="text-xs text-slate-400 font-sans leading-relaxed mb-6">
+              This file contains compiled binary or executable data and cannot be displayed as plain text. Inspecting binary contents can cause out-of-memory errors.
+            </p>
+            <div class="flex items-center gap-3 w-full justify-center">
+              <button type="button" onclick="downloadModalFile()" class="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-mono font-medium transition flex items-center gap-1.5 shadow-lg shadow-orange-600/30">
+                <span>↓</span> <span>Download File</span>
+              </button>
+              <button type="button" onclick="closeFileContentModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-mono transition">
+                <span>✕</span> <span>Close</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Bottom Status Bar -->
@@ -4362,7 +4382,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                   openDatabaseModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId);
                 } else if (cat.isPdf) {
                   openPdfModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId);
-                } else if (cat.canCat || (targetStat && targetStat.is_file)) {
+                } else if ((cat.canCat || (targetStat && targetStat.is_text && !targetStat.is_binary)) && cat.type !== 'blocked') {
                   openFileContentModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId, targetStat, (cat.isHtml || cat.isMarkdown) ? 'preview' : 'code');
                 } else {
                   showFileHoverMenu(e, text, tabId, targetStat);
@@ -4574,7 +4594,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           }
         } else if (stat.is_file) {
           if (btnDir) btnDir.classList.add('hidden');
-          if (!cat.isImage && !cat.badge) {
+          if (!cat.isImage && !cat.badge && stat.is_text && !stat.is_binary && cat.type !== 'blocked') {
             if (btnCat) {
               btnCat.classList.remove('hidden');
               if (btnCatText) btnCatText.textContent = 'View File';
@@ -4589,6 +4609,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               badgeEl.textContent = `${stat.lines}L`;
               badgeEl.classList.remove('hidden');
             }
+          } else if (stat.is_binary && badgeEl && !cat.badge) {
+            badgeEl.textContent = 'BINARY';
+            badgeEl.classList.remove('hidden');
+            if (btnCat) btnCat.classList.add('hidden');
           }
         }
       }
@@ -5194,6 +5218,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (sizeBadge) sizeBadge.classList.add('hidden');
       if (modal) modal.classList.remove('hidden');
 
+      const binaryWrap = document.getElementById('file-modal-binary-wrap');
+      if (binaryWrap) binaryWrap.classList.add('hidden');
+
       // Hide file-only toolbar elements, show dir elements
       if (viewModeGroup) { viewModeGroup.classList.add('hidden'); viewModeGroup.classList.remove('flex'); }
       if (openTabBtn) openTabBtn.classList.add('hidden');
@@ -5385,6 +5412,106 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       });
     }
 
+    function renderBinaryModalCard(path, cat, stat, customMsg = null, customBadge = null) {
+      const fileName = path.split('/').pop() || path;
+      const modal = document.getElementById('file-content-modal');
+      const titleEl = document.getElementById('file-modal-title');
+      const pathEl = document.getElementById('file-modal-path');
+      const iconEl = document.getElementById('file-modal-icon');
+      const lineBadge = document.getElementById('file-modal-line-badge');
+      const sizeBadge = document.getElementById('file-modal-size-badge');
+      const spinner = document.getElementById('file-modal-spinner');
+      const errorEl = document.getElementById('file-modal-error');
+      const codeWrap = document.getElementById('file-modal-code-wrap');
+      const dirWrap = document.getElementById('file-modal-dir-wrap');
+      const dbWrap = document.getElementById('file-modal-db-wrap');
+      const pdfWrap = document.getElementById('file-modal-pdf-wrap');
+      const previewWrap = document.getElementById('file-modal-preview-wrap');
+      const mdWrap = document.getElementById('file-modal-markdown-wrap');
+      const viewModeGroup = document.getElementById('file-modal-view-mode');
+      const openTabBtn = document.getElementById('file-modal-open-tab-btn');
+      const cdBtn = document.getElementById('file-modal-cd-btn');
+      const editBtn = document.getElementById('file-modal-edit-btn');
+      const nanoBtn = document.getElementById('file-modal-nano-btn');
+      const saveBtn = document.getElementById('file-modal-save-btn');
+      const cancelBtn = document.getElementById('file-modal-cancel-edit-btn');
+      const copyBtn = document.getElementById('file-modal-copy-btn');
+      const dlBtn = document.getElementById('file-modal-dl-btn');
+      const metaLines = document.getElementById('file-modal-meta-lines');
+      const metaSize = document.getElementById('file-modal-meta-size');
+      const metaEncoding = document.getElementById('file-modal-meta-encoding');
+
+      const binaryWrap = document.getElementById('file-modal-binary-wrap');
+      const binTitle = document.getElementById('file-modal-binary-title');
+      const binIcon = document.getElementById('file-modal-binary-icon');
+      const binBadge = document.getElementById('file-modal-binary-badge');
+      const binMsg = document.getElementById('file-modal-binary-msg');
+
+      if (modal) modal.classList.remove('hidden');
+      if (spinner) spinner.classList.add('hidden');
+      if (errorEl) errorEl.classList.add('hidden');
+      if (codeWrap) codeWrap.classList.add('hidden');
+      if (dirWrap) dirWrap.classList.add('hidden');
+      if (dbWrap) dbWrap.classList.add('hidden');
+      if (pdfWrap) pdfWrap.classList.add('hidden');
+      if (previewWrap) previewWrap.classList.add('hidden');
+      if (mdWrap) mdWrap.classList.add('hidden');
+      if (viewModeGroup) { viewModeGroup.classList.add('hidden'); viewModeGroup.classList.remove('flex'); }
+      if (openTabBtn) openTabBtn.classList.add('hidden');
+      if (cdBtn) cdBtn.classList.add('hidden');
+      if (editBtn) editBtn.classList.add('hidden');
+      if (nanoBtn) nanoBtn.classList.add('hidden');
+      if (saveBtn) saveBtn.classList.add('hidden');
+      if (cancelBtn) cancelBtn.classList.add('hidden');
+      if (copyBtn) copyBtn.classList.add('hidden');
+      if (dlBtn) dlBtn.classList.remove('hidden');
+
+      const isArchive = cat && cat.badge === 'ARCHIVE';
+      const icon = isArchive ? '📦' : '⚙️';
+      const badgeText = customBadge || (isArchive ? 'ARCHIVE' : 'BINARY EXECUTABLE');
+      const msgText = customMsg || (isArchive
+        ? 'This archive cannot be displayed as plain text. Inspecting binary contents in browser memory can cause out-of-memory errors. Please download the archive.'
+        : 'This file contains compiled binary or executable data and cannot be displayed as plain text. Inspecting binary contents in browser memory can cause out-of-memory errors.');
+
+      if (titleEl) titleEl.textContent = fileName;
+      if (pathEl) pathEl.textContent = path;
+      if (iconEl) iconEl.textContent = icon;
+      if (lineBadge) lineBadge.classList.add('hidden');
+
+      const sizeStr = (stat && stat.size !== undefined && stat.size !== null) ? formatBytes(stat.size) : '--';
+      if (sizeBadge) {
+        sizeBadge.textContent = sizeStr;
+        sizeBadge.classList.remove('hidden');
+      }
+      if (metaLines) metaLines.textContent = 'Lines: Binary';
+      if (metaSize) metaSize.textContent = `Size: ${sizeStr}`;
+      if (metaEncoding) metaEncoding.textContent = `Type: ${badgeText}`;
+
+      if (binTitle) binTitle.textContent = fileName;
+      if (binIcon) binIcon.textContent = icon;
+      if (binBadge) {
+        binBadge.textContent = badgeText;
+        if (customBadge && customBadge.includes('TOO LARGE')) {
+          binBadge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-red-500/20 text-red-300 border border-red-500/30 mb-4';
+        } else {
+          binBadge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30 mb-4';
+        }
+      }
+      if (binMsg) binMsg.textContent = msgText;
+
+      if (binaryWrap) binaryWrap.classList.remove('hidden');
+
+      if (!stat || stat.size === undefined) {
+        fetchPathStat(path, currentModalFileTabId).then(st => {
+          if (st && st.size !== undefined) {
+            const sz = formatBytes(st.size);
+            if (sizeBadge) sizeBadge.textContent = sz;
+            if (metaSize) metaSize.textContent = `Size: ${sz}`;
+          }
+        }).catch(() => {});
+      }
+    }
+
     async function openFileContentModal(path, tabId, statData, initialMode = null, parentDir = null) {
       if (!path) return;
       path = cleanCandidatePath(path);
@@ -5402,6 +5529,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       modalParentDirPath = (parentDir !== undefined && parentDir !== null) ? parentDir : null;
       currentModalFilePath = path;
       currentModalFileTabId = tabId || activeTabId;
+
+      if (catCheck && catCheck.type === 'blocked') {
+        renderBinaryModalCard(path, catCheck, statData);
+        return;
+      }
+      if (statData && (statData.is_binary || (statData.is_text === false && statData.is_file))) {
+        renderBinaryModalCard(path, catCheck, statData);
+        return;
+      }
+      if (statData && statData.size > 5 * 1024 * 1024) {
+        renderBinaryModalCard(path, catCheck, statData, `File size (${formatBytes(statData.size)}) exceeds the 5 MB browser inspection limit. Use Download or terminal tools.`, `FILE TOO LARGE (${formatBytes(statData.size)})`);
+        return;
+      }
+
+      const binaryWrap = document.getElementById('file-modal-binary-wrap');
+      if (binaryWrap) binaryWrap.classList.add('hidden');
 
       const modal = document.getElementById('file-content-modal');
       const titleEl = document.getElementById('file-modal-title');
@@ -5501,9 +5644,34 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const qs = [fileParam ? `file=${fileParam}` : '', tabParam, tokenParam, 'inline=1'].filter(Boolean).join('&');
         const res = await fetch(`/api/view?${qs}`);
         if (!res.ok) {
+          if (res.status === 413) {
+            let data = {};
+            try { data = await res.json(); } catch(e) {}
+            const sz = data.size ? formatBytes(data.size) : '';
+            renderBinaryModalCard(path, catCheck, { size: data.size }, data.error || 'File exceeds the 5 MB browser inspection limit. Please use Download or terminal tools.', sz ? `FILE TOO LARGE (${sz})` : 'FILE TOO LARGE');
+            return;
+          }
+          if (res.status === 415) {
+            let data = {};
+            try { data = await res.json(); } catch(e) {}
+            renderBinaryModalCard(path, catCheck, statData, data.error || 'Binary or executable file content cannot be inspected as plain text. Please use Download.', 'BINARY EXECUTABLE');
+            return;
+          }
           throw new Error(`HTTP ${res.status}: Failed to read file`);
         }
+
+        const clHeader = res.headers.get('Content-Length');
+        const clBytes = clHeader ? parseInt(clHeader, 10) : 0;
+        if (clBytes > 5 * 1024 * 1024) {
+          renderBinaryModalCard(path, catCheck, { size: clBytes }, `File size (${formatBytes(clBytes)}) exceeds the 5 MB browser inspection limit. Use Download or terminal tools.`, `FILE TOO LARGE (${formatBytes(clBytes)})`);
+          return;
+        }
+
         const text = await res.text();
+        if (text.includes('\x00')) {
+          renderBinaryModalCard(path, catCheck, { size: text.length }, 'File contains binary null characters and cannot be displayed as plain text. Please use Download.', 'BINARY FILE');
+          return;
+        }
         currentModalFileContent = text;
 
         const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -5532,7 +5700,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         if (codeTextEl) {
-          if (typeof hljs !== 'undefined' && displayCode) {
+          if (byteSize <= 256 * 1024 && lineCount <= 3000 && typeof hljs !== 'undefined' && displayCode) {
             try {
               let highlightedVal = '';
               if (detectedLang && hljs.getLanguage(detectedLang)) {
@@ -5597,6 +5765,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (dirWrap) dirWrap.classList.add('hidden');
       if (dbWrap) dbWrap.classList.add('hidden');
       if (pdfWrap) pdfWrap.classList.add('hidden');
+      const binaryWrap = document.getElementById('file-modal-binary-wrap');
+      if (binaryWrap) binaryWrap.classList.add('hidden');
       if (pdfFrame) { pdfFrame.onload = null; pdfFrame.onerror = null; pdfFrame.src = ''; pdfFrame.classList.remove('opacity-100'); }
       const pdfLoading = document.getElementById('file-modal-pdf-loading');
       const pdfProgress = document.getElementById('file-modal-pdf-progress');
@@ -9761,6 +9931,31 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 safe_name = urllib.parse.quote(filename)
                 disposition_type = "inline" if (norm_path in ('/api/preview', '/api/view') or query.get('inline', ['0'])[0] in ('1', 'true', 'yes')) else "attachment"
                 is_raw = query.get('raw', ['0'])[0] in ('1', 'true', 'yes')
+                if norm_path == '/api/view' and not is_raw:
+                    if file_size > 5 * 1024 * 1024:
+                        self.send_response(413)
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        return
+                    ext = (filename.split('.').pop() if '.' in filename else '').lower()
+                    BLOCKED_VIEW_EXTS = {'exe', 'bin', 'dll', 'so', 'dylib', 'o', 'a', 'obj', 'pyc', 'pyo', 'class', 'wasm',
+                                         'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst', 'iso', 'dmg', 'deb', 'rpm', 'apk', 'msi'}
+                    if ext in BLOCKED_VIEW_EXTS:
+                        self.send_response(415)
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        return
+                    if file_size > 0:
+                        try:
+                            with open(target_path, 'rb') as f:
+                                sample = f.read(2048)
+                                if b'\x00' in sample or sample.startswith(b'\x7fELF') or sample.startswith(b'MZ') or sample.startswith(b'\xfe\xed\xfa') or sample.startswith(b'\xcf\xfa\xed\xfe'):
+                                    self.send_response(415)
+                                    self.send_header("Content-Type", "application/json")
+                                    self.end_headers()
+                                    return
+                        except Exception:
+                            pass
                 if disposition_type == "inline" and not is_raw:
                     if content_type == "application/octet-stream" or content_type.startswith("text/") or content_type in ("application/json", "application/javascript", "application/xml"):
                         content_type = "text/plain; charset=utf-8"
@@ -10001,6 +10196,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
+            is_binary = False
             if is_file:
                 ext = (os.path.basename(target_path).split('.').pop() if '.' in os.path.basename(target_path) else '').lower()
                 is_db = ext in {'db', 'sqlite', 'sqlite3', 'db3', 's3db', 'sl3'}
@@ -10009,16 +10205,23 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                                'mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv', 'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a',
                                'pdf', 'docx', 'xlsx', 'pptx', 'sqlite', 'db', 'sqlite3', 'db3', 's3db', 'sl3',
                                'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'tiff'}
-                if ext not in BLOCKED_SET and size <= 5 * 1024 * 1024:
+                if ext in BLOCKED_SET:
+                    is_binary = True
+                elif size > 0:
                     try:
                         with open(target_path, 'rb') as f:
                             sample = f.read(2048)
-                            if b'\x00' not in sample:
+                            if b'\x00' in sample or sample.startswith(b'\x7fELF') or sample.startswith(b'MZ') or sample.startswith(b'\xfe\xed\xfa') or sample.startswith(b'\xcf\xfa\xed\xfe'):
+                                is_binary = True
+                            elif size <= 5 * 1024 * 1024:
                                 is_text = True
                                 f.seek(0)
                                 lines = sum(1 for _ in f)
                     except Exception:
                         pass
+                elif size == 0:
+                    is_text = True
+                    lines = 0
 
             self.send_json({
                 "success": True,
@@ -10026,6 +10229,7 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 "is_dir": is_dir,
                 "is_file": is_file,
                 "is_db": is_db,
+                "is_binary": is_binary,
                 "size": size,
                 "lines": lines,
                 "is_text": is_text,
@@ -10129,6 +10333,41 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 content_type = mimetypes.guess_type(target_path)[0] or "application/octet-stream"
                 disposition_type = "inline" if (parsed.path.rstrip('/') in ('/api/preview', '/api/view') or query.get('inline', ['0'])[0] in ('1', 'true', 'yes')) else "attachment"
                 is_raw = query.get('raw', ['0'])[0] in ('1', 'true', 'yes')
+                if parsed.path.rstrip('/') == '/api/view' and not is_raw:
+                    if file_size > 5 * 1024 * 1024:
+                        self.send_json({
+                            "success": False,
+                            "error": f"File size ({file_size} bytes) exceeds the 5 MB limit for inline inspection. Please use Download.",
+                            "code": "FILE_TOO_LARGE",
+                            "size": file_size,
+                            "limit": 5 * 1024 * 1024
+                        }, status=413)
+                        return
+                    ext = (filename.split('.').pop() if '.' in filename else '').lower()
+                    BLOCKED_VIEW_EXTS = {'exe', 'bin', 'dll', 'so', 'dylib', 'o', 'a', 'obj', 'pyc', 'pyo', 'class', 'wasm',
+                                         'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst', 'iso', 'dmg', 'deb', 'rpm', 'apk', 'msi'}
+                    if ext in BLOCKED_VIEW_EXTS:
+                        self.send_json({
+                            "success": False,
+                            "error": f"Binary or executable file (.{ext}) cannot be inspected as text. Please use Download.",
+                            "code": "BINARY_FILE",
+                            "is_binary": True
+                        }, status=415)
+                        return
+                    if file_size > 0:
+                        try:
+                            with open(target_path, 'rb') as f:
+                                sample = f.read(2048)
+                                if b'\x00' in sample or sample.startswith(b'\x7fELF') or sample.startswith(b'MZ') or sample.startswith(b'\xfe\xed\xfa') or sample.startswith(b'\xcf\xfa\xed\xfe'):
+                                    self.send_json({
+                                        "success": False,
+                                        "error": "Binary or executable file content cannot be inspected as text. Please use Download.",
+                                        "code": "BINARY_FILE",
+                                        "is_binary": True
+                                    }, status=415)
+                                    return
+                        except Exception:
+                            pass
                 if disposition_type == "inline" and not is_raw:
                     if content_type == "application/octet-stream" or content_type.startswith("text/") or content_type in ("application/json", "application/javascript", "application/xml"):
                         content_type = "text/plain; charset=utf-8"
