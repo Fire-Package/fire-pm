@@ -1831,7 +1831,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="flex items-center gap-3 min-w-0">
           <span id="image-modal-icon" class="text-lg">🖼️</span>
           <div class="min-w-0">
-            <div id="image-modal-title" class="text-sm font-semibold text-white truncate font-mono">image.png</div>
+            <div class="flex items-center gap-2">
+              <span id="image-modal-title" class="text-sm font-semibold text-white truncate font-mono">image.png</span>
+              <span id="image-modal-counter" class="hidden px-2 py-0.5 rounded-full text-[10px] font-mono bg-orange-500/20 text-orange-300 border border-orange-500/30">1 / 1</span>
+              <span id="image-modal-folder-badge" class="hidden px-2 py-0.5 rounded-full text-[10px] font-mono bg-slate-800 text-slate-300 cursor-pointer hover:text-white transition" title="Open containing folder" onclick="openCurrentPreviewFolder()">📁 folder</span>
+            </div>
             <div id="image-modal-path" class="text-[11px] text-slate-400 font-mono truncate max-w-lg cursor-pointer hover:text-orange-300 transition" title="Click to copy path" onclick="copyModalImagePath()"></div>
           </div>
         </div>
@@ -1864,6 +1868,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       <!-- Main Viewer Viewport -->
       <div id="image-modal-viewport" class="flex-1 relative overflow-hidden flex items-center justify-center p-4 cursor-grab active:cursor-grabbing bg-slate-950/50" style="background-image: radial-gradient(#1e293b 1px, transparent 1px); background-size: 24px 24px;">
+        <button type="button" id="image-modal-prev-btn" onclick="navigateImagePreview(-1)" class="hidden absolute left-4 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white flex items-center justify-center text-2xl transition shadow-xl backdrop-blur select-none cursor-pointer" title="Previous Image (Left Arrow)">‹</button>
+        <button type="button" id="image-modal-next-btn" onclick="navigateImagePreview(1)" class="hidden absolute right-4 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white flex items-center justify-center text-2xl transition shadow-xl backdrop-blur select-none cursor-pointer" title="Next Image (Right Arrow)">›</button>
         <div id="image-modal-spinner" class="hidden absolute inset-0 flex items-center justify-center bg-slate-950/60 z-10 text-orange-400 text-sm">
           <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 p-3 rounded-2xl shadow-xl">
             <span class="animate-spin text-base">⟳</span>
@@ -1892,9 +1898,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <span id="image-modal-meta-dims">Dimensions: --</span>
           <span id="image-modal-meta-size">Size: --</span>
           <span id="image-modal-meta-type">Type: --</span>
+          <span id="image-modal-meta-folder" class="hidden sm:inline">Folder: --</span>
         </div>
         <div id="image-modal-shortcuts-hint" class="text-[11px] text-slate-500 hidden md:block">
-          Use mouse wheel to zoom, drag to pan, <kbd class="px-1 py-0.5 bg-slate-800 rounded text-slate-400">Esc</kbd> to exit
+          Use ← / → to toggle media, mouse wheel to zoom, <kbd class="px-1 py-0.5 bg-slate-800 rounded text-slate-400">Esc</kbd> to exit
         </div>
       </div>
     </div>
@@ -1908,6 +1915,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <div class="min-w-0">
             <div class="flex items-center gap-2">
               <span id="file-modal-title" class="text-sm font-semibold text-white truncate font-mono">file.txt</span>
+              <span id="file-modal-target-line-badge" class="hidden px-2 py-0.5 rounded-full text-[10px] font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30">Line 1</span>
               <span id="file-modal-line-badge" class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-sky-500/20 text-sky-300 border border-sky-500/30">0 lines</span>
               <span id="file-modal-size-badge" class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-slate-800 text-slate-300">0 B</span>
             </div>
@@ -1970,10 +1978,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           </div>
         </div>
 
+        <!-- Window Banner for large files or targeted lines -->
+        <div id="file-modal-window-banner" class="hidden mb-3 px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-300 font-mono flex items-center justify-between select-none shrink-0">
+          <span id="file-modal-window-info">Viewing lines 1–1,000 of 10,000</span>
+          <div class="flex items-center gap-2">
+            <button type="button" id="file-modal-btn-load-before" onclick="loadEarlierFileLines()" class="hidden px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 rounded border border-amber-500/40 text-[11px] text-amber-200 transition">⬆ Load Earlier Lines</button>
+            <button type="button" id="file-modal-btn-load-after" onclick="loadMoreFileLines()" class="hidden px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 rounded border border-amber-500/40 text-[11px] text-amber-200 transition">⬇ Load More Lines</button>
+            <button type="button" id="file-modal-btn-load-all" onclick="loadFullFileContent()" class="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 text-[11px] transition">Load Full File</button>
+          </div>
+        </div>
+
         <!-- Code Container with line numbers and text -->
         <div id="file-modal-code-wrap" class="min-w-full inline-flex font-mono text-xs sm:text-sm leading-6">
           <div id="file-modal-line-numbers" class="select-none text-right pr-4 text-slate-500 font-mono shrink-0 border-r border-slate-800/80 whitespace-pre leading-6 min-w-[3.5rem] sticky left-0 bg-slate-950 z-10"></div>
           <div id="file-modal-editor-container" class="relative flex-1 min-w-0">
+            <div id="file-modal-target-line-highlight" class="hidden pointer-events-none absolute left-0 right-0 bg-amber-500/15 border-y border-amber-500/40 z-0 h-6"></div>
             <pre id="file-modal-code-text" class="m-0 pl-4 whitespace-pre font-mono text-slate-200 select-text outline-none leading-6"></pre>
             <textarea id="file-modal-code-editor" oninput="onModalEditorInput()" onkeydown="handleEditorKeydown.call(this, event)" class="hidden absolute inset-0 w-full h-full pl-4 m-0 whitespace-pre font-mono leading-6" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
           </div>
@@ -4129,8 +4148,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     const KNOWN_SPECIAL_FILES = new Set(['dockerfile', 'makefile', 'license', 'procfile', 'gemfile']);
 
-    function cleanCandidatePath(p) {
-      if (!p) return '';
+    function parseCandidatePath(p) {
+      if (!p) return { path: '', line: null, col: null, raw: '' };
       let s = p.trim();
       s = s.replace(/^["'`]+|["'`]+$/g, '');
       s = s.replace(/["'`]/g, '');
@@ -4149,8 +4168,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (s.includes('?')) {
         s = s.split('?')[0];
       }
-      s = s.replace(/:\d+(?::\d+)?$/, '');
-      return s;
+      let line = null;
+      let col = null;
+      const lineMatch = s.match(/:(\d+)(?::(\d+))?$/);
+      if (lineMatch) {
+        line = parseInt(lineMatch[1], 10);
+        if (lineMatch[2]) col = parseInt(lineMatch[2], 10);
+        s = s.slice(0, lineMatch.index);
+      }
+      if (s.length > 1 && s.endsWith('/')) {
+        s = s.replace(/\/+$/, '') || '/';
+      }
+      return { path: s, line, col, raw: p };
+    }
+
+    function cleanCandidatePath(p) {
+      return parseCandidatePath(p).path;
     }
 
     const cwdEntriesCache = new Map();
@@ -4182,13 +4215,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     function isPathValidCandidate(candidate, tabId) {
       if (!candidate || candidate.length < 2) return false;
-      const s = cleanCandidatePath(candidate);
+      const parsed = parseCandidatePath(candidate);
+      const s = parsed.path;
+      if (!s) return false;
       if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('ftp://') || s.startsWith('git@')) return false;
       if (s.startsWith('-')) return false;
       if (/^[0-9.]+$/.test(s)) return false;
       if (s.includes(':') && !/^[a-zA-Z]:[/\\]/.test(s)) return false;
 
-      const hasSlash = s.includes('/') || s.startsWith('~');
+      const hasSlash = candidate.includes('/') || s.includes('/') || s.startsWith('~');
       const base = s.split('/').pop();
       if (hasSlash) return true;
       if (base.startsWith('.') && base.length > 2) return true;
@@ -4201,7 +4236,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       // Check if bare candidate matches an existing file/directory in the current directory
       const tid = tabId || (typeof activeTabId !== 'undefined' ? activeTabId : 'default');
       const cached = cwdEntriesCache.get(tid);
-      if (cached && cached.names && cached.names.has(s)) {
+      if (cached && cached.names && (cached.names.has(s) || cached.names.has(base))) {
         return true;
       }
 
@@ -4335,7 +4370,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             await fetchCwdEntries(tid);
           }
 
-          const rawRegex = /(?:^|[\s"'`(\[<])((?:file:\/\/(?:localhost)?\/|[~.A-Za-z0-9_-]*\/)?(?:[A-Za-z0-9_.~%+-]+\/)*[A-Za-z0-9_.~%+-]+(?:\.[A-Za-z0-9_+-]+)?)(?=[\s"'`()\[\]<>{},;:!?.#]|$)/gi;
+          const rawRegex = /(?:^|[\s"'`(\[<])((?:file:\/\/(?:localhost)?\/|[~.A-Za-z0-9_-]*\/)?(?:[A-Za-z0-9_.~%+-]+\/)*[A-Za-z0-9_.~%+-]+(?:\.[A-Za-z0-9_+-]+)?\/?(?::\d+(?::\d+)?)?)(?=[\s"'`()\[\]<>{},;:!?.#]|$)/gi;
           const candidates = [];
           let match;
 
@@ -4356,7 +4391,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
           const validLinks = [];
           await Promise.all(candidates.map(async ({ candidate, startOffset, endOffset }) => {
-            const clean = cleanCandidatePath(candidate);
+            const pInfo = parseCandidatePath(candidate);
+            const clean = pInfo.path;
+            const targetLine = pInfo.line;
             const stat = await fetchPathStat(clean, tabId);
             if (!stat || stat.exists === false) {
               return;
@@ -4369,7 +4406,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               },
               text: candidate,
               activate: async (e, text) => {
-                const targetClean = cleanCandidatePath(text);
+                const innerParsed = parseCandidatePath(text);
+                const targetClean = innerParsed.path;
+                const innerLine = innerParsed.line || targetLine;
                 const targetStat = await fetchPathStat(targetClean, tabId);
                 if (targetStat && targetStat.is_dir) {
                   openFolderInModal(targetStat.path || targetClean, tabId);
@@ -4383,13 +4422,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 } else if (cat.isPdf) {
                   openPdfModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId);
                 } else if ((cat.canCat || (targetStat && targetStat.is_text && !targetStat.is_binary)) && cat.type !== 'blocked') {
-                  openFileContentModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId, targetStat, (cat.isHtml || cat.isMarkdown) ? 'preview' : 'code');
+                  openFileContentModal(targetStat ? (targetStat.path || targetClean) : targetClean, tabId, targetStat, (cat.isHtml || cat.isMarkdown) ? 'preview' : 'code', null, innerLine);
                 } else {
-                  showFileHoverMenu(e, text, tabId, targetStat);
+                  showFileHoverMenu(e, text, tabId, targetStat, innerLine);
                 }
               },
               hover: (e, text) => {
-                showFileHoverMenu(e, text, tabId, stat);
+                const innerParsed = parseCandidatePath(text);
+                showFileHoverMenu(e, text, tabId, stat, innerParsed.line || targetLine);
               },
               leave: () => {
                 hideFileHoverMenu();
@@ -4405,12 +4445,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     const registerImageLinkProvider = registerFileLinkProvider;
 
-    function showFileHoverMenu(event, rawPath, tabId, prefetchedStat) {
+    function showFileHoverMenu(event, rawPath, tabId, prefetchedStat, targetLine = null) {
       clearTimeout(fileMenuHideTimer);
       const menu = document.getElementById('file-hover-menu');
       if (!menu) return;
 
-      const path = cleanCandidatePath(rawPath);
+      const pInfo = parseCandidatePath(rawPath);
+      const path = pInfo.path;
+      const line = targetLine || pInfo.line;
       const fileName = path.split('/').pop() || path;
       const cat = getFileCategory(path);
 
@@ -4427,8 +4469,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const btnCopy = document.getElementById('file-hover-btn-copy');
       const btnDl = document.getElementById('file-hover-btn-dl');
 
-      if (nameEl) nameEl.textContent = fileName;
-      if (pathEl) pathEl.textContent = path;
+      if (nameEl) nameEl.textContent = line ? `${fileName}:${line}` : fileName;
+      if (pathEl) pathEl.textContent = line ? `${path}:${line}` : path;
       if (btnDir) btnDir.classList.add('hidden');
 
       // Icon & thumbnail
@@ -4455,7 +4497,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       // Badge
       if (badgeEl) {
-        if (cat.badge) {
+        if (line) {
+          badgeEl.textContent = `L${line}`;
+          badgeEl.classList.remove('hidden');
+        } else if (cat.badge) {
           badgeEl.textContent = cat.badge;
           badgeEl.classList.remove('hidden');
         } else {
@@ -4467,9 +4512,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (btnCat) {
         if (cat.canCat || cat.isDb || cat.isPdf) {
           btnCat.classList.remove('hidden');
-          const previewLabel = cat.isDb ? 'Explore DB' : (cat.isPdf ? 'View PDF' : (cat.isHtml ? 'Preview HTML' : (cat.isMarkdown ? 'Preview Markdown' : 'View File')));
+          const previewLabel = cat.isDb ? 'Explore DB' : (cat.isPdf ? 'View PDF' : (cat.isHtml ? 'Preview HTML' : (cat.isMarkdown ? 'Preview Markdown' : (line ? `Jump to L${line}` : 'View File'))));
           if (btnCatText) btnCatText.textContent = previewLabel;
-          btnCat.title = cat.isDb ? 'Explore SQLite database tables and run queries' : (cat.isPdf ? 'View PDF document in modal' : ((cat.isHtml || cat.isMarkdown) ? `Preview rendered ${cat.isMarkdown ? 'Markdown' : 'HTML'} or view code` : 'View file content in modal'));
+          btnCat.title = cat.isDb ? 'Explore SQLite database tables and run queries' : (cat.isPdf ? 'View PDF document in modal' : ((cat.isHtml || cat.isMarkdown) ? `Preview rendered ${cat.isMarkdown ? 'Markdown' : 'HTML'} or view code` : (line ? `Jump to line ${line} in modal` : 'View file content in modal')));
           btnCat.onclick = (e) => {
             e.stopPropagation();
             hideFileHoverMenu();
@@ -4478,7 +4523,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             } else if (cat.isPdf) {
               openPdfModal(path, tabId);
             } else {
-              openFileContentModal(path, tabId, null, (cat.isHtml || cat.isMarkdown) ? 'preview' : 'code');
+              openFileContentModal(path, tabId, null, (cat.isHtml || cat.isMarkdown) ? 'preview' : 'code', null, line);
             }
           };
         } else {
@@ -4493,11 +4538,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           btnEdit.onclick = (e) => {
             e.stopPropagation();
             hideFileHoverMenu();
-            openTabWithCommand(`edit ${fileName}`, `nano ${quoteShellArg(path)}`);
+            const nanoCmd = line ? `nano +${line} ${quoteShellArg(path)}` : `nano ${quoteShellArg(path)}`;
+            openTabWithCommand(`edit ${fileName}${line ? `:${line}` : ''}`, nanoCmd);
           };
         } else {
           btnEdit.classList.add('hidden');
         }
+      }
       }
 
       // View Image / Preview Video / Play Audio (for media)
@@ -4597,17 +4644,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           if (!cat.isImage && !cat.badge && stat.is_text && !stat.is_binary && cat.type !== 'blocked') {
             if (btnCat) {
               btnCat.classList.remove('hidden');
-              if (btnCatText) btnCatText.textContent = 'View File';
-              btnCat.title = `View file content in modal${stat.lines !== null ? ` (${stat.lines} lines)` : ''}`;
+              if (btnCatText) btnCatText.textContent = line ? `Jump to L${line}` : 'View File';
+              btnCat.title = line ? `Jump to line ${line} in modal` : `View file content in modal${stat.lines !== null ? ` (${stat.lines} lines)` : ''}`;
               btnCat.onclick = (e) => {
                 e.stopPropagation();
                 hideFileHoverMenu();
-                openFileContentModal(stat.path || path, tabId, stat);
+                openFileContentModal(stat.path || path, tabId, stat, null, null, line);
               };
             }
-            if (badgeEl && stat.lines !== null) {
-              badgeEl.textContent = `${stat.lines}L`;
-              badgeEl.classList.remove('hidden');
+            if (badgeEl) {
+              badgeEl.textContent = line ? `L${line}` : (stat.lines !== null ? `${stat.lines}L` : '');
+              if (badgeEl.textContent) badgeEl.classList.remove('hidden');
             }
           } else if (stat.is_binary && badgeEl && !cat.badge) {
             badgeEl.textContent = 'BINARY';
@@ -5010,11 +5057,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
     }
 
-    function toggleFileModalEditor(enable) {
+    async function toggleFileModalEditor(enable) {
       if (currentModalIsDir || !currentModalFilePath) return;
       if (window.IS_READONLY) {
         showToast('Cannot edit file in read-only mode');
         return;
+      }
+      if (enable !== false && !isModalEditing) {
+        if (currentModalFileStartLine > 1 || (currentModalFileTotalLines > 0 && currentModalFileEndLine < currentModalFileTotalLines)) {
+          showToast('Loading full file for editing...');
+          await loadFullFileContent();
+        }
       }
 
       isModalEditing = (enable !== undefined) ? !!enable : !isModalEditing;
@@ -5512,9 +5565,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
     }
 
+    let currentModalFileStartLine = 1;
+    let currentModalFileEndLine = 0;
+    let currentModalFileTotalLines = 0;
+    let currentModalFileTargetLine = null;
+
     async function openFileContentModal(path, tabId, statData, initialMode = null, parentDir = null) {
       if (!path) return;
-      path = cleanCandidatePath(path);
+      const targetLine = arguments.length > 5 ? arguments[5] : null;
+      const forceFull = arguments.length > 6 ? !!arguments[6] : false;
+      const parsedPath = parseCandidatePath(path);
+      path = parsedPath.path;
+      const lineToJump = targetLine || parsedPath.line;
+      currentModalFileTargetLine = lineToJump;
+
       const catCheck = getFileCategory(path);
       if (catCheck.isDb) {
         return openDatabaseModal(path, tabId, statData, parentDir);
@@ -5641,7 +5705,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const fileParam = encodeURIComponent(path);
         const tabParam = (tabId || activeTabId) ? `tab=${encodeURIComponent(tabId || activeTabId)}` : '';
         const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
-        const qs = [fileParam ? `file=${fileParam}` : '', tabParam, tokenParam, 'inline=1'].filter(Boolean).join('&');
+
+        let windowParams = [];
+        if (!forceFull && !catCheck.isHtml && !catCheck.isMarkdown) {
+          if (lineToJump) {
+            windowParams.push(`line=${lineToJump}`, 'window=500');
+          } else if ((statData && statData.lines && statData.lines > 3000) || (statData && statData.size > 250 * 1024)) {
+            windowParams.push('start_line=1', 'end_line=1500');
+          }
+        }
+
+        const qs = [fileParam ? `file=${fileParam}` : '', tabParam, tokenParam, 'inline=1', ...windowParams].filter(Boolean).join('&');
         const res = await fetch(`/api/view?${qs}`);
         if (!res.ok) {
           if (res.status === 413) {
@@ -5667,6 +5741,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           return;
         }
 
+        const totalLinesHdr = res.headers.get('X-Total-Lines');
+        const startLineHdr = res.headers.get('X-Start-Line');
+        const endLineHdr = res.headers.get('X-End-Line');
+        const isWindowed = Boolean(totalLinesHdr);
+
         const text = await res.text();
         if (text.includes('\x00')) {
           renderBinaryModalCard(path, catCheck, { size: text.length }, 'File contains binary null characters and cannot be displayed as plain text. Please use Download.', 'BINARY FILE');
@@ -5681,16 +5760,66 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const lineCount = normalized.length === 0 ? 0 : contentLines.length;
         const byteSize = new Blob([text]).size;
 
-        if (lineBadge) lineBadge.textContent = `${lineCount} line${lineCount === 1 ? '' : 's'}`;
+        const totalLines = isWindowed ? parseInt(totalLinesHdr, 10) : lineCount;
+        const startLine = isWindowed ? parseInt(startLineHdr, 10) : 1;
+        const endLine = isWindowed ? parseInt(endLineHdr, 10) : (startLine + Math.max(0, lineCount - 1));
+
+        currentModalFileStartLine = startLine;
+        currentModalFileEndLine = endLine;
+        currentModalFileTotalLines = totalLines;
+
+        if (lineBadge) lineBadge.textContent = `${totalLines.toLocaleString()} line${totalLines === 1 ? '' : 's'}`;
         if (sizeBadge) sizeBadge.textContent = formatBytes(byteSize);
-        if (metaLines) metaLines.textContent = `Lines: ${lineCount}`;
+        if (metaLines) metaLines.textContent = isWindowed ? `Lines: ${startLine.toLocaleString()}–${endLine.toLocaleString()} of ${totalLines.toLocaleString()}` : `Lines: ${totalLines.toLocaleString()}`;
         if (metaSize) metaSize.textContent = `Size: ${formatBytes(byteSize)}`;
 
         let lineNums = '';
-        for (let i = 1; i <= lineCount; i++) {
-          lineNums += (i === 1 ? '' : '\n') + i;
+        for (let i = startLine; i <= endLine; i++) {
+          lineNums += (i === startLine ? '' : '\n') + i;
         }
         if (lineNumEl) lineNumEl.textContent = lineNums;
+
+        const windowBanner = document.getElementById('file-modal-window-banner');
+        const windowInfo = document.getElementById('file-modal-window-info');
+        const btnLoadBefore = document.getElementById('file-modal-btn-load-before');
+        const btnLoadAfter = document.getElementById('file-modal-btn-load-after');
+
+        if (isWindowed && totalLines > (endLine - startLine + 1)) {
+          if (windowBanner) {
+            windowBanner.classList.remove('hidden');
+            if (windowInfo) windowInfo.textContent = `Viewing lines ${startLine.toLocaleString()}–${endLine.toLocaleString()} of ${totalLines.toLocaleString()}`;
+            if (btnLoadBefore) {
+              if (startLine > 1) {
+                btnLoadBefore.classList.remove('hidden');
+                const countBefore = Math.min(1000, startLine - 1);
+                btnLoadBefore.textContent = `⬆ Load ${countBefore} Earlier Lines`;
+              } else {
+                btnLoadBefore.classList.add('hidden');
+              }
+            }
+            if (btnLoadAfter) {
+              if (endLine < totalLines) {
+                btnLoadAfter.classList.remove('hidden');
+                const countAfter = Math.min(1000, totalLines - endLine);
+                btnLoadAfter.textContent = `⬇ Load ${countAfter} More Lines`;
+              } else {
+                btnLoadAfter.classList.add('hidden');
+              }
+            }
+          }
+        } else {
+          if (windowBanner) windowBanner.classList.add('hidden');
+        }
+
+        const targetLineBadge = document.getElementById('file-modal-target-line-badge');
+        if (targetLineBadge) {
+          if (lineToJump) {
+            targetLineBadge.textContent = `Line ${lineToJump}`;
+            targetLineBadge.classList.remove('hidden');
+          } else {
+            targetLineBadge.classList.add('hidden');
+          }
+        }
 
         const displayCode = (hasTrailingNewline && rawLines.length > 1) ? normalized.slice(0, -1) : normalized;
         const detectedLang = getLanguageFromPath(path);
@@ -5716,6 +5845,26 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           } else {
             codeTextEl.textContent = displayCode;
           }
+        }
+
+        const lineHighlight = document.getElementById('file-modal-target-line-highlight');
+        if (lineToJump && lineToJump >= startLine && lineToJump <= endLine) {
+          const relativeIdx = lineToJump - startLine;
+          const lineHeight = 24;
+          if (lineHighlight) {
+            lineHighlight.style.top = `${relativeIdx * lineHeight}px`;
+            lineHighlight.style.height = `${lineHeight}px`;
+            lineHighlight.classList.remove('hidden');
+          }
+          const vp = document.getElementById('file-modal-viewport');
+          if (vp) {
+            setTimeout(() => {
+              const scrollPos = Math.max(0, (relativeIdx * lineHeight) - 80);
+              vp.scrollTo({ top: scrollPos, behavior: 'smooth' });
+            }, 60);
+          }
+        } else if (lineHighlight) {
+          lineHighlight.classList.add('hidden');
         }
 
         if (hasPreview && currentModalFileMode === 'preview') {
@@ -5815,7 +5964,123 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       currentModalDirPath = '';
       currentModalIsDir = false;
       currentModalFileType = 'text';
+      currentModalFileStartLine = 1;
+      currentModalFileEndLine = 0;
+      currentModalFileTotalLines = 0;
+      currentModalFileTargetLine = null;
+      const windowBanner = document.getElementById('file-modal-window-banner');
+      if (windowBanner) windowBanner.classList.add('hidden');
+      const targetLineBadge = document.getElementById('file-modal-target-line-badge');
+      if (targetLineBadge) targetLineBadge.classList.add('hidden');
+      const lineHighlight = document.getElementById('file-modal-target-line-highlight');
+      if (lineHighlight) lineHighlight.classList.add('hidden');
       setFileModalViewMode('code');
+    }
+
+    async function loadMoreFileLines() {
+      if (!currentModalFilePath || currentModalFileEndLine >= currentModalFileTotalLines) return;
+      const nextStart = currentModalFileEndLine + 1;
+      const nextEnd = Math.min(currentModalFileTotalLines, currentModalFileEndLine + 1000);
+      try {
+        const fileParam = encodeURIComponent(currentModalFilePath);
+        const tabParam = currentModalFileTabId ? `tab=${encodeURIComponent(currentModalFileTabId)}` : '';
+        const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+        const qs = [fileParam ? `file=${fileParam}` : '', tabParam, tokenParam, 'inline=1', `start_line=${nextStart}`, `end_line=${nextEnd}`].filter(Boolean).join('&');
+        const res = await fetch(`/api/view?${qs}`);
+        if (!res.ok) return;
+        const text = await res.text();
+        const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+        currentModalFileContent = (currentModalFileContent || '') + (currentModalFileContent && !currentModalFileContent.endsWith('\n') ? '\n' : '') + normalized;
+        currentModalFileEndLine = nextEnd;
+
+        const lineNumEl = document.getElementById('file-modal-line-numbers');
+        if (lineNumEl) {
+          let extraNums = '';
+          for (let i = nextStart; i <= nextEnd; i++) {
+            extraNums += '\n' + i;
+          }
+          lineNumEl.textContent += extraNums;
+        }
+
+        const codeTextEl = document.getElementById('file-modal-code-text');
+        if (codeTextEl) {
+          codeTextEl.textContent += (codeTextEl.textContent && !codeTextEl.textContent.endsWith('\n') ? '\n' : '') + normalized;
+        }
+
+        const windowInfo = document.getElementById('file-modal-window-info');
+        if (windowInfo) windowInfo.textContent = `Viewing lines ${currentModalFileStartLine.toLocaleString()}–${currentModalFileEndLine.toLocaleString()} of ${currentModalFileTotalLines.toLocaleString()}`;
+        const metaLines = document.getElementById('file-modal-meta-lines');
+        if (metaLines) metaLines.textContent = `Lines: ${currentModalFileStartLine}–${currentModalFileEndLine} of ${currentModalFileTotalLines}`;
+
+        const btnLoadAfter = document.getElementById('file-modal-btn-load-after');
+        if (btnLoadAfter) {
+          if (currentModalFileEndLine < currentModalFileTotalLines) {
+            const countAfter = Math.min(1000, currentModalFileTotalLines - currentModalFileEndLine);
+            btnLoadAfter.textContent = `⬇ Load ${countAfter} More Lines`;
+          } else {
+            btnLoadAfter.classList.add('hidden');
+          }
+        }
+      } catch (err) {
+        console.debug('loadMoreFileLines error', err);
+      }
+    }
+
+    async function loadEarlierFileLines() {
+      if (!currentModalFilePath || currentModalFileStartLine <= 1) return;
+      const prevEnd = currentModalFileStartLine - 1;
+      const prevStart = Math.max(1, currentModalFileStartLine - 1000);
+      try {
+        const fileParam = encodeURIComponent(currentModalFilePath);
+        const tabParam = currentModalFileTabId ? `tab=${encodeURIComponent(currentModalFileTabId)}` : '';
+        const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+        const qs = [fileParam ? `file=${fileParam}` : '', tabParam, tokenParam, 'inline=1', `start_line=${prevStart}`, `end_line=${prevEnd}`].filter(Boolean).join('&');
+        const res = await fetch(`/api/view?${qs}`);
+        if (!res.ok) return;
+        const text = await res.text();
+        const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+        currentModalFileContent = normalized + (normalized && !normalized.endsWith('\n') ? '\n' : '') + (currentModalFileContent || '');
+        currentModalFileStartLine = prevStart;
+
+        const lineNumEl = document.getElementById('file-modal-line-numbers');
+        if (lineNumEl) {
+          let lineNums = '';
+          for (let i = currentModalFileStartLine; i <= currentModalFileEndLine; i++) {
+            lineNums += (i === currentModalFileStartLine ? '' : '\n') + i;
+          }
+          lineNumEl.textContent = lineNums;
+        }
+
+        const codeTextEl = document.getElementById('file-modal-code-text');
+        if (codeTextEl) {
+          codeTextEl.textContent = normalized + (normalized && !normalized.endsWith('\n') ? '\n' : '') + codeTextEl.textContent;
+        }
+
+        const windowInfo = document.getElementById('file-modal-window-info');
+        if (windowInfo) windowInfo.textContent = `Viewing lines ${currentModalFileStartLine.toLocaleString()}–${currentModalFileEndLine.toLocaleString()} of ${currentModalFileTotalLines.toLocaleString()}`;
+        const metaLines = document.getElementById('file-modal-meta-lines');
+        if (metaLines) metaLines.textContent = `Lines: ${currentModalFileStartLine}–${currentModalFileEndLine} of ${currentModalFileTotalLines}`;
+
+        const btnLoadBefore = document.getElementById('file-modal-btn-load-before');
+        if (btnLoadBefore) {
+          if (currentModalFileStartLine > 1) {
+            const countBefore = Math.min(1000, currentModalFileStartLine - 1);
+            btnLoadBefore.textContent = `⬆ Load ${countBefore} Earlier Lines`;
+          } else {
+            btnLoadBefore.classList.add('hidden');
+          }
+        }
+      } catch (err) {
+        console.debug('loadEarlierFileLines error', err);
+      }
+    }
+
+    async function loadFullFileContent() {
+      if (!currentModalFilePath) return;
+      showToast('Loading full file...');
+      await openFileContentModal(currentModalFilePath, currentModalFileTabId, null, currentModalFileMode, modalParentDirPath, null, true);
     }
 
     function closeFileContentModal(forceCloseAll = false) {
@@ -6543,6 +6808,105 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (audioBox) audioBox.classList.add('hidden');
     }
 
+    let currentPreviewFolder = '';
+    let currentPreviewFolderMediaList = [];
+    let currentPreviewMediaIndex = -1;
+
+    function openCurrentPreviewFolder() {
+      if (!currentPreviewFolder) return;
+      const folderToOpen = currentPreviewFolder;
+      const tabToOpen = currentPreviewTabId;
+      closeImagePreviewModal(false, true);
+      openFolderInModal(folderToOpen, tabToOpen);
+    }
+
+    function navigateImagePreview(delta) {
+      if (!currentPreviewFolderMediaList || currentPreviewFolderMediaList.length <= 1) return;
+      let newIdx = currentPreviewMediaIndex + delta;
+      if (newIdx < 0) newIdx = currentPreviewFolderMediaList.length - 1;
+      if (newIdx >= currentPreviewFolderMediaList.length) newIdx = 0;
+
+      const nextItem = currentPreviewFolderMediaList[newIdx];
+      if (!nextItem) return;
+
+      currentPreviewMediaIndex = newIdx;
+      openImagePreviewModal(nextItem.fullPath, currentPreviewTabId, currentPreviewFolder);
+    }
+
+    async function fetchPreviewFolderMedia(folderDir, tabId, currentPath) {
+      const counterEl = document.getElementById('image-modal-counter');
+      const folderBadge = document.getElementById('image-modal-folder-badge');
+      const prevBtn = document.getElementById('image-modal-prev-btn');
+      const nextBtn = document.getElementById('image-modal-next-btn');
+      const metaFolder = document.getElementById('image-modal-meta-folder');
+
+      currentPreviewFolder = folderDir || '';
+
+      try {
+        const dirParam = folderDir ? `dir=${encodeURIComponent(folderDir)}` : '';
+        const tabParam = (tabId || activeTabId) ? `tab=${encodeURIComponent(tabId || activeTabId)}` : '';
+        const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+        const qs = [dirParam, tabParam, tokenParam].filter(Boolean).join('&');
+        const res = await fetch(`/api/suggest?${qs}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data || !data.success || !Array.isArray(data.items)) return;
+
+        const folderResolved = data.dir || folderDir;
+        currentPreviewFolder = folderResolved;
+        const folderBase = (folderResolved.split('/').pop() || folderResolved || 'folder');
+
+        const totalFiles = data.items.filter(i => !i.is_dir).length;
+        const mediaList = [];
+        for (const item of data.items) {
+          if (item.is_dir) continue;
+          const cat = getFileCategory(item.name);
+          if (cat.isImage || cat.isVideo || cat.isAudio) {
+            const itemFullPath = folderResolved.replace(/\/+$/, '') + '/' + item.name;
+            mediaList.push({
+              name: item.name,
+              fullPath: itemFullPath,
+              isImage: cat.isImage,
+              isVideo: cat.isVideo,
+              isAudio: cat.isAudio
+            });
+          }
+        }
+
+        currentPreviewFolderMediaList = mediaList;
+        const currentName = currentPath.split('/').pop() || currentPath;
+        const curIdx = mediaList.findIndex(m => m.fullPath === currentPath || m.name === currentName);
+        currentPreviewMediaIndex = curIdx >= 0 ? curIdx : 0;
+
+        if (folderBadge) {
+          folderBadge.textContent = `📁 ${folderBase} (${totalFiles} file${totalFiles === 1 ? '' : 's'})`;
+          folderBadge.title = `Folder: ${folderResolved} (${totalFiles} files total, ${mediaList.length} media)`;
+          folderBadge.classList.remove('hidden');
+        }
+
+        if (counterEl && mediaList.length > 0) {
+          const displayIdx = (curIdx >= 0 ? curIdx : 0) + 1;
+          counterEl.textContent = `${displayIdx} / ${mediaList.length}`;
+          counterEl.title = `Media ${displayIdx} of ${mediaList.length} in ${folderBase} (${totalFiles} total files)`;
+          counterEl.classList.remove('hidden');
+        }
+
+        if (metaFolder) {
+          metaFolder.textContent = `Folder: ${folderBase} (${totalFiles} files, ${mediaList.length} media)`;
+        }
+
+        if (mediaList.length > 1) {
+          if (prevBtn) prevBtn.classList.remove('hidden');
+          if (nextBtn) nextBtn.classList.remove('hidden');
+        } else {
+          if (prevBtn) prevBtn.classList.add('hidden');
+          if (nextBtn) nextBtn.classList.add('hidden');
+        }
+      } catch (err) {
+        console.debug('fetchPreviewFolderMedia error', err);
+      }
+    }
+
     function openImagePreviewModal(path, tabId, parentDir = null) {
       if (!path) return;
       path = cleanCandidatePath(path);
@@ -6554,6 +6918,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       currentPreviewPath = path;
       currentPreviewTabId = tabId || activeTabId;
       mediaModalParentDirPath = (parentDir !== undefined && parentDir !== null) ? parentDir : null;
+
+      const folderDir = parentDir || (path.includes('/') ? path.substring(0, path.lastIndexOf('/')) || '/' : '');
+      fetchPreviewFolderMedia(folderDir, currentPreviewTabId, path);
 
       const modal = document.getElementById('image-preview-modal');
       const img = document.getElementById('image-modal-img');
@@ -6774,6 +7141,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (audioEl) { audioEl.onloadedmetadata = null; audioEl.onerror = null; audioEl.pause(); audioEl.removeAttribute('src'); }
         if (audioBox) audioBox.classList.add('hidden');
       }
+
+      currentPreviewFolder = '';
+      currentPreviewFolderMediaList = [];
+      currentPreviewMediaIndex = -1;
+      const counterEl = document.getElementById('image-modal-counter');
+      if (counterEl) counterEl.classList.add('hidden');
+      const folderBadge = document.getElementById('image-modal-folder-badge');
+      if (folderBadge) folderBadge.classList.add('hidden');
+      const prevBtn = document.getElementById('image-modal-prev-btn');
+      if (prevBtn) prevBtn.classList.add('hidden');
+      const nextBtn = document.getElementById('image-modal-next-btn');
+      if (nextBtn) nextBtn.classList.add('hidden');
+      const metaFolder = document.getElementById('image-modal-meta-folder');
+      if (metaFolder) metaFolder.textContent = '';
 
       const returnDir = (!forceCloseAll) ? mediaModalParentDirPath : null;
       const returnTab = currentPreviewTabId;
@@ -7002,7 +7383,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           }
 
           if (activeMedia) {
-            if (e.key === ' ' || e.code === 'Space') {
+            if (e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowUp')) {
+              e.preventDefault();
+              navigateImagePreview(-1);
+              return;
+            } else if (e.shiftKey && (e.key === 'ArrowRight' || e.key === 'ArrowDown')) {
+              e.preventDefault();
+              navigateImagePreview(1);
+              return;
+            } else if (e.key === ' ' || e.code === 'Space') {
               e.preventDefault();
               if (activeMedia.paused) activeMedia.play();
               else activeMedia.pause();
@@ -7021,7 +7410,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               return;
             }
           } else {
-            if (e.key === '+' || e.key === '=') {
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              navigateImagePreview(-1);
+              return;
+            } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+              e.preventDefault();
+              navigateImagePreview(1);
+              return;
+            } else if (e.key === '+' || e.key === '=') {
               e.preventDefault();
               zoomImagePreview(0.25);
               return;
@@ -10368,6 +10765,53 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                                     return
                         except Exception:
                             pass
+
+                safe_name = urllib.parse.quote(filename)
+                if parsed.path.rstrip('/') == '/api/view' and not is_raw:
+                    start_line_opt = query.get('start_line', [None])[0] or query.get('start', [None])[0]
+                    end_line_opt = query.get('end_line', [None])[0] or query.get('end', [None])[0]
+                    target_line_opt = query.get('line', [None])[0]
+                    window_opt = query.get('window', [None])[0]
+
+                    if start_line_opt or end_line_opt or target_line_opt:
+                        try:
+                            w_size = int(window_opt) if window_opt and window_opt.isdigit() else 500
+                            if target_line_opt and target_line_opt.isdigit():
+                                t_line = int(target_line_opt)
+                                s_line = max(1, t_line - w_size)
+                                e_line = t_line + w_size
+                            else:
+                                s_line = max(1, int(start_line_opt)) if start_line_opt and start_line_opt.isdigit() else 1
+                                e_line = max(s_line, int(end_line_opt)) if end_line_opt and end_line_opt.isdigit() else s_line + 1000
+
+                            total_lines = 0
+                            window_lines = []
+                            with open(target_path, 'r', encoding='utf-8', errors='replace') as f:
+                                for idx, line in enumerate(f, start=1):
+                                    if s_line <= idx <= e_line:
+                                        window_lines.append(line)
+                                    total_lines = idx
+
+                            actual_end = min(e_line, total_lines) if total_lines > 0 else 0
+                            text_payload = "".join(window_lines)
+                            bytes_payload = text_payload.encode('utf-8')
+
+                            self.send_response(200)
+                            self.send_header("Content-Type", "text/plain; charset=utf-8")
+                            self.send_header("Content-Length", str(len(bytes_payload)))
+                            self.send_header("X-Total-Lines", str(total_lines))
+                            self.send_header("X-Start-Line", str(s_line))
+                            self.send_header("X-End-Line", str(actual_end))
+                            self.send_header("X-Has-More-Before", "1" if s_line > 1 else "0")
+                            self.send_header("X-Has-More-After", "1" if actual_end < total_lines else "0")
+                            self.send_header("Access-Control-Expose-Headers", "Content-Disposition, X-Total-Lines, X-Start-Line, X-End-Line, X-Has-More-Before, X-Has-More-After")
+                            self.send_header("Content-Disposition", f'inline; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
+                            self.end_headers()
+                            self.wfile.write(bytes_payload)
+                            return
+                        except Exception as e:
+                            self.send_json({"success": False, "error": f"Failed reading line range: {e}"}, status=500)
+                            return
                 if disposition_type == "inline" and not is_raw:
                     if content_type == "application/octet-stream" or content_type.startswith("text/") or content_type in ("application/json", "application/javascript", "application/xml"):
                         content_type = "text/plain; charset=utf-8"
