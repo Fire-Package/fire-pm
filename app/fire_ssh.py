@@ -28,6 +28,7 @@ import mimetypes
 import urllib.parse
 import zipfile
 import tempfile
+import shutil
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 import threading
@@ -949,6 +950,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-webgl@0.16.0/lib/xterm-addon-webgl.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-search@0.13.0/lib/xterm-addon-search.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.5.1/github-markdown-dark.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
@@ -1168,6 +1170,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <button onclick="clearTerm()" title="Clear Terminal Output" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">Clear</button>
         <button onclick="termFit()" title="Fit Terminal Window" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fit</button>
         <button onclick="toggleFullscreen()" title="Fullscreen mode (locks Ctrl+W from closing tab)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">⛶ Fullscreen</button>
+        <button onclick="toggleTerminalSearch()" title="Search Terminal Output (Ctrl+Shift+F)" class="hidden sm:inline-flex px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono items-center gap-1">
+          <span>🔍</span>
+          <span>Find</span>
+        </button>
         <div class="relative hidden sm:inline-block">
           <button id="split-btn" onclick="toggleSplitMenu()" title="Split View: Dual Interactive Tabs (Alt+V / Alt+H)" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-mono flex items-center gap-1">
             <span id="split-icon">◫</span>
@@ -1412,7 +1418,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
 
     <!-- Terminal Mounting Area (holds per-tab terminal mount divs) -->
-    <div id="terminal-container" class="flex-1 w-full bg-[#020617] relative overflow-hidden"></div>
+    <div id="terminal-container" class="flex-1 w-full bg-[#020617] relative overflow-hidden">
+      <!-- Floating Terminal Search Bar (Ctrl+Shift+F) -->
+      <div id="term-search-bar" class="hidden absolute top-3 right-5 z-40 bg-slate-900/95 border border-slate-700/80 rounded-xl px-2.5 py-1.5 shadow-2xl flex items-center gap-2 text-xs font-mono backdrop-blur-md">
+        <span class="text-slate-400 text-xs">🔍</span>
+        <input type="text" id="term-search-input" placeholder="Find in terminal..." oninput="onTermSearchInput()" onkeydown="onTermSearchKeydown(event)" class="bg-slate-950 border border-slate-800 focus:border-orange-500 text-slate-200 placeholder-slate-500 rounded px-2 py-0.5 w-36 sm:w-52 outline-none text-xs">
+        <span id="term-search-results-count" class="text-[10px] text-slate-400 min-w-[2.5rem] text-center shrink-0"></span>
+        <button type="button" onclick="termSearchNext(false)" class="p-1 hover:bg-slate-800 rounded text-slate-300 hover:text-white" title="Previous (Shift+Enter)">▲</button>
+        <button type="button" onclick="termSearchNext(true)" class="p-1 hover:bg-slate-800 rounded text-slate-300 hover:text-white" title="Next (Enter)">▼</button>
+        <button type="button" onclick="closeTerminalSearch()" class="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-red-400" title="Close (Escape)">✕</button>
+      </div>
+    </div>
 
     <!-- MOBILE ACCESSORY KEYPAD BAR -->
     <div id="mobile-accessory-bar" class="hidden w-full bg-slate-900 border-t border-slate-800 select-none z-30 shrink-0 transition-all duration-150">
@@ -1944,6 +1960,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <button type="button" id="file-modal-edit-btn" onclick="toggleFileModalEditor(true)" class="px-2.5 py-1.5 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-xl text-xs text-orange-300 hover:text-orange-200 transition flex items-center gap-1 font-medium" title="Edit file directly in modal">
             <span>✏️</span> <span class="hidden sm:inline">Edit</span>
           </button>
+          <button type="button" id="file-modal-find-btn" onclick="openFileFindBar()" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Find in file (Ctrl+F)">
+            <span>🔍</span> <span class="hidden sm:inline">Find</span>
+          </button>
+          <button type="button" id="file-modal-follow-btn" onclick="toggleLogFollow()" class="hidden px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1 font-medium" title="Live tail follow (auto-scroll to new lines)">
+            <span>⚡</span> <span id="file-modal-follow-label" class="hidden sm:inline">Follow</span>
+          </button>
           <button type="button" id="file-modal-save-btn" onclick="saveModalFile()" class="hidden px-2.5 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 hover:text-emerald-200 transition flex items-center gap-1 font-medium" title="Save changes (Ctrl+S)">
             <span>💾</span> <span class="hidden sm:inline">Save</span>
           </button>
@@ -1965,6 +1987,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       <!-- Main Code Viewport -->
       <div id="file-modal-viewport" class="flex-1 relative overflow-auto p-4 bg-slate-950 font-mono text-xs sm:text-sm select-text text-slate-200">
+        <!-- Floating Find in File Bar (Ctrl+F) -->
+        <div id="file-modal-find-bar" class="hidden absolute top-4 right-6 z-30 bg-slate-900/95 border border-slate-700/80 rounded-xl px-2.5 py-1.5 shadow-2xl flex items-center gap-1.5 text-xs font-mono backdrop-blur-md">
+          <span class="text-slate-400 text-xs">🔍</span>
+          <input type="text" id="file-modal-find-input" placeholder="Find in file..." oninput="onFileFindInput()" onkeydown="onFileFindKeydown(event)" class="bg-slate-950 border border-slate-800 focus:border-amber-500 text-slate-200 placeholder-slate-500 rounded px-2 py-0.5 w-32 sm:w-44 outline-none text-xs">
+          <span id="file-modal-find-count" class="text-[11px] text-slate-400 shrink-0 min-w-[3rem] text-center">0/0</span>
+          <button type="button" onclick="navigateFileFind(-1)" class="p-1 hover:bg-slate-800 rounded text-slate-300 hover:text-white" title="Previous (Shift+Enter)">▲</button>
+          <button type="button" onclick="navigateFileFind(1)" class="p-1 hover:bg-slate-800 rounded text-slate-300 hover:text-white" title="Next (Enter)">▼</button>
+          <button type="button" onclick="closeFileFindBar()" class="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-red-400" title="Close (Escape)">✕</button>
+        </div>
         <div id="file-modal-spinner" class="hidden absolute inset-0 flex items-center justify-center bg-slate-950/70 z-10 text-orange-400 text-sm select-none">
           <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 p-3.5 rounded-2xl shadow-xl">
             <span class="animate-spin text-base">⟳</span>
@@ -2012,15 +2043,47 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div id="file-modal-dir-wrap" class="hidden absolute inset-0 z-0 flex flex-col bg-slate-950 overflow-hidden">
           <!-- Top Toolbar: Breadcrumb + Search + Controls -->
           <div class="px-3 py-2 border-b border-slate-800/80 bg-slate-900/70 text-xs font-mono shrink-0 flex flex-wrap items-center justify-between gap-2 select-none">
-            <!-- Breadcrumb -->
-            <div id="file-modal-breadcrumb" class="flex items-center gap-1 text-slate-400 shrink-0 flex-wrap overflow-x-auto max-w-full sm:max-w-[48%]"></div>
+            <!-- Breadcrumb + Bookmark Button -->
+            <div class="flex items-center gap-1.5 text-slate-400 shrink-0 flex-wrap overflow-x-auto max-w-full sm:max-w-[42%]">
+              <button type="button" id="file-modal-dir-bookmark-btn" onclick="toggleCurrentDirBookmark()" class="text-slate-500 hover:text-amber-400 text-sm px-1 transition cursor-pointer" title="Bookmark current folder">☆</button>
+              <div id="file-modal-breadcrumb" class="flex items-center gap-1 shrink-0 flex-wrap"></div>
+            </div>
 
-            <!-- Controls Toolbar (Search, Depth, Dotfiles, Sort) -->
+            <!-- Controls Toolbar (New, Bookmarks, Search, Depth, Dotfiles, Sort, View) -->
             <div class="flex items-center gap-1.5 shrink-0 ml-auto flex-wrap">
+              <!-- New Item Menu -->
+              <div class="relative">
+                <button type="button" id="file-modal-dir-new-btn" onclick="toggleDirNewMenu()" class="px-2 py-1 rounded-lg text-xs font-mono border transition flex items-center gap-1 bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30 cursor-pointer shadow-sm" title="Create New File or Folder">
+                  <span>+</span> <span>New</span> <span>▾</span>
+                </button>
+                <div id="file-modal-dir-new-menu" class="hidden absolute left-0 top-full mt-1.5 w-36 bg-slate-900 border border-slate-700/80 rounded-xl shadow-2xl p-1 z-40 font-mono text-xs flex flex-col gap-0.5">
+                  <button type="button" onclick="promptCreateDirItem('file')" class="px-2.5 py-1.5 rounded-lg text-left text-slate-300 hover:text-white hover:bg-slate-800 flex items-center gap-1.5 cursor-pointer">
+                    <span>📄</span> <span>New File</span>
+                  </button>
+                  <button type="button" onclick="promptCreateDirItem('folder')" class="px-2.5 py-1.5 rounded-lg text-left text-slate-300 hover:text-white hover:bg-slate-800 flex items-center gap-1.5 cursor-pointer">
+                    <span>📁</span> <span>New Folder</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Quick Access & Bookmarks Menu -->
+              <div class="relative">
+                <button type="button" id="file-modal-dir-bookmarks-btn" onclick="toggleDirBookmarksMenu()" class="px-2 py-1 rounded-lg text-xs font-mono border transition flex items-center gap-1 bg-slate-950/80 text-slate-400 border-slate-800 hover:text-slate-200 cursor-pointer" title="Pinned Bookmarks & Shortcuts">
+                  <span>📌</span> <span class="hidden sm:inline">Bookmarks</span> <span>▾</span>
+                </button>
+                <div id="file-modal-dir-bookmarks-menu" class="hidden absolute right-0 top-full mt-1.5 w-60 bg-slate-900 border border-slate-700/80 rounded-xl shadow-2xl p-1.5 z-40 font-mono text-xs flex flex-col gap-1 max-h-72 overflow-y-auto">
+                  <div class="text-[10px] text-slate-500 font-semibold uppercase px-2 py-0.5">Quick Shortcuts</div>
+                  <div id="file-modal-dir-shortcuts-list" class="flex flex-col gap-0.5"></div>
+                  <div class="border-t border-slate-800 my-1"></div>
+                  <div class="text-[10px] text-slate-500 font-semibold uppercase px-2 py-0.5">Pinned Bookmarks</div>
+                  <div id="file-modal-dir-bookmarks-list" class="flex flex-col gap-0.5"></div>
+                </div>
+              </div>
+
               <!-- Search Filter Input -->
               <div class="relative flex items-center">
                 <span class="absolute left-2 text-slate-500 text-xs pointer-events-none">🔍</span>
-                <input type="text" id="file-modal-dir-search" placeholder="Filter (/)" oninput="onDirSearchInput()" onkeydown="onDirSearchKeydown(event)" class="bg-slate-950/80 border border-slate-800 hover:border-slate-700 focus:border-orange-500 text-slate-200 placeholder-slate-500 text-xs rounded-lg pl-6 pr-5 py-1 w-28 sm:w-36 focus:w-48 transition-all outline-none font-mono">
+                <input type="text" id="file-modal-dir-search" placeholder="Filter (/)" oninput="onDirSearchInput()" onkeydown="onDirSearchKeydown(event)" class="bg-slate-950/80 border border-slate-800 hover:border-slate-700 focus:border-orange-500 text-slate-200 placeholder-slate-500 text-xs rounded-lg pl-6 pr-5 py-1 w-24 sm:w-32 focus:w-44 transition-all outline-none font-mono">
                 <button type="button" id="file-modal-dir-search-clear" onclick="clearDirSearch()" class="hidden absolute right-1.5 text-slate-500 hover:text-slate-300 text-xs cursor-pointer">✕</button>
               </div>
 
@@ -2043,11 +2106,23 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <option value="date-desc">Date (New)</option>
                 <option value="type">Type (Ext)</option>
               </select>
+
+              <!-- View Mode Toggle (Grid vs List) -->
+              <button type="button" id="file-modal-dir-view-btn" onclick="toggleDirViewMode()" class="px-2 py-1 rounded-lg text-xs font-mono border transition flex items-center gap-1 bg-slate-950/80 text-slate-400 border-slate-800 hover:text-slate-200 cursor-pointer" title="Toggle Grid / List View">
+                <span id="file-modal-dir-view-icon">☰</span>
+              </button>
             </div>
           </div>
 
           <!-- File list -->
           <div id="file-modal-dir-list" class="flex-1 overflow-auto p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1 content-start"></div>
+
+          <!-- Drag-and-drop Upload Overlay -->
+          <div id="file-modal-dir-drop-overlay" class="hidden absolute inset-0 z-30 bg-slate-950/90 border-2 border-dashed border-sky-500 rounded-xl flex flex-col items-center justify-center gap-2 select-none pointer-events-none">
+            <span class="text-3xl animate-bounce">📥</span>
+            <div class="text-sm font-semibold text-white">Drop files to upload here</div>
+            <div id="file-modal-dir-drop-target" class="text-xs text-sky-300 font-mono"></div>
+          </div>
 
           <!-- Empty state -->
           <div id="file-modal-dir-empty" class="hidden absolute inset-0 flex items-center justify-center text-slate-500 text-sm select-none pointer-events-none">
@@ -2171,6 +2246,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
         <div class="text-[11px] text-slate-500 hidden md:block">
           Press <kbd class="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">Esc</kbd> to close
+        </div>
+      </div>
+
+      <!-- Generic Action Prompt Dialog (New File/Folder, Rename, Delete Confirmation) -->
+      <div id="file-modal-prompt-dialog" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl p-5 w-full max-w-sm text-xs font-sans text-slate-200 flex flex-col gap-3">
+          <div class="flex items-center justify-between">
+            <div id="file-modal-prompt-title" class="font-semibold text-sm text-white">Create New File</div>
+            <button type="button" onclick="closeFileModalPrompt()" class="text-slate-400 hover:text-white cursor-pointer">✕</button>
+          </div>
+          <div id="file-modal-prompt-desc" class="text-slate-400 leading-relaxed">Enter name:</div>
+          <input type="text" id="file-modal-prompt-input" class="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-sky-500" spellcheck="false" autocomplete="off">
+          <div class="flex items-center justify-end gap-2 pt-1">
+            <button type="button" onclick="closeFileModalPrompt()" class="px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer">Cancel</button>
+            <button type="button" id="file-modal-prompt-confirm-btn" class="px-3 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-medium transition cursor-pointer">Confirm</button>
+          </div>
         </div>
       </div>
     </div>
@@ -5345,11 +5436,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         currentModalDirPath = data.dir || path;
         if (pathEl) pathEl.textContent = currentModalDirPath;
         buildBreadcrumb(currentModalDirPath);
+        updateBookmarkStarUI();
         currentDirRawItems = data.items || [];
         currentDirDepthItems = [];
         currentDirLoadedDepth = 1;
         updateDirControlsUI();
         applyDirFiltersAndRender();
+        setupDirDragAndDrop();
       } catch (err) {
         if (errorEl) errorEl.classList.remove('hidden');
         if (errorMsg) errorMsg.textContent = err.message || 'Unable to list directory';
@@ -5369,9 +5462,426 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     try {
       dirSortBy = localStorage.getItem('fire_ssh_dir_sort') || 'name-asc';
     } catch (e) {}
+    let dirViewMode = 'grid';
+    try {
+      dirViewMode = localStorage.getItem('fire_ssh_dir_view_mode') || 'grid';
+    } catch (e) {}
+    let dirBookmarks = [];
+    try {
+      dirBookmarks = JSON.parse(localStorage.getItem('fire_ssh_bookmarks') || '[]');
+    } catch (e) {}
     let dirSearchQuery = '';
     let dirSearchDepth = 1;
     let dirSearchDebounceTimer = null;
+
+    function downloadFilePath(p) {
+      if (!p) return;
+      const dlUrl = buildImageUrl(p, currentModalFileTabId, true);
+      const a = document.createElement('a');
+      a.href = dlUrl;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { document.body.removeChild(a); } catch (e) {}
+      }, 100);
+    }
+
+    function toggleDirViewMode() {
+      dirViewMode = dirViewMode === 'list' ? 'grid' : 'list';
+      try {
+        localStorage.setItem('fire_ssh_dir_view_mode', dirViewMode);
+      } catch (e) {}
+      updateDirControlsUI();
+      applyDirFiltersAndRender();
+    }
+
+    function isCurrentDirBookmarked() {
+      if (!currentModalDirPath) return false;
+      return dirBookmarks.includes(currentModalDirPath);
+    }
+
+    function toggleCurrentDirBookmark() {
+      if (!currentModalDirPath) return;
+      const idx = dirBookmarks.indexOf(currentModalDirPath);
+      if (idx >= 0) {
+        dirBookmarks.splice(idx, 1);
+        showToast('Bookmark removed');
+      } else {
+        dirBookmarks.push(currentModalDirPath);
+        showToast('Folder bookmarked');
+      }
+      try {
+        localStorage.setItem('fire_ssh_bookmarks', JSON.stringify(dirBookmarks));
+      } catch (e) {}
+      updateBookmarkStarUI();
+    }
+
+    function updateBookmarkStarUI() {
+      const btn = document.getElementById('file-modal-dir-bookmark-btn');
+      if (!btn) return;
+      if (isCurrentDirBookmarked()) {
+        btn.textContent = '⭐';
+        btn.className = 'text-amber-400 text-sm px-1 transition cursor-pointer';
+        btn.title = 'Remove bookmark';
+      } else {
+        btn.textContent = '☆';
+        btn.className = 'text-slate-500 hover:text-amber-400 text-sm px-1 transition cursor-pointer';
+        btn.title = 'Bookmark current folder';
+      }
+    }
+
+    function toggleDirBookmarksMenu() {
+      const menu = document.getElementById('file-modal-dir-bookmarks-menu');
+      if (!menu) return;
+      const isHidden = menu.classList.contains('hidden');
+      closeDirNewMenu();
+      if (isHidden) {
+        renderBookmarksMenu();
+        menu.classList.remove('hidden');
+      } else {
+        menu.classList.add('hidden');
+      }
+    }
+
+    function closeDirBookmarksMenu() {
+      const menu = document.getElementById('file-modal-dir-bookmarks-menu');
+      if (menu) menu.classList.add('hidden');
+    }
+
+    function toggleDirNewMenu() {
+      const menu = document.getElementById('file-modal-dir-new-menu');
+      if (!menu) return;
+      const isHidden = menu.classList.contains('hidden');
+      closeDirBookmarksMenu();
+      if (isHidden) {
+        menu.classList.remove('hidden');
+      } else {
+        menu.classList.add('hidden');
+      }
+    }
+
+    function closeDirNewMenu() {
+      const menu = document.getElementById('file-modal-dir-new-menu');
+      if (menu) menu.classList.add('hidden');
+    }
+
+    function renderBookmarksMenu() {
+      const shortcutsList = document.getElementById('file-modal-dir-shortcuts-list');
+      const bookmarksList = document.getElementById('file-modal-dir-bookmarks-list');
+      if (!shortcutsList || !bookmarksList) return;
+
+      shortcutsList.innerHTML = '';
+      bookmarksList.innerHTML = '';
+
+      const shortcuts = [
+        { name: 'Root (/)', path: '/' },
+        { name: 'Home (/root)', path: '/root' },
+        { name: 'Logs (/var/log)', path: '/var/log' },
+        { name: 'Config (/etc)', path: '/etc' },
+        { name: 'Temp (/tmp)', path: '/tmp' }
+      ];
+
+      const curTab = getActiveTab();
+      if (curTab && curTab.cwd && !shortcuts.some(s => s.path === curTab.cwd)) {
+        shortcuts.unshift({ name: `Tab CWD (${curTab.cwd.split('/').pop() || '/'})`, path: curTab.cwd });
+      }
+
+      shortcuts.forEach(s => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'w-full text-left px-2 py-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white flex items-center justify-between text-xs cursor-pointer';
+        btn.innerHTML = `<span class="truncate">${escapeHtml(s.name)}</span><span class="text-[10px] text-slate-500 font-mono truncate max-w-[7rem] ml-1">${escapeHtml(s.path)}</span>`;
+        btn.onclick = () => {
+          closeDirBookmarksMenu();
+          openFolderInModal(s.path, currentModalFileTabId);
+        };
+        shortcutsList.appendChild(btn);
+      });
+
+      if (dirBookmarks.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'text-[11px] text-slate-500 italic px-2 py-1';
+        empty.textContent = 'No pinned bookmarks. Click ☆ to pin.';
+        bookmarksList.appendChild(empty);
+      } else {
+        dirBookmarks.forEach(bm => {
+          const row = document.createElement('div');
+          row.className = 'w-full flex items-center justify-between px-2 py-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white text-xs group cursor-pointer';
+
+          const link = document.createElement('span');
+          link.className = 'truncate flex-1 font-mono text-[11px]';
+          link.textContent = bm;
+          link.title = bm;
+          link.onclick = () => {
+            closeDirBookmarksMenu();
+            openFolderInModal(bm, currentModalFileTabId);
+          };
+
+          const del = document.createElement('button');
+          del.type = 'button';
+          del.textContent = '✕';
+          del.className = 'text-slate-500 hover:text-red-400 px-1 opacity-0 group-hover:opacity-100 transition cursor-pointer text-xs ml-1';
+          del.title = 'Remove pin';
+          del.onclick = (e) => {
+            e.stopPropagation();
+            const idx = dirBookmarks.indexOf(bm);
+            if (idx >= 0) dirBookmarks.splice(idx, 1);
+            try { localStorage.setItem('fire_ssh_bookmarks', JSON.stringify(dirBookmarks)); } catch(e){}
+            updateBookmarkStarUI();
+            renderBookmarksMenu();
+          };
+
+          row.appendChild(link);
+          row.appendChild(del);
+          bookmarksList.appendChild(row);
+        });
+      }
+    }
+
+    let currentPromptConfirmHandler = null;
+
+    function showFileModalPrompt({ title, desc, defaultValue = '', placeholder = '', confirmLabel = 'Confirm', isDanger = false, isConfirmOnly = false, onConfirm }) {
+      const dialog = document.getElementById('file-modal-prompt-dialog');
+      const titleEl = document.getElementById('file-modal-prompt-title');
+      const descEl = document.getElementById('file-modal-prompt-desc');
+      const inputEl = document.getElementById('file-modal-prompt-input');
+      const confirmBtn = document.getElementById('file-modal-prompt-confirm-btn');
+      if (!dialog || !confirmBtn) return;
+
+      if (titleEl) titleEl.textContent = title;
+      if (descEl) descEl.textContent = desc;
+      if (inputEl) {
+        inputEl.style.display = isConfirmOnly ? 'none' : 'block';
+        inputEl.value = defaultValue;
+        inputEl.placeholder = placeholder || '';
+      }
+      confirmBtn.textContent = confirmLabel;
+      confirmBtn.className = isDanger
+        ? 'px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-medium transition cursor-pointer'
+        : 'px-3 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-medium transition cursor-pointer';
+
+      currentPromptConfirmHandler = () => {
+        const val = inputEl ? inputEl.value.trim() : '';
+        if (!isConfirmOnly && !val) return;
+        closeFileModalPrompt();
+        if (typeof onConfirm === 'function') {
+          onConfirm(val);
+        }
+      };
+
+      confirmBtn.onclick = currentPromptConfirmHandler;
+      if (inputEl) {
+        inputEl.onkeydown = (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            currentPromptConfirmHandler();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            closeFileModalPrompt();
+          }
+        };
+      }
+
+      dialog.classList.remove('hidden');
+      if (inputEl && !isConfirmOnly) {
+        setTimeout(() => {
+          inputEl.focus();
+          inputEl.select();
+        }, 50);
+      }
+    }
+
+    function closeFileModalPrompt() {
+      const dialog = document.getElementById('file-modal-prompt-dialog');
+      if (dialog) dialog.classList.add('hidden');
+      currentPromptConfirmHandler = null;
+    }
+
+    function promptCreateDirItem(type) {
+      closeDirNewMenu();
+      const isFolder = type === 'folder';
+      showFileModalPrompt({
+        title: isFolder ? 'Create New Folder' : 'Create New File',
+        desc: `Enter name for new ${isFolder ? 'folder' : 'file'} in ${currentModalDirPath}:`,
+        placeholder: isFolder ? 'my-folder' : 'untitled.txt',
+        confirmLabel: 'Create',
+        onConfirm: async (name) => {
+          if (!name) return;
+          const targetPath = (currentModalDirPath.replace(/\/+$/, '') || '') + '/' + name;
+          try {
+            const res = await fetch('/api/file-op', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                op: isFolder ? 'mkdir' : 'touch',
+                path: targetPath,
+                tab: currentModalFileTabId || activeTabId
+              })
+            });
+            const data = await res.json();
+            if (data.success) {
+              showToast(`${isFolder ? 'Folder' : 'File'} created`);
+              openFolderInModal(currentModalDirPath, currentModalFileTabId);
+            } else {
+              alert(data.error || 'Operation failed');
+            }
+          } catch (err) {
+            alert(err.message || 'Network error');
+          }
+        }
+      });
+    }
+
+    function promptRenameDirItem(fullPath, currentName) {
+      showFileModalPrompt({
+        title: 'Rename',
+        desc: `Rename "${currentName}":`,
+        defaultValue: currentName,
+        confirmLabel: 'Rename',
+        onConfirm: async (newName) => {
+          if (!newName || newName === currentName) return;
+          try {
+            const res = await fetch('/api/file-op', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                op: 'rename',
+                path: fullPath,
+                new_name: newName,
+                tab: currentModalFileTabId || activeTabId
+              })
+            });
+            const data = await res.json();
+            if (data.success) {
+              showToast('Renamed successfully');
+              openFolderInModal(currentModalDirPath, currentModalFileTabId);
+            } else {
+              alert(data.error || 'Rename failed');
+            }
+          } catch (err) {
+            alert(err.message || 'Network error');
+          }
+        }
+      });
+    }
+
+    function promptDeleteDirItem(fullPath, isDir) {
+      const name = fullPath.split('/').pop() || fullPath;
+      showFileModalPrompt({
+        title: isDir ? 'Delete Folder' : 'Delete File',
+        desc: `Are you sure you want to permanently delete "${name}"? This cannot be undone.`,
+        isConfirmOnly: true,
+        isDanger: true,
+        confirmLabel: 'Delete',
+        onConfirm: async () => {
+          try {
+            const res = await fetch('/api/file-op', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                op: 'delete',
+                path: fullPath,
+                tab: currentModalFileTabId || activeTabId
+              })
+            });
+            const data = await res.json();
+            if (data.success) {
+              showToast(`${isDir ? 'Folder' : 'File'} deleted`);
+              openFolderInModal(currentModalDirPath, currentModalFileTabId);
+            } else {
+              alert(data.error || 'Delete failed');
+            }
+          } catch (err) {
+            alert(err.message || 'Network error');
+          }
+        }
+      });
+    }
+
+    async function duplicateDirItem(fullPath) {
+      try {
+        const res = await fetch('/api/file-op', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            op: 'duplicate',
+            path: fullPath,
+            tab: currentModalFileTabId || activeTabId
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('Duplicated successfully');
+          openFolderInModal(currentModalDirPath, currentModalFileTabId);
+        } else {
+          alert(data.error || 'Duplicate failed');
+        }
+      } catch (err) {
+        alert(err.message || 'Network error');
+      }
+    }
+
+    let dirDragSetupDone = false;
+    function setupDirDragAndDrop() {
+      if (dirDragSetupDone) return;
+      const dirWrap = document.getElementById('file-modal-dir-wrap');
+      const dropOverlay = document.getElementById('file-modal-dir-drop-overlay');
+      const dropTarget = document.getElementById('file-modal-dir-drop-target');
+      if (!dirWrap || !dropOverlay) return;
+      dirDragSetupDone = true;
+
+      let dragCounter = 0;
+
+      dirWrap.addEventListener('dragenter', (e) => {
+        e.preventDefault();
+        dragCounter++;
+        if (dropOverlay && currentModalDirPath) {
+          if (dropTarget) dropTarget.textContent = currentModalDirPath;
+          dropOverlay.classList.remove('hidden');
+        }
+      });
+
+      dirWrap.addEventListener('dragover', (e) => {
+        e.preventDefault();
+      });
+
+      dirWrap.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        dragCounter--;
+        if (dragCounter <= 0) {
+          dragCounter = 0;
+          if (dropOverlay) dropOverlay.classList.add('hidden');
+        }
+      });
+
+      dirWrap.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        dragCounter = 0;
+        if (dropOverlay) dropOverlay.classList.add('hidden');
+        const files = e.dataTransfer.files;
+        if (!files || files.length === 0 || !currentModalDirPath) return;
+
+        showToast(`Uploading ${files.length} file(s)...`);
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const formData = new FormData();
+          formData.append('file', file, file.name);
+          try {
+            const tabParam = (currentModalFileTabId || activeTabId) ? `tab=${encodeURIComponent(currentModalFileTabId || activeTabId)}` : '';
+            const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+            const destParam = `dest=${encodeURIComponent(currentModalDirPath)}`;
+            const nameParam = `name=${encodeURIComponent(file.name)}`;
+            const qs = [destParam, nameParam, tabParam, tokenParam].filter(Boolean).join('&');
+            await fetch(`/api/upload?${qs}`, {
+              method: 'POST',
+              body: formData
+            });
+          } catch (err) {}
+        }
+        showToast('Upload completed');
+        openFolderInModal(currentModalDirPath, currentModalFileTabId);
+      });
+    }
 
     function fuzzyMatch(pattern, text) {
       if (!pattern) return 0;
@@ -5514,6 +6024,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (sortSelect && dirSortBy) {
         sortSelect.value = dirSortBy;
       }
+
+      const viewBtn = document.getElementById('file-modal-dir-view-btn');
+      const viewIcon = document.getElementById('file-modal-dir-view-icon');
+      if (viewBtn && viewIcon) {
+        if (dirViewMode === 'list') {
+          viewIcon.textContent = '⊞';
+          viewBtn.title = 'Switch to Grid View';
+          viewBtn.className = 'px-2 py-1 rounded-lg text-xs font-mono border transition flex items-center gap-1 bg-sky-500/20 text-sky-300 border-sky-500/40 cursor-pointer shadow-sm';
+        } else {
+          viewIcon.textContent = '☰';
+          viewBtn.title = 'Switch to List View';
+          viewBtn.className = 'px-2 py-1 rounded-lg text-xs font-mono border transition flex items-center gap-1 bg-slate-950/80 text-slate-400 border-slate-800 hover:text-slate-200 cursor-pointer';
+        }
+      }
+
+      updateBookmarkStarUI();
     }
 
     function applyDirFiltersAndRender() {
@@ -5658,6 +6184,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
       if (emptyEl) emptyEl.classList.add('hidden');
 
+      if (dirViewMode === 'list') {
+        list.className = 'flex-1 overflow-auto p-2 flex flex-col gap-0.5';
+      } else {
+        list.className = 'flex-1 overflow-auto p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1 content-start';
+      }
+
       const baseClean = dirPath.replace(/\/+$/, '');
 
       items.forEach(item => {
@@ -5677,16 +6209,48 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           cat && cat.badge === 'BINARY' ? '⚙️' : '📄'
         );
 
-        const card = document.createElement('button');
-        card.type = 'button';
-        card.className = `w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-xl bg-slate-900/60 hover:bg-slate-800/90 border border-slate-800/80 transition group select-none ${item.is_dir ? 'hover:border-sky-500/40' : 'hover:border-orange-500/30'}`;
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition shrink-0 ml-1';
+        actionsDiv.onclick = (e) => e.stopPropagation();
+
+        const renameBtn = document.createElement('button');
+        renameBtn.type = 'button';
+        renameBtn.textContent = '✏️';
+        renameBtn.title = 'Rename';
+        renameBtn.className = 'p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-white transition text-xs cursor-pointer';
+        renameBtn.onclick = (e) => { e.stopPropagation(); promptRenameDirItem(fullPath, item.name); };
+
+        const dupBtn = document.createElement('button');
+        dupBtn.type = 'button';
+        dupBtn.textContent = '📋';
+        dupBtn.title = 'Duplicate';
+        dupBtn.className = 'p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-white transition text-xs cursor-pointer';
+        dupBtn.onclick = (e) => { e.stopPropagation(); duplicateDirItem(fullPath); };
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.textContent = '🗑️';
+        delBtn.title = 'Delete';
+        delBtn.className = 'p-1 hover:bg-red-500/20 rounded text-slate-400 hover:text-red-400 transition text-xs cursor-pointer';
+        delBtn.onclick = (e) => { e.stopPropagation(); promptDeleteDirItem(fullPath, item.is_dir); };
+
+        actionsDiv.appendChild(renameBtn);
+        actionsDiv.appendChild(dupBtn);
+        actionsDiv.appendChild(delBtn);
+
+        if (!item.is_dir) {
+          const dlBtn = document.createElement('button');
+          dlBtn.type = 'button';
+          dlBtn.textContent = '↓';
+          dlBtn.title = 'Download file';
+          dlBtn.className = 'p-1 hover:bg-slate-700/80 rounded text-slate-400 hover:text-white transition text-xs cursor-pointer';
+          dlBtn.onclick = (e) => { e.stopPropagation(); downloadFilePath(fullPath); };
+          actionsDiv.appendChild(dlBtn);
+        }
 
         const iconSpan = document.createElement('span');
         iconSpan.textContent = icon;
         iconSpan.className = 'text-base shrink-0';
-
-        const info = document.createElement('div');
-        info.className = 'min-w-0 flex-1';
 
         const nameSpan = document.createElement('div');
         nameSpan.textContent = displayName + (item.is_dir ? '/' : '');
@@ -5694,35 +6258,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (item.rel_path && item.rel_path.includes('/')) {
           nameSpan.title = item.rel_path;
         }
-        info.appendChild(nameSpan);
 
-        if (item.is_dir) {
-          const subInfo = [];
-          if (item.sub_dirs !== undefined) subInfo.push(`📁 ${item.sub_dirs}`);
-          if (item.sub_files !== undefined) subInfo.push(`📄 ${item.sub_files}`);
-          if (item.sub_imgs) subInfo.push(`🖼️ ${item.sub_imgs}`);
-          const metaSpan = document.createElement('div');
-          metaSpan.textContent = subInfo.length > 0 ? subInfo.join('  ') : (item.rel_path && item.rel_path.includes('/') ? item.rel_path : '📁 0  📄 0');
-          metaSpan.className = 'text-[10px] text-slate-500 font-mono truncate';
-          info.appendChild(metaSpan);
-        } else if (item.size !== undefined && item.size !== null) {
-          const sizeSpan = document.createElement('div');
-          sizeSpan.textContent = formatBytes(item.size);
-          sizeSpan.className = 'text-[10px] text-slate-500 font-mono truncate';
-          info.appendChild(sizeSpan);
-        }
+        const arrow = document.createElement('span');
+        arrow.textContent = '›';
+        arrow.className = 'text-slate-600 group-hover:text-sky-400 font-bold text-sm transition shrink-0';
 
-        card.appendChild(iconSpan);
-        card.appendChild(info);
-
-        if (item.is_dir) {
-          const arrow = document.createElement('span');
-          arrow.textContent = '›';
-          arrow.className = 'text-slate-600 group-hover:text-sky-400 font-bold text-sm transition shrink-0';
-          card.appendChild(arrow);
-          card.onclick = () => openFolderInModal(fullPath, currentModalFileTabId);
-        } else {
-          card.onclick = () => {
+        const onItemClick = () => {
+          if (item.is_dir) {
+            openFolderInModal(fullPath, currentModalFileTabId);
+          } else {
             const originFolder = currentModalDirPath;
             if (cat && (cat.isImage || cat.isVideo || cat.isAudio)) {
               closeFileContentModal(true);
@@ -5734,10 +6278,89 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             } else {
               openFileContentModal(fullPath, currentModalFileTabId, null, (cat && (cat.isHtml || cat.isMarkdown)) ? 'preview' : 'code', originFolder);
             }
-          };
-        }
+          }
+        };
 
-        list.appendChild(card);
+        if (dirViewMode === 'list') {
+          const row = document.createElement('div');
+          row.role = 'button';
+          row.tabIndex = 0;
+          row.className = `w-full text-left flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-slate-900/40 hover:bg-slate-800/90 border border-slate-800/40 hover:border-slate-700/80 transition group select-none text-xs font-mono cursor-pointer ${item.is_dir ? 'hover:border-sky-500/30' : 'hover:border-orange-500/20'}`;
+
+          const leftSection = document.createElement('div');
+          leftSection.className = 'flex items-center gap-2 min-w-0 flex-1';
+          leftSection.appendChild(iconSpan);
+          leftSection.appendChild(nameSpan);
+
+          const metaSection = document.createElement('div');
+          metaSection.className = 'flex items-center gap-4 text-[11px] text-slate-500 font-mono shrink-0';
+
+          const statsSpan = document.createElement('span');
+          if (item.is_dir) {
+            const subInfo = [];
+            if (item.sub_dirs !== undefined) subInfo.push(`📁 ${item.sub_dirs}`);
+            if (item.sub_files !== undefined) subInfo.push(`📄 ${item.sub_files}`);
+            if (item.sub_imgs) subInfo.push(`🖼️ ${item.sub_imgs}`);
+            statsSpan.textContent = subInfo.length > 0 ? subInfo.join('  ') : '📁 0  📄 0';
+          } else if (item.size !== undefined && item.size !== null) {
+            statsSpan.textContent = formatBytes(item.size);
+          }
+          metaSection.appendChild(statsSpan);
+
+          if (item.mtime) {
+            const dateSpan = document.createElement('span');
+            const d = new Date(item.mtime * 1000);
+            const pad = (n) => String(n).padStart(2, '0');
+            dateSpan.textContent = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+            dateSpan.className = 'hidden md:inline text-slate-600';
+            metaSection.appendChild(dateSpan);
+          }
+
+          row.appendChild(leftSection);
+          row.appendChild(metaSection);
+          row.appendChild(actionsDiv);
+          if (item.is_dir) {
+            row.appendChild(arrow);
+          }
+
+          row.onclick = onItemClick;
+          row.onkeydown = (e) => { if (e.key === 'Enter') onItemClick(); };
+          list.appendChild(row);
+        } else {
+          const card = document.createElement('button');
+          card.type = 'button';
+          card.className = `w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-xl bg-slate-900/60 hover:bg-slate-800/90 border border-slate-800/80 transition group select-none ${item.is_dir ? 'hover:border-sky-500/40' : 'hover:border-orange-500/30'}`;
+
+          const info = document.createElement('div');
+          info.className = 'min-w-0 flex-1';
+          info.appendChild(nameSpan);
+
+          if (item.is_dir) {
+            const subInfo = [];
+            if (item.sub_dirs !== undefined) subInfo.push(`📁 ${item.sub_dirs}`);
+            if (item.sub_files !== undefined) subInfo.push(`📄 ${item.sub_files}`);
+            if (item.sub_imgs) subInfo.push(`🖼️ ${item.sub_imgs}`);
+            const metaSpan = document.createElement('div');
+            metaSpan.textContent = subInfo.length > 0 ? subInfo.join('  ') : (item.rel_path && item.rel_path.includes('/') ? item.rel_path : '📁 0  📄 0');
+            metaSpan.className = 'text-[10px] text-slate-500 font-mono truncate';
+            info.appendChild(metaSpan);
+          } else if (item.size !== undefined && item.size !== null) {
+            const sizeSpan = document.createElement('div');
+            sizeSpan.textContent = formatBytes(item.size);
+            sizeSpan.className = 'text-[10px] text-slate-500 font-mono truncate';
+            info.appendChild(sizeSpan);
+          }
+
+          card.appendChild(iconSpan);
+          card.appendChild(info);
+          card.appendChild(actionsDiv);
+          if (item.is_dir) {
+            card.appendChild(arrow);
+          }
+
+          card.onclick = onItemClick;
+          list.appendChild(card);
+        }
       });
     }
 
@@ -6022,6 +6645,23 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const endLineHdr = res.headers.get('X-End-Line');
         const isWindowed = Boolean(totalLinesHdr);
 
+        const xFileSzHdr = res.headers.get('X-File-Size');
+        if (xFileSzHdr) {
+          currentModalFileSize = parseInt(xFileSzHdr, 10);
+        } else {
+          currentModalFileSize = clBytes || 0;
+        }
+
+        const followBtn = document.getElementById('file-modal-follow-btn');
+        const isLogOrText = (catCheck && catCheck.type === 'text') || path.toLowerCase().endsWith('.log');
+        if (followBtn) {
+          if (isLogOrText) {
+            followBtn.classList.remove('hidden');
+          } else {
+            followBtn.classList.add('hidden');
+          }
+        }
+
         const text = await res.text();
         if (text.includes('\x00')) {
           renderBinaryModalCard(path, catCheck, { size: text.length }, 'File contains binary null characters and cannot be displayed as plain text. Please use Download.', 'BINARY FILE');
@@ -6244,6 +6884,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       currentModalFileEndLine = 0;
       currentModalFileTotalLines = 0;
       currentModalFileTargetLine = null;
+      stopLogFollow();
+      closeFileFindBar();
+      closeDirNewMenu();
+      closeDirBookmarksMenu();
+      closeFileModalPrompt();
+      const followBtn = document.getElementById('file-modal-follow-btn');
+      if (followBtn) followBtn.classList.add('hidden');
       const windowBanner = document.getElementById('file-modal-window-banner');
       if (windowBanner) windowBanner.classList.add('hidden');
       const targetLineBadge = document.getElementById('file-modal-target-line-badge');
@@ -6372,6 +7019,236 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       cleanupFileModalView();
       const modal = document.getElementById('file-content-modal');
       if (modal) modal.classList.add('hidden');
+    }
+
+    function jumpToModalLine(lineNum) {
+      if (!lineNum) return;
+      const startLine = currentModalFileStartLine || 1;
+      const relativeIdx = lineNum - startLine;
+      const lineHeight = 24;
+      const lineHighlight = document.getElementById('file-modal-target-line-highlight');
+      if (lineHighlight) {
+        lineHighlight.style.top = `${relativeIdx * lineHeight}px`;
+        lineHighlight.style.height = `${lineHeight}px`;
+        lineHighlight.classList.remove('hidden');
+      }
+      const vp = document.getElementById('file-modal-viewport');
+      if (vp) {
+        const scrollPos = Math.max(0, (relativeIdx * lineHeight) - 80);
+        vp.scrollTo({ top: scrollPos, behavior: 'smooth' });
+      }
+    }
+
+    let fileFindQuery = '';
+    let fileFindMatches = [];
+    let fileFindIndex = -1;
+
+    function openFileFindBar() {
+      const bar = document.getElementById('file-modal-find-bar');
+      const input = document.getElementById('file-modal-find-input');
+      if (!bar || !input) return;
+      bar.classList.remove('hidden');
+      input.focus();
+      input.select();
+      if (input.value) {
+        onFileFindInput();
+      }
+    }
+
+    function closeFileFindBar() {
+      const bar = document.getElementById('file-modal-find-bar');
+      if (bar) bar.classList.add('hidden');
+      fileFindMatches = [];
+      fileFindIndex = -1;
+      const countEl = document.getElementById('file-modal-find-count');
+      if (countEl) countEl.textContent = '0/0';
+      const highlight = document.getElementById('file-modal-target-line-highlight');
+      if (highlight) highlight.classList.add('hidden');
+    }
+
+    function onFileFindInput() {
+      const input = document.getElementById('file-modal-find-input');
+      const countEl = document.getElementById('file-modal-find-count');
+      if (!input) return;
+      fileFindQuery = input.value;
+      fileFindMatches = [];
+      fileFindIndex = -1;
+
+      if (!fileFindQuery) {
+        if (countEl) countEl.textContent = '0/0';
+        const highlight = document.getElementById('file-modal-target-line-highlight');
+        if (highlight) highlight.classList.add('hidden');
+        return;
+      }
+
+      const qLower = fileFindQuery.toLowerCase();
+
+      if (isModalEditing) {
+        const editor = document.getElementById('file-modal-code-editor');
+        if (!editor) return;
+        const text = editor.value.toLowerCase();
+        let idx = 0;
+        while ((idx = text.indexOf(qLower, idx)) !== -1) {
+          fileFindMatches.push({ start: idx, end: idx + fileFindQuery.length });
+          idx += fileFindQuery.length;
+        }
+      } else {
+        const raw = currentModalFileContent || '';
+        const lines = raw.split('\n');
+        const startLine = currentModalFileStartLine || 1;
+        lines.forEach((lineText, lIdx) => {
+          if (lineText.toLowerCase().includes(qLower)) {
+            fileFindMatches.push({ line: startLine + lIdx, text: lineText });
+          }
+        });
+      }
+
+      if (fileFindMatches.length > 0) {
+        navigateFileFind(1);
+      } else {
+        if (countEl) countEl.textContent = '0/0';
+        const highlight = document.getElementById('file-modal-target-line-highlight');
+        if (highlight) highlight.classList.add('hidden');
+      }
+    }
+
+    function onFileFindKeydown(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        navigateFileFind(e.shiftKey ? -1 : 1);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeFileFindBar();
+      }
+    }
+
+    function navigateFileFind(delta) {
+      if (fileFindMatches.length === 0) return;
+      if (fileFindIndex === -1) {
+        fileFindIndex = delta > 0 ? 0 : fileFindMatches.length - 1;
+      } else {
+        fileFindIndex = (fileFindIndex + delta + fileFindMatches.length) % fileFindMatches.length;
+      }
+
+      const countEl = document.getElementById('file-modal-find-count');
+      if (countEl) {
+        countEl.textContent = `${fileFindIndex + 1}/${fileFindMatches.length}`;
+      }
+
+      const cur = fileFindMatches[fileFindIndex];
+      if (!cur) return;
+
+      if (isModalEditing) {
+        const editor = document.getElementById('file-modal-code-editor');
+        if (editor) {
+          editor.focus();
+          editor.setSelectionRange(cur.start, cur.end);
+          const textBefore = editor.value.substring(0, cur.start);
+          const lineNum = textBefore.split('\n').length;
+          editor.scrollTop = Math.max(0, (lineNum - 5) * 24);
+        }
+      } else if (cur.line) {
+        jumpToModalLine(cur.line);
+      }
+    }
+
+    let fileModalFollowing = false;
+    let fileModalFollowInterval = null;
+    let fileModalFollowOffset = 0;
+    let currentModalFileSize = 0;
+
+    function toggleLogFollow() {
+      if (fileModalFollowing) {
+        stopLogFollow();
+      } else {
+        startLogFollow();
+      }
+    }
+
+    function startLogFollow() {
+      fileModalFollowing = true;
+      const followBtn = document.getElementById('file-modal-follow-btn');
+      const followLabel = document.getElementById('file-modal-follow-label');
+      if (followBtn) {
+        followBtn.className = 'px-2.5 py-1.5 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded-xl text-xs transition flex items-center gap-1 font-medium animate-pulse';
+      }
+      if (followLabel) followLabel.textContent = 'Following (live)';
+
+      fileModalFollowOffset = currentModalFileSize || (currentModalFileContent ? (new Blob([currentModalFileContent])).size : 0);
+
+      if (fileModalFollowInterval) clearInterval(fileModalFollowInterval);
+      fileModalFollowInterval = setInterval(pollLogFollow, 1500);
+
+      const viewport = document.getElementById('file-modal-viewport');
+      if (viewport) viewport.scrollTop = viewport.scrollHeight;
+    }
+
+    function stopLogFollow() {
+      fileModalFollowing = false;
+      if (fileModalFollowInterval) {
+        clearInterval(fileModalFollowInterval);
+        fileModalFollowInterval = null;
+      }
+      const followBtn = document.getElementById('file-modal-follow-btn');
+      const followLabel = document.getElementById('file-modal-follow-label');
+      if (followBtn) {
+        followBtn.className = 'px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1 font-medium';
+      }
+      if (followLabel) followLabel.textContent = 'Follow';
+    }
+
+    async function pollLogFollow() {
+      if (!fileModalFollowing || !currentModalFilePath || isModalEditing) {
+        stopLogFollow();
+        return;
+      }
+      try {
+        const fileParam = encodeURIComponent(currentModalFilePath);
+        const offsetParam = `offset=${fileModalFollowOffset}`;
+        const tabParam = (currentModalFileTabId || activeTabId) ? `tab=${encodeURIComponent(currentModalFileTabId || activeTabId)}` : '';
+        const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+        const qs = [`file=${fileParam}`, offsetParam, tabParam, tokenParam].filter(Boolean).join('&');
+        const res = await fetch(`/api/view?${qs}`);
+        if (!res.ok) return;
+
+        const newOffsetHeader = res.headers.get('X-File-Offset');
+        const isTruncated = res.headers.get('X-Truncated') === '1';
+        if (newOffsetHeader) {
+          fileModalFollowOffset = parseInt(newOffsetHeader, 10);
+        }
+        const chunk = await res.text();
+        if (!chunk) return;
+
+        if (isTruncated) {
+          currentModalFileContent = chunk;
+        } else {
+          currentModalFileContent = (currentModalFileContent || '') + chunk;
+        }
+
+        const lines = currentModalFileContent.split('\n');
+        currentModalFileTotalLines = lines.length;
+        currentModalFileEndLine = lines.length;
+
+        const codeText = document.getElementById('file-modal-code-text');
+        if (codeText) {
+          codeText.textContent = currentModalFileContent;
+        }
+        const lineNumEl = document.getElementById('file-modal-line-numbers');
+        if (lineNumEl) {
+          let lineNums = '';
+          for (let i = 1; i <= currentModalFileTotalLines; i++) {
+            lineNums += (i === 1 ? '' : '\n') + i;
+          }
+          lineNumEl.textContent = lineNums;
+        }
+        const metaLines = document.getElementById('file-modal-meta-lines');
+        if (metaLines) metaLines.textContent = `Lines: ${currentModalFileTotalLines}`;
+
+        const viewport = document.getElementById('file-modal-viewport');
+        if (viewport) {
+          viewport.scrollTop = viewport.scrollHeight;
+        }
+      } catch (err) {}
     }
 
     let currentDbColumns = [];
@@ -7719,8 +8596,30 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             }
             return;
           }
+          if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+            e.preventDefault();
+            if (!currentModalIsDir) {
+              openFileFindBar();
+            } else {
+              const sInput = document.getElementById('file-modal-dir-search');
+              if (sInput) { sInput.focus(); sInput.select(); }
+            }
+            return;
+          }
           if (e.key === 'Escape') {
             e.preventDefault();
+            const promptDlg = document.getElementById('file-modal-prompt-dialog');
+            if (promptDlg && !promptDlg.classList.contains('hidden')) {
+              closeFileModalPrompt();
+              return;
+            }
+            const findBar = document.getElementById('file-modal-find-bar');
+            if (findBar && !findBar.classList.contains('hidden')) {
+              closeFileFindBar();
+              return;
+            }
+            closeDirNewMenu();
+            closeDirBookmarksMenu();
             if (isModalEditing) {
               cancelFileModalEditor();
             } else if (currentModalIsDir && dirSearchQuery) {
@@ -7832,6 +8731,73 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         term.clear();
         term.focus();
         showToast('Terminal cleared');
+      }
+    }
+
+    let currentTermSearchQuery = '';
+
+    function openTerminalSearch() {
+      const bar = document.getElementById('term-search-bar');
+      const input = document.getElementById('term-search-input');
+      if (!bar || !input) return;
+      bar.classList.remove('hidden');
+      input.focus();
+      input.select();
+      if (input.value) {
+        onTermSearchInput();
+      }
+    }
+
+    function closeTerminalSearch() {
+      const bar = document.getElementById('term-search-bar');
+      if (bar) bar.classList.add('hidden');
+      const curTab = getActiveTab();
+      const t = curTab ? curTab.term : term;
+      if (t) {
+        if (t._searchAddon && typeof t._searchAddon.clearDecorations === 'function') {
+          t._searchAddon.clearDecorations();
+        }
+        t.focus();
+      }
+    }
+
+    function toggleTerminalSearch() {
+      const bar = document.getElementById('term-search-bar');
+      if (bar && !bar.classList.contains('hidden')) {
+        closeTerminalSearch();
+      } else {
+        openTerminalSearch();
+      }
+    }
+
+    function onTermSearchInput() {
+      const input = document.getElementById('term-search-input');
+      if (!input) return;
+      currentTermSearchQuery = input.value;
+      termSearchNext(true);
+    }
+
+    function onTermSearchKeydown(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        termSearchNext(!e.shiftKey);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeTerminalSearch();
+      }
+    }
+
+    function termSearchNext(forward = true) {
+      if (!currentTermSearchQuery) return;
+      const curTab = getActiveTab();
+      const t = curTab ? curTab.term : term;
+      if (!t || !t._searchAddon) return;
+      const sa = t._searchAddon;
+      const opts = { regex: false, wholeWord: false, caseSensitive: false, incremental: false, decorations: { matchOverviewRuler: '#f97316', activeMatchColorOverviewRuler: '#f97316' } };
+      if (forward) {
+        sa.findNext(currentTermSearchQuery, opts);
+      } else {
+        sa.findPrevious(currentTermSearchQuery, opts);
       }
     }
 
@@ -8104,6 +9070,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       t.loadAddon(fa);
       if (typeof WebLinksAddon !== 'undefined') {
         t.loadAddon(new WebLinksAddon.WebLinksAddon());
+      }
+      if (typeof SearchAddon !== 'undefined' && SearchAddon.SearchAddon) {
+        try {
+          const sa = new SearchAddon.SearchAddon();
+          t.loadAddon(sa);
+          t._searchAddon = sa;
+        } catch(e) {}
       }
       t.open(mountEl);
       if (typeof registerFileLinkProvider === 'function') {
@@ -10192,12 +11165,25 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (e.key === 'Escape') {
           hideContextMenu();
           hideTerminalSelectionMenu();
+          const termSearch = document.getElementById('term-search-bar');
+          if (termSearch && !termSearch.classList.contains('hidden')) {
+            e.preventDefault();
+            closeTerminalSearch();
+            return;
+          }
           const quickModal = document.getElementById('quick-exec-modal');
           if (quickModal && !quickModal.classList.contains('hidden')) {
             e.preventDefault();
             closeQuickExecModal();
             return;
           }
+        }
+
+        // Ctrl+Shift+F: Find in terminal output
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+          e.preventDefault();
+          toggleTerminalSearch();
+          return;
         }
 
         // Alt+T or Ctrl+Shift+T: New Tab
@@ -10652,8 +11638,9 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(file_size))
+                self.send_header("X-File-Size", str(file_size))
                 self.send_header("Accept-Ranges", "bytes")
-                self.send_header("Access-Control-Expose-Headers", "Content-Disposition, Content-Range, Accept-Ranges")
+                self.send_header("Access-Control-Expose-Headers", "Content-Disposition, Content-Range, Accept-Ranges, X-File-Size")
                 self.send_header("Content-Disposition", f'{disposition_type}; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
                 if is_raw and content_type.startswith("text/html"):
                     self.send_header("Content-Security-Policy", "sandbox allow-scripts allow-forms allow-modals;")
@@ -10861,6 +11848,10 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                                     item_info["sub_dirs"] = sd
                                     item_info["sub_files"] = sf
                                     item_info["sub_imgs"] = si
+                                    try:
+                                        item_info["mtime"] = int(entry.stat(follow_symlinks=False).st_mtime)
+                                    except Exception:
+                                        item_info["mtime"] = 0
                                 else:
                                     try:
                                         st = entry.stat(follow_symlinks=False)
@@ -11153,6 +12144,39 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                         except Exception as e:
                             self.send_json({"success": False, "error": f"Failed reading line range: {e}"}, status=500)
                             return
+
+                    offset_opt = query.get('offset', [None])[0]
+                    if offset_opt is not None and offset_opt.isdigit():
+                        try:
+                            cur_offset = int(offset_opt)
+                            if cur_offset > file_size:
+                                read_start = 0
+                                read_len = min(file_size, 64 * 1024)
+                                is_truncated = True
+                            else:
+                                read_start = cur_offset
+                                read_len = min(file_size - cur_offset, 256 * 1024)
+                                is_truncated = False
+
+                            with open(target_path, 'rb') as f:
+                                f.seek(read_start)
+                                chunk = f.read(read_len)
+
+                            new_offset = read_start + len(chunk)
+                            self.send_response(200)
+                            self.send_header("Content-Type", "text/plain; charset=utf-8")
+                            self.send_header("Content-Length", str(len(chunk)))
+                            self.send_header("X-File-Size", str(file_size))
+                            self.send_header("X-File-Offset", str(new_offset))
+                            self.send_header("X-Truncated", "1" if is_truncated else "0")
+                            self.send_header("Access-Control-Expose-Headers", "Content-Disposition, X-File-Size, X-File-Offset, X-Truncated")
+                            self.send_header("Content-Disposition", f'inline; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
+                            self.end_headers()
+                            self.wfile.write(chunk)
+                            return
+                        except Exception as e:
+                            self.send_json({"success": False, "error": f"Failed reading log offset: {e}"}, status=500)
+                            return
                 if disposition_type == "inline" and not is_raw:
                     if content_type == "application/octet-stream" or content_type.startswith("text/") or content_type in ("application/json", "application/javascript", "application/xml"):
                         content_type = "text/plain; charset=utf-8"
@@ -11212,8 +12236,9 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(file_size))
+                self.send_header("X-File-Size", str(file_size))
                 self.send_header("Accept-Ranges", "bytes")
-                self.send_header("Access-Control-Expose-Headers", "Content-Disposition, Content-Range, Accept-Ranges")
+                self.send_header("Access-Control-Expose-Headers", "Content-Disposition, Content-Range, Accept-Ranges, X-File-Size")
                 self.send_header("Content-Disposition", f'{disposition_type}; filename="{clean_name}"; filename*=UTF-8\'\'{safe_name}')
                 if is_raw and content_type.startswith("text/html"):
                     self.send_header("Content-Security-Policy", "sandbox allow-scripts allow-forms allow-modals;")
@@ -11670,6 +12695,143 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                         pass
                 self.send_json({"success": False, "error": f"Failed to save file: {e}"}, status=500)
             return
+
+        elif parsed.path == '/api/file-op':
+            if not self.is_authenticated():
+                self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
+                return
+
+            content_len = int(self.headers.get('Content-Length', 0))
+            if content_len > 1024 * 1024:
+                self.send_json({"success": False, "error": "Payload too large"}, status=413)
+                return
+
+            try:
+                body = self.rfile.read(content_len).decode('utf-8', errors='replace')
+                data = json.loads(body)
+            except Exception as e:
+                self.send_json({"success": False, "error": f"Invalid JSON payload: {e}"}, status=400)
+                return
+
+            token = self.get_auth_token()
+            tab_id = data.get('tab')
+            op = (data.get('op') or '').strip().lower()
+            path_param = (data.get('path') or '').strip()
+            new_name = (data.get('new_name') or data.get('target') or '').strip()
+
+            if not op or not path_param:
+                self.send_json({"success": False, "error": "Missing 'op' or 'path' parameter"}, status=400)
+                return
+
+            session = self.server.terminals.get(token, tab_id)
+            cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
+            target_path = resolve_fs_path(cwd, path_param)
+
+            PROTECTED_SYSTEM_DIRS = {
+                '/', '/root', '/bin', '/boot', '/dev', '/etc', '/lib', '/lib64',
+                '/proc', '/sys', '/usr', '/var', '/home', '/mnt', '/media', '/opt',
+                '/run', '/srv', '/tmp'
+            }
+
+            try:
+                if op == 'mkdir':
+                    if os.path.exists(target_path):
+                        self.send_json({"success": False, "error": f"Path already exists: {os.path.basename(target_path)}"}, status=400)
+                        return
+                    os.makedirs(target_path, exist_ok=False)
+                    self.send_json({"success": True, "op": "mkdir", "path": target_path})
+                    return
+
+                elif op == 'touch':
+                    if os.path.isdir(target_path):
+                        self.send_json({"success": False, "error": "Cannot touch an existing directory"}, status=400)
+                        return
+                    parent = os.path.dirname(target_path) or '.'
+                    os.makedirs(parent, exist_ok=True)
+                    with open(target_path, 'a', encoding='utf-8'):
+                        os.utime(target_path, None)
+                    self.send_json({"success": True, "op": "touch", "path": target_path})
+                    return
+
+                elif op == 'rename':
+                    if not new_name:
+                        self.send_json({"success": False, "error": "Missing new_name parameter for rename"}, status=400)
+                        return
+                    if not os.path.exists(target_path):
+                        self.send_json({"success": False, "error": "Source path does not exist"}, status=404)
+                        return
+                    real_target = os.path.realpath(target_path)
+                    if real_target in PROTECTED_SYSTEM_DIRS:
+                        self.send_json({"success": False, "error": "Cannot rename protected system directory"}, status=403)
+                        return
+                    parent_dir = os.path.dirname(real_target)
+                    dest_path = resolve_fs_path(parent_dir, new_name) if '/' in new_name else os.path.join(parent_dir, new_name)
+                    if os.path.exists(dest_path):
+                        self.send_json({"success": False, "error": f"Destination already exists: {os.path.basename(dest_path)}"}, status=400)
+                        return
+                    os.rename(real_target, dest_path)
+                    self.send_json({"success": True, "op": "rename", "old_path": real_target, "new_path": dest_path})
+                    return
+
+                elif op == 'delete':
+                    if not os.path.exists(target_path):
+                        self.send_json({"success": False, "error": "Target does not exist"}, status=404)
+                        return
+                    real_target = os.path.realpath(target_path)
+                    if real_target in PROTECTED_SYSTEM_DIRS or len(real_target.strip('/').split('/')) < 2:
+                        self.send_json({"success": False, "error": "Deleting critical system directories is forbidden"}, status=403)
+                        return
+                    if os.path.isdir(real_target):
+                        shutil.rmtree(real_target)
+                    else:
+                        os.remove(real_target)
+                    self.send_json({"success": True, "op": "delete", "path": real_target})
+                    return
+
+                elif op == 'duplicate':
+                    if not os.path.exists(target_path):
+                        self.send_json({"success": False, "error": "Target does not exist"}, status=404)
+                        return
+                    real_target = os.path.realpath(target_path)
+                    parent_dir = os.path.dirname(real_target)
+                    base_name = os.path.basename(real_target)
+                    if new_name:
+                        dest_path = resolve_fs_path(parent_dir, new_name) if '/' in new_name else os.path.join(parent_dir, new_name)
+                    else:
+                        if os.path.isdir(real_target):
+                            dest_path = os.path.join(parent_dir, f"{base_name}-copy")
+                        else:
+                            parts = base_name.rsplit('.', 1)
+                            if len(parts) == 2:
+                                dest_path = os.path.join(parent_dir, f"{parts[0]}-copy.{parts[1]}")
+                            else:
+                                dest_path = os.path.join(parent_dir, f"{base_name}-copy")
+                    counter = 1
+                    initial_dest = dest_path
+                    while os.path.exists(dest_path):
+                        if os.path.isdir(real_target):
+                            dest_path = f"{initial_dest}-{counter}"
+                        else:
+                            parts = initial_dest.rsplit('.', 1)
+                            if len(parts) == 2:
+                                dest_path = f"{parts[0]}-{counter}.{parts[1]}"
+                            else:
+                                dest_path = f"{initial_dest}-{counter}"
+                        counter += 1
+
+                    if os.path.isdir(real_target):
+                        shutil.copytree(real_target, dest_path)
+                    else:
+                        shutil.copy2(real_target, dest_path)
+                    self.send_json({"success": True, "op": "duplicate", "source": real_target, "dest": dest_path})
+                    return
+
+                else:
+                    self.send_json({"success": False, "error": f"Unsupported op: {op}"}, status=400)
+                    return
+            except Exception as e:
+                self.send_json({"success": False, "error": f"File operation '{op}' failed: {e}"}, status=500)
+                return
 
         elif parsed.path == '/api/db/query':
             if not self.is_authenticated():
