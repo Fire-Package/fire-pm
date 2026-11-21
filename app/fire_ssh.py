@@ -2009,16 +2009,51 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
 
         <!-- Directory Browser Container -->
-        <div id="file-modal-dir-wrap" class="hidden absolute inset-0 z-0 flex flex-col bg-slate-950 overflow-auto">
-          <!-- Breadcrumb -->
-          <div id="file-modal-breadcrumb" class="flex items-center gap-1 px-4 py-2.5 border-b border-slate-800/80 text-xs font-mono text-slate-400 shrink-0 flex-wrap select-none bg-slate-900/60 overflow-x-auto"></div>
+        <div id="file-modal-dir-wrap" class="hidden absolute inset-0 z-0 flex flex-col bg-slate-950 overflow-hidden">
+          <!-- Top Toolbar: Breadcrumb + Search + Controls -->
+          <div class="px-3 py-2 border-b border-slate-800/80 bg-slate-900/70 text-xs font-mono shrink-0 flex flex-wrap items-center justify-between gap-2 select-none">
+            <!-- Breadcrumb -->
+            <div id="file-modal-breadcrumb" class="flex items-center gap-1 text-slate-400 shrink-0 flex-wrap overflow-x-auto max-w-full sm:max-w-[48%]"></div>
+
+            <!-- Controls Toolbar (Search, Depth, Dotfiles, Sort) -->
+            <div class="flex items-center gap-1.5 shrink-0 ml-auto flex-wrap">
+              <!-- Search Filter Input -->
+              <div class="relative flex items-center">
+                <span class="absolute left-2 text-slate-500 text-xs pointer-events-none">🔍</span>
+                <input type="text" id="file-modal-dir-search" placeholder="Filter (/)" oninput="onDirSearchInput()" onkeydown="onDirSearchKeydown(event)" class="bg-slate-950/80 border border-slate-800 hover:border-slate-700 focus:border-orange-500 text-slate-200 placeholder-slate-500 text-xs rounded-lg pl-6 pr-5 py-1 w-28 sm:w-36 focus:w-48 transition-all outline-none font-mono">
+                <button type="button" id="file-modal-dir-search-clear" onclick="clearDirSearch()" class="hidden absolute right-1.5 text-slate-500 hover:text-slate-300 text-xs cursor-pointer">✕</button>
+              </div>
+
+              <!-- Depth Toggle (Depth 1 vs Depth 3) -->
+              <button type="button" id="file-modal-dir-depth-btn" onclick="toggleDirSearchDepth()" class="px-2 py-1 rounded-lg text-xs font-mono border transition flex items-center gap-1 bg-slate-950/80 text-slate-400 border-slate-800 hover:text-slate-200 cursor-pointer" title="Search Scope: Depth 1 (current folder) vs Depth 3 (recursive up to 3 levels)">
+                <span id="file-modal-dir-depth-icon">🌿</span> <span id="file-modal-dir-depth-label">D:1</span>
+              </button>
+
+              <!-- Dotfiles Toggle -->
+              <button type="button" id="file-modal-dir-dotfiles-btn" onclick="toggleDirDotfiles()" class="px-2 py-1 rounded-lg text-xs font-mono border transition flex items-center gap-1 bg-slate-950/80 text-slate-400 border-slate-800 hover:text-slate-200 cursor-pointer" title="Toggle Hidden Files / Dotfiles (e.g. .git, .env)">
+                <span id="file-modal-dir-dotfiles-icon">👁️</span> <span id="file-modal-dir-dotfiles-label">Hidden</span>
+              </button>
+
+              <!-- Sort Dropdown -->
+              <select id="file-modal-dir-sort-select" onchange="onDirSortChange(this.value)" class="bg-slate-950/80 border border-slate-800 hover:border-slate-700 text-slate-300 text-xs rounded-lg px-2 py-1 font-mono outline-none cursor-pointer">
+                <option value="name-asc">Name (A-Z)</option>
+                <option value="name-desc">Name (Z-A)</option>
+                <option value="size-desc">Size (Large)</option>
+                <option value="size-asc">Size (Small)</option>
+                <option value="date-desc">Date (New)</option>
+                <option value="type">Type (Ext)</option>
+              </select>
+            </div>
+          </div>
+
           <!-- File list -->
           <div id="file-modal-dir-list" class="flex-1 overflow-auto p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1 content-start"></div>
+
           <!-- Empty state -->
           <div id="file-modal-dir-empty" class="hidden absolute inset-0 flex items-center justify-center text-slate-500 text-sm select-none pointer-events-none">
             <div class="text-center">
               <div class="text-3xl mb-2">📂</div>
-              <div>Empty directory</div>
+              <div id="file-modal-dir-empty-msg">Empty directory</div>
             </div>
           </div>
         </div>
@@ -5310,16 +5345,244 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         currentModalDirPath = data.dir || path;
         if (pathEl) pathEl.textContent = currentModalDirPath;
         buildBreadcrumb(currentModalDirPath);
-        renderDirListing(data.items || [], currentModalDirPath);
-
-        const count = (data.items || []).length;
-        if (metaLines) metaLines.textContent = `${count} item${count !== 1 ? 's' : ''}`;
-        if (metaSize) metaSize.textContent = '';
+        currentDirRawItems = data.items || [];
+        currentDirDepthItems = [];
+        currentDirLoadedDepth = 1;
+        updateDirControlsUI();
+        applyDirFiltersAndRender();
       } catch (err) {
         if (errorEl) errorEl.classList.remove('hidden');
         if (errorMsg) errorMsg.textContent = err.message || 'Unable to list directory';
       } finally {
         if (spinner) spinner.classList.add('hidden');
+      }
+    }
+
+    let currentDirRawItems = [];
+    let currentDirDepthItems = [];
+    let currentDirLoadedDepth = 1;
+    let showDirDotfiles = false;
+    try {
+      showDirDotfiles = localStorage.getItem('fire_ssh_show_dotfiles') === 'true';
+    } catch (e) {}
+    let dirSortBy = 'name-asc';
+    try {
+      dirSortBy = localStorage.getItem('fire_ssh_dir_sort') || 'name-asc';
+    } catch (e) {}
+    let dirSearchQuery = '';
+    let dirSearchDepth = 1;
+    let dirSearchDebounceTimer = null;
+
+    function fuzzyMatch(pattern, text) {
+      if (!pattern) return 0;
+      pattern = pattern.toLowerCase();
+      text = text.toLowerCase();
+      let pIdx = 0;
+      let score = 0;
+      let prevMatchIdx = -1;
+      for (let tIdx = 0; tIdx < text.length && pIdx < pattern.length; tIdx++) {
+        if (text[tIdx] === pattern[pIdx]) {
+          score += 1;
+          if (prevMatchIdx !== -1 && tIdx === prevMatchIdx + 1) {
+            score += 3;
+          }
+          if (tIdx === 0 || text[tIdx - 1] === '/' || text[tIdx - 1] === '.' || text[tIdx - 1] === '_' || text[tIdx - 1] === '-') {
+            score += 5;
+          }
+          prevMatchIdx = tIdx;
+          pIdx++;
+        }
+      }
+      return pIdx === pattern.length ? score : null;
+    }
+
+    function toggleDirDotfiles() {
+      showDirDotfiles = !showDirDotfiles;
+      try {
+        localStorage.setItem('fire_ssh_show_dotfiles', showDirDotfiles ? 'true' : 'false');
+      } catch (e) {}
+      updateDirControlsUI();
+      applyDirFiltersAndRender();
+    }
+
+    function onDirSortChange(val) {
+      dirSortBy = val || 'name-asc';
+      try {
+        localStorage.setItem('fire_ssh_dir_sort', dirSortBy);
+      } catch (e) {}
+      applyDirFiltersAndRender();
+    }
+
+    function toggleDirSearchDepth() {
+      dirSearchDepth = dirSearchDepth === 1 ? 3 : 1;
+      updateDirControlsUI();
+      if (dirSearchDepth === 3 && currentDirLoadedDepth < 3 && currentModalDirPath) {
+        fetchDirDepthItems(currentModalDirPath).then(() => {
+          applyDirFiltersAndRender();
+        });
+      } else {
+        applyDirFiltersAndRender();
+      }
+    }
+
+    async function fetchDirDepthItems(dirPath) {
+      const spinner = document.getElementById('file-modal-spinner');
+      if (spinner) spinner.classList.remove('hidden');
+      try {
+        const dirParam = `dir=${encodeURIComponent(dirPath)}`;
+        const depthParam = `depth=3`;
+        const tabParam = (currentModalFileTabId || activeTabId) ? `tab=${encodeURIComponent(currentModalFileTabId || activeTabId)}` : '';
+        const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+        const qs = [dirParam, depthParam, tabParam, tokenParam].filter(Boolean).join('&');
+        const res = await fetch(`/api/suggest?${qs}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.success && Array.isArray(data.items)) {
+          currentDirDepthItems = data.items;
+          currentDirLoadedDepth = 3;
+        }
+      } catch (e) {
+      } finally {
+        if (spinner) spinner.classList.add('hidden');
+      }
+    }
+
+    function onDirSearchInput() {
+      const searchInput = document.getElementById('file-modal-dir-search');
+      const clearBtn = document.getElementById('file-modal-dir-search-clear');
+      if (!searchInput) return;
+      dirSearchQuery = searchInput.value;
+      if (clearBtn) {
+        clearBtn.classList.toggle('hidden', !dirSearchQuery);
+      }
+      clearTimeout(dirSearchDebounceTimer);
+      dirSearchDebounceTimer = setTimeout(async () => {
+        if (dirSearchDepth === 3 && currentDirLoadedDepth < 3 && dirSearchQuery.trim() && currentModalDirPath) {
+          await fetchDirDepthItems(currentModalDirPath);
+        }
+        applyDirFiltersAndRender();
+      }, 150);
+    }
+
+    function onDirSearchKeydown(e) {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        if (dirSearchQuery) {
+          clearDirSearch();
+        } else {
+          closeFileContentModal();
+        }
+      }
+    }
+
+    function clearDirSearch() {
+      const searchInput = document.getElementById('file-modal-dir-search');
+      const clearBtn = document.getElementById('file-modal-dir-search-clear');
+      if (searchInput) searchInput.value = '';
+      if (clearBtn) clearBtn.classList.add('hidden');
+      dirSearchQuery = '';
+      applyDirFiltersAndRender();
+      if (searchInput) searchInput.focus();
+    }
+
+    function updateDirControlsUI() {
+      const dotfileBtn = document.getElementById('file-modal-dir-dotfiles-btn');
+      const dotfileLabel = document.getElementById('file-modal-dir-dotfiles-label');
+      if (dotfileBtn && dotfileLabel) {
+        if (showDirDotfiles) {
+          dotfileBtn.className = 'px-2 py-1 rounded-lg text-xs font-mono border transition flex items-center gap-1 bg-amber-500/20 text-amber-300 border-amber-500/40 cursor-pointer shadow-sm';
+          dotfileLabel.textContent = 'Dotfiles: ON';
+        } else {
+          dotfileBtn.className = 'px-2 py-1 rounded-lg text-xs font-mono border transition flex items-center gap-1 bg-slate-950/80 text-slate-400 border-slate-800 hover:text-slate-200 cursor-pointer';
+          dotfileLabel.textContent = 'Hidden';
+        }
+      }
+
+      const depthBtn = document.getElementById('file-modal-dir-depth-btn');
+      const depthLabel = document.getElementById('file-modal-dir-depth-label');
+      if (depthBtn && depthLabel) {
+        if (dirSearchDepth === 3) {
+          depthBtn.className = 'px-2 py-1 rounded-lg text-xs font-mono border transition flex items-center gap-1 bg-sky-500/20 text-sky-300 border-sky-500/40 cursor-pointer shadow-sm';
+          depthLabel.textContent = 'D:3 (Deep)';
+        } else {
+          depthBtn.className = 'px-2 py-1 rounded-lg text-xs font-mono border transition flex items-center gap-1 bg-slate-950/80 text-slate-400 border-slate-800 hover:text-slate-200 cursor-pointer';
+          depthLabel.textContent = 'D:1';
+        }
+      }
+
+      const sortSelect = document.getElementById('file-modal-dir-sort-select');
+      if (sortSelect && dirSortBy) {
+        sortSelect.value = dirSortBy;
+      }
+    }
+
+    function applyDirFiltersAndRender() {
+      const isDeep = dirSearchDepth === 3 && currentDirLoadedDepth === 3 && dirSearchQuery.trim() !== '';
+      const sourceItems = isDeep ? currentDirDepthItems : currentDirRawItems;
+      const query = dirSearchQuery.trim();
+      const qLower = query.toLowerCase();
+      const queryAllowsDotfiles = qLower.startsWith('.');
+
+      let filtered = sourceItems.filter(item => {
+        const itemName = item.name || '';
+        if (!showDirDotfiles && !queryAllowsDotfiles && (itemName.startsWith('.') || (item.rel_path && item.rel_path.split('/').some(p => p.startsWith('.'))))) {
+          return false;
+        }
+
+        if (query) {
+          const matchTarget = item.rel_path || itemName;
+          const score = fuzzyMatch(qLower, matchTarget);
+          if (score === null) return false;
+          item._fuzzyScore = score;
+        } else {
+          item._fuzzyScore = 0;
+        }
+        return true;
+      });
+
+      filtered.sort((a, b) => {
+        if (query && a._fuzzyScore !== b._fuzzyScore) {
+          return b._fuzzyScore - a._fuzzyScore;
+        }
+        if (a.is_dir !== b.is_dir) {
+          return a.is_dir ? -1 : 1;
+        }
+        if (dirSortBy === 'name-desc') {
+          return (b.name || '').localeCompare(a.name || '', undefined, { sensitivity: 'base' });
+        }
+        if (dirSortBy === 'size-desc') {
+          return (b.size || 0) - (a.size || 0);
+        }
+        if (dirSortBy === 'size-asc') {
+          return (a.size || 0) - (b.size || 0);
+        }
+        if (dirSortBy === 'date-desc') {
+          return (b.mtime || 0) - (a.mtime || 0);
+        }
+        if (dirSortBy === 'type') {
+          const extA = ((a.name || '').split('.').pop() || '').toLowerCase();
+          const extB = ((b.name || '').split('.').pop() || '').toLowerCase();
+          const cmp = extA.localeCompare(extB);
+          if (cmp !== 0) return cmp;
+          return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+        }
+        return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+      });
+
+      renderDirListing(filtered, currentModalDirPath);
+
+      const metaLines = document.getElementById('file-modal-meta-lines');
+      if (metaLines) {
+        const total = sourceItems.length;
+        const shown = filtered.length;
+        const hidden = total - shown;
+        if (query) {
+          metaLines.textContent = `${shown} match${shown !== 1 ? 'es' : ''} (depth ${dirSearchDepth})`;
+        } else if (hidden > 0) {
+          metaLines.textContent = `${shown} item${shown !== 1 ? 's' : ''} (${hidden} hidden)`;
+        } else {
+          metaLines.textContent = `${shown} item${shown !== 1 ? 's' : ''}`;
+        }
       }
     }
 
@@ -5380,25 +5643,27 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     function renderDirListing(items, dirPath) {
       const list = document.getElementById('file-modal-dir-list');
       const emptyEl = document.getElementById('file-modal-dir-empty');
+      const emptyMsg = document.getElementById('file-modal-dir-empty-msg');
       if (!list) return;
       list.innerHTML = '';
 
       if (!items || items.length === 0) {
-        if (emptyEl) emptyEl.classList.remove('hidden');
+        if (emptyEl) {
+          emptyEl.classList.remove('hidden');
+          if (emptyMsg) {
+            emptyMsg.textContent = dirSearchQuery ? 'No matching files or folders' : 'Empty directory';
+          }
+        }
         return;
       }
       if (emptyEl) emptyEl.classList.add('hidden');
 
-      const sorted = [...items].sort((a, b) => {
-        if (a.is_dir && !b.is_dir) return -1;
-        if (!a.is_dir && b.is_dir) return 1;
-        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-      });
-
       const baseClean = dirPath.replace(/\/+$/, '');
 
-      sorted.forEach(item => {
-        const fullPath = (baseClean === '' || baseClean === '/') ? `/${item.name}` : `${baseClean}/${item.name}`;
+      items.forEach(item => {
+        const itemRel = item.rel_path || item.name;
+        const fullPath = (baseClean === '' || baseClean === '/') ? `/${itemRel}` : `${baseClean}/${itemRel}`;
+        const displayName = (item.rel_path && item.rel_path.includes('/')) ? item.rel_path : item.name;
         const cat = item.is_dir ? null : getFileCategory(item.name);
         const icon = item.is_dir ? '📁' : (
           cat && cat.isImage ? '🖼️' :
@@ -5424,14 +5689,26 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         info.className = 'min-w-0 flex-1';
 
         const nameSpan = document.createElement('div');
-        nameSpan.textContent = item.name + (item.is_dir ? '/' : '');
+        nameSpan.textContent = displayName + (item.is_dir ? '/' : '');
         nameSpan.className = `text-xs font-mono truncate ${item.is_dir ? 'text-sky-300 group-hover:text-sky-200 font-medium' : 'text-slate-200 group-hover:text-white'}`;
+        if (item.rel_path && item.rel_path.includes('/')) {
+          nameSpan.title = item.rel_path;
+        }
         info.appendChild(nameSpan);
 
-        if (!item.is_dir && item.size !== undefined && item.size !== null) {
+        if (item.is_dir) {
+          const subInfo = [];
+          if (item.sub_dirs !== undefined) subInfo.push(`📁 ${item.sub_dirs}`);
+          if (item.sub_files !== undefined) subInfo.push(`📄 ${item.sub_files}`);
+          if (item.sub_imgs) subInfo.push(`🖼️ ${item.sub_imgs}`);
+          const metaSpan = document.createElement('div');
+          metaSpan.textContent = subInfo.length > 0 ? subInfo.join('  ') : (item.rel_path && item.rel_path.includes('/') ? item.rel_path : '📁 0  📄 0');
+          metaSpan.className = 'text-[10px] text-slate-500 font-mono truncate';
+          info.appendChild(metaSpan);
+        } else if (item.size !== undefined && item.size !== null) {
           const sizeSpan = document.createElement('div');
           sizeSpan.textContent = formatBytes(item.size);
-          sizeSpan.className = 'text-[10px] text-slate-500 font-mono';
+          sizeSpan.className = 'text-[10px] text-slate-500 font-mono truncate';
           info.appendChild(sizeSpan);
         }
 
@@ -7446,10 +7723,24 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             e.preventDefault();
             if (isModalEditing) {
               cancelFileModalEditor();
+            } else if (currentModalIsDir && dirSearchQuery) {
+              clearDirSearch();
             } else {
               closeFileContentModal();
             }
             return;
+          }
+          if (currentModalIsDir && (e.key === '/' || e.code === 'Slash')) {
+            const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+            if (activeTag !== 'input' && activeTag !== 'textarea') {
+              e.preventDefault();
+              const sInput = document.getElementById('file-modal-dir-search');
+              if (sInput) {
+                sInput.focus();
+                sInput.select();
+              }
+              return;
+            }
           }
         }
       });
@@ -10519,33 +10810,84 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_json({"success": False, "error": "Not a directory", "items": [], "dir": target_dir}, status=400)
                 return
 
-            items = []
+            depth_val = query.get('depth', ['1'])[0]
             try:
-                with os.scandir(target_dir) as entries:
-                    for entry in entries:
-                        try:
-                            is_dir = entry.is_dir(follow_symlinks=True)
-                            if filter_type == 'dir_only' and not is_dir:
+                max_depth = min(3, max(1, int(depth_val)))
+            except (ValueError, TypeError):
+                max_depth = 1
+
+            items = []
+            img_exts = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico', '.avif'}
+
+            def _get_dir_stats(dpath):
+                sd, sf, si = 0, 0, 0
+                try:
+                    with os.scandir(dpath) as sub_it:
+                        for s in sub_it:
+                            try:
+                                if s.is_dir(follow_symlinks=False):
+                                    sd += 1
+                                else:
+                                    sf += 1
+                                    sn = s.name.lower()
+                                    if any(sn.endswith(e) for e in img_exts):
+                                        si += 1
+                            except (PermissionError, OSError):
+                                pass
+                except (PermissionError, OSError):
+                    pass
+                return sd, sf, si
+
+            def _scan_tree(cur_dir, cur_depth, base_path, acc_items, max_items=500):
+                if cur_depth > max_depth or len(acc_items) >= max_items:
+                    return
+                try:
+                    with os.scandir(cur_dir) as entries:
+                        for entry in entries:
+                            if len(acc_items) >= max_items:
+                                break
+                            try:
+                                is_dir = entry.is_dir(follow_symlinks=False)
+                                if filter_type == 'dir_only' and not is_dir:
+                                    continue
+                                rel_path = os.path.relpath(entry.path, base_path)
+                                item_info = {
+                                    "name": entry.name,
+                                    "rel_path": rel_path,
+                                    "is_dir": is_dir
+                                }
+                                if is_dir:
+                                    sd, sf, si = _get_dir_stats(entry.path)
+                                    item_info["sub_dirs"] = sd
+                                    item_info["sub_files"] = sf
+                                    item_info["sub_imgs"] = si
+                                else:
+                                    try:
+                                        st = entry.stat(follow_symlinks=False)
+                                        item_info["size"] = st.st_size
+                                        item_info["mtime"] = int(st.st_mtime)
+                                    except Exception:
+                                        item_info["size"] = 0
+                                        item_info["mtime"] = 0
+
+                                acc_items.append(item_info)
+
+                                if is_dir and cur_depth < max_depth:
+                                    if entry.name not in ('.git', 'node_modules', '.next', '__pycache__', 'venv', '.venv', 'dist', 'build'):
+                                        _scan_tree(entry.path, cur_depth + 1, base_path, acc_items, max_items)
+                            except (PermissionError, OSError):
                                 continue
-                            item_info = {
-                                "name": entry.name,
-                                "is_dir": is_dir
-                            }
-                            if not is_dir:
-                                try:
-                                    item_info["size"] = entry.stat(follow_symlinks=True).st_size
-                                except Exception:
-                                    item_info["size"] = 0
-                            items.append(item_info)
-                        except (PermissionError, OSError):
-                            continue
+                except (PermissionError, OSError):
+                    pass
+
+            try:
+                _scan_tree(target_dir, 1, target_dir, items, max_items=500)
             except (PermissionError, OSError) as e:
                 self.send_json({"success": False, "error": str(e), "items": [], "dir": target_dir}, status=403)
                 return
 
-            # Sort directories first, then alphabetically case-insensitive
             items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
-            self.send_json({"success": True, "dir": target_dir, "cwd": cwd, "items": items[:250]})
+            self.send_json({"success": True, "dir": target_dir, "cwd": cwd, "depth": max_depth, "items": items[:500]})
             return
 
         elif parsed.path == '/api/stat':
