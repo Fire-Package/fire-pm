@@ -30,6 +30,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 * Prevent dual split terminal panes from physically flipping positions on screen when clicking panes or switching tabs ([#98](https://github.com/Fire-Package/fire-pm/issues/98), [#99](https://github.com/Fire-Package/fire-pm/pull/99)).
 
 ### Added
+* Add dotfiles visibility toggle, multi-criteria sorting (Name, Size, Date, Type), recursive depth-3 fuzzy search with keyboard navigation (`/` and `Esc`), and subdirectory/file/image count stats on folder cards in directory browser ([#158](https://github.com/Fire-Package/fire-pm/issues/158), [#159](https://github.com/Fire-Package/fire-pm/pull/159)).
 * Add folder file counter and arrow-key gallery navigation to media preview lightbox with on-screen `‹` / `›` buttons and click-to-browse folder badge ([#156](https://github.com/Fire-Package/fire-pm/issues/156), [#157](https://github.com/Fire-Package/fire-pm/pull/157)).
 * Add `file:line` stack trace recognition, target line jump/highlight badge, and backend line range windowing with lazy line pagination to file content viewer, preventing browser lag and crashes on 10k–20k line files ([#156](https://github.com/Fire-Package/fire-pm/issues/156), [#157](https://github.com/Fire-Package/fire-pm/pull/157)).
 * Return to folder preview when closing a file opened from directory browser instead of closing the entire modal window ([#152](https://github.com/Fire-Package/fire-pm/issues/152)).
