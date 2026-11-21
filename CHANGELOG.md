@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]{HH:mm:ss} Title: Description #optional extra notes` (Times
 ## [Unreleased]
 
 ### Fixed
+* Fix syntax error in web terminal HTML template script caused by an extra closing brace, which broke client-side script execution and prevented authentication/login.
 * Fix terminal link detection for trailing slash directory paths (e.g. `/root/fire-package-pm/tests/` or `/root/fire-package-pm/app/`) by updating regex lookahead boundaries and normalizing trailing slashes during candidate path validation ([#156](https://github.com/Fire-Package/fire-pm/issues/156), [#157](https://github.com/Fire-Package/fire-pm/pull/157)).
 * Prevent Out of Memory (OOM) browser crashes when inspecting executable (.exe, ELF, DLL) and oversized binary files by enforcing a 5 MB limit on `/api/view`, detecting binary magic headers, skipping heavy syntax highlighting on large files, and presenting a dedicated in-modal binary card with download action ([#154](https://github.com/Fire-Package/fire-pm/issues/154)).
 * Fix blank viewport in PDF viewer modal by relocating container into file modal viewport ([#149](https://github.com/Fire-Package/fire-pm/issues/149)).
