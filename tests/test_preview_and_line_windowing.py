@@ -49,6 +49,21 @@ class TestTrailingSlashAndRegexMatching:
         assert "function cleanCandidatePath(p)" in HTML_TEMPLATE
         assert "s.replace(/\\/+$/, '')" in HTML_TEMPLATE or "s.replace(/\\/$/, '')" in HTML_TEMPLATE
 
+    def test_html_template_javascript_has_no_syntax_errors(self):
+        """Validate that all inline JavaScript in HTML_TEMPLATE compiles without syntax errors."""
+        scripts = re.findall(r'<script(?:\s+[^>]*)?>(.*?)</script>', HTML_TEMPLATE, re.DOTALL)
+        main_script = next((s for s in scripts if 'function checkAuth' in s), None)
+        assert main_script is not None, "Main terminal script must be present in HTML_TEMPLATE"
+
+        import subprocess
+        proc = subprocess.run(
+            ['node', '--check'],
+            input=main_script,
+            text=True,
+            capture_output=True
+        )
+        assert proc.returncode == 0, f"JavaScript syntax error in HTML_TEMPLATE:\n{proc.stderr}"
+
 
 class TestLineWindowingBackend:
     """Test /api/view line windowing and slice headers."""

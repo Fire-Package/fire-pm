@@ -4545,7 +4545,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           btnEdit.classList.add('hidden');
         }
       }
-      }
 
       // View Image / Preview Video / Play Audio (for media)
       if (btnImg) {
