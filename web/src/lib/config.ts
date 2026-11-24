@@ -79,10 +79,23 @@ export function resolveCliBinary(configured?: string): string {
   return configured || "/usr/local/bin/fire";
 }
 
+const INSECURE_JWT_SECRETS = new Set([
+  "default-secret",
+  "secret",
+  "changeme",
+  "123456",
+  "admin",
+]);
+
+function isStrongJwtSecret(secret?: string): boolean {
+  const s = secret?.trim();
+  return Boolean(s && s.length >= 16 && !INSECURE_JWT_SECRETS.has(s.toLowerCase()));
+}
+
 const DEFAULT_CONFIG: FireConfig = {
   auth: {
     passwordHash: "",
-    jwtSecret: crypto.randomBytes(32).toString("hex"),
+    jwtSecret: "",
     apiTokens: [],
   },
   server: {
@@ -116,10 +129,20 @@ export function loadConfig(): FireConfig {
     try {
       const data = fs.readFileSync(configPath, "utf-8");
       const parsed = JSON.parse(data);
-      cachedConfig = {
+      const loadedJwtSecret = parsed.auth?.jwtSecret;
+      const needsPersistedSecret = !isStrongJwtSecret(loadedJwtSecret);
+      const resolvedJwtSecret = needsPersistedSecret
+        ? crypto.randomBytes(32).toString("hex")
+        : loadedJwtSecret.trim();
+
+      const nextConfig: FireConfig = {
         ...DEFAULT_CONFIG,
         ...parsed,
-        auth: { ...DEFAULT_CONFIG.auth, ...(parsed.auth || {}) },
+        auth: {
+          ...DEFAULT_CONFIG.auth,
+          ...(parsed.auth || {}),
+          jwtSecret: resolvedJwtSecret,
+        },
         server: { ...DEFAULT_CONFIG.server, ...(parsed.server || {}) },
         fire: {
           ...DEFAULT_CONFIG.fire,
@@ -128,7 +151,12 @@ export function loadConfig(): FireConfig {
         },
         tunnel: { ...DEFAULT_CONFIG.tunnel, ...(parsed.tunnel || {}) },
       };
-      return cachedConfig!;
+
+      cachedConfig = nextConfig;
+      if (needsPersistedSecret) {
+        saveConfig(nextConfig);
+      }
+      return nextConfig;
     } catch (e) {
       console.error(`Error reading config from ${configPath}:`, e);
     }
@@ -137,6 +165,10 @@ export function loadConfig(): FireConfig {
   // Create initial config if not exists
   cachedConfig = {
     ...DEFAULT_CONFIG,
+    auth: {
+      ...DEFAULT_CONFIG.auth,
+      jwtSecret: crypto.randomBytes(32).toString("hex"),
+    },
     fire: {
       ...DEFAULT_CONFIG.fire,
       cliBinary: resolveCliBinary(DEFAULT_CONFIG.fire.cliBinary),

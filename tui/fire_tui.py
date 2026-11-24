@@ -20,6 +20,25 @@ _log.setLevel(logging.WARNING)
 PREFIX = "fire-"
 TUNNEL_DIR = os.environ.get("FIRE_TUNNEL_DIR", "/tmp/fire-tunnels")
 
+
+def _parse_mem_bytes(mem_str: str) -> int:
+    """Parse formatted memory string (B, KB, MB, GB, TB) into integer bytes."""
+    if not mem_str or not isinstance(mem_str, str):
+        return 0
+    m = re.match(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*(B|KB|K|MB|M|GB|G|TB|T)?\s*$", mem_str, re.IGNORECASE)
+    if not m:
+        return 0
+    val = float(m.group(1))
+    unit = (m.group(2) or "MB").upper()
+    mult = {
+        "B": 1,
+        "K": 1024, "KB": 1024,
+        "M": 1024 ** 2, "MB": 1024 ** 2,
+        "G": 1024 ** 3, "GB": 1024 ** 3,
+        "T": 1024 ** 4, "TB": 1024 ** 4,
+    }.get(unit, 1024 ** 2)
+    return int(val * mult)
+
 class ConfigEditorModal(ModalScreen):
     def __init__(self, svc_name, app_name):
         super().__init__()
@@ -437,10 +456,7 @@ class FireTUI(App):
             app_to_svc[name] = svc_key
 
             mem_str = p.get("mem", "0.0MB")
-            try:
-                mem_bytes = int(float(mem_str.replace("MB", "")) * 1024 * 1024)
-            except (ValueError, AttributeError):
-                mem_bytes = 0
+            mem_bytes = _parse_mem_bytes(mem_str)
             total_mem_bytes += mem_bytes
 
             cpu_str = p.get("cpu", "0.0%")
@@ -641,8 +657,12 @@ class FireTUI(App):
                 svc_file = f"/etc/systemd/system/{svc_name}"
                 try:
                     with open(svc_file, "r") as f: content = f.read()
-                    if "Restart=always" in content: content = content.replace("Restart=always", "Restart=no")
-                    else: content = content.replace("Restart=no", "Restart=always")
+                    if re.search(r"(?m)^Restart=always\b", content):
+                        content = re.sub(r"(?m)^Restart=always\b", "Restart=no", content)
+                    elif re.search(r"(?m)^Restart=\S+", content):
+                        content = re.sub(r"(?m)^Restart=\S+", "Restart=always", content)
+                    elif "[Service]" in content:
+                        content = content.replace("[Service]", "[Service]\nRestart=always", 1)
                     with open(svc_file, "w") as f: f.write(content)
                     subprocess.run(["systemctl", "daemon-reload"], capture_output=True)
                 except Exception as e: self.app.call_from_thread(self.notify, f"Error: {e}", severity="error")

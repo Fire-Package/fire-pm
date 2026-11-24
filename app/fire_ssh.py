@@ -581,6 +581,28 @@ class TerminalSession:
                 self.active_cmd_start_time = now
                 self.active_cmd_pgid = fg_pgid
 
+    def _drain_pty_unlocked(self):
+        if not self.master_fd:
+            return
+        chunks = []
+        while True:
+            try:
+                extra = os.read(self.master_fd, 65536)
+                if not extra:
+                    break
+                chunks.append(extra)
+            except (BlockingIOError, InterruptedError, OSError):
+                break
+        if chunks:
+            total_data = b"".join(chunks)
+            with self.buffer_lock:
+                self.output_buffer.extend(total_data)
+                if len(self.output_buffer) > SCROLLBACK_BUFFER_SIZE:
+                    self.output_buffer = self.output_buffer[-SCROLLBACK_BUFFER_SIZE:]
+            with self.sock_lock:
+                frame = ws_make_frame(total_data, opcode=2)
+                self._broadcast_frame_unlocked(frame)
+
     def _pty_reader_loop(self):
         last_proc_check = 0.0
         while not self.closed:
@@ -589,9 +611,11 @@ class TerminalSession:
                     try:
                         pid_res, _ = os.waitpid(self.pid, os.WNOHANG)
                         if pid_res != 0:
+                            self._drain_pty_unlocked()
                             self.closed = True
                             break
                     except (ChildProcessError, ProcessLookupError):
+                        self._drain_pty_unlocked()
                         self.closed = True
                         break
 
@@ -809,8 +833,12 @@ class TerminalSessionManager:
     def __init__(self):
         self.lock = threading.Lock()
         self.sessions = {}  # session_key -> TerminalSession
+        self._stop_event = threading.Event()
         self.reaper_thread = threading.Thread(target=self._reaper_loop, daemon=True)
         self.reaper_thread.start()
+
+    def stop(self):
+        self._stop_event.set()
 
     def _make_key(self, token: str = None, tab_id: str = None) -> str:
         if tab_id:
@@ -912,24 +940,23 @@ class TerminalSessionManager:
         pass
 
     def _reaper_loop(self):
-        while True:
-            time.sleep(5)
-            while True:
-                try:
-                    rpid, _ = os.waitpid(-1, os.WNOHANG)
-                    if rpid <= 0:
-                        break
-                except (ChildProcessError, OSError):
-                    break
-
+        while not self._stop_event.wait(5):
             now = time.time()
             with self.lock:
                 to_delete = []
-                for token, session in self.sessions.items():
-                    if not session.is_alive():
-                        to_delete.append(token)
-                    elif len(session.interactive_socks) == 0 and len(session.readonly_socks) == 0 and (now - session.last_seen > DETACHED_SESSION_TTL):
-                        to_delete.append(token)
+                for token, session in list(self.sessions.items()):
+                    try:
+                        if not session.is_alive():
+                            to_delete.append(token)
+                        elif (
+                            len(session.interactive_socks) == 0
+                            and len(session.readonly_socks) == 0
+                            and isinstance(getattr(session, "last_seen", None), (int, float))
+                            and (now - session.last_seen > DETACHED_SESSION_TTL)
+                        ):
+                            to_delete.append(token)
+                    except Exception:
+                        continue
                 for token in to_delete:
                     sess = self.sessions.pop(token, None)
                     if sess:
@@ -4992,6 +5019,46 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       return 'Plain Text';
     }
 
+    function sanitizeMarkdownHtml(rawHtml) {
+      if (!rawHtml) return '';
+      if (typeof DOMParser === 'undefined') {
+        return rawHtml.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+      }
+      try {
+        const doc = new DOMParser().parseFromString(rawHtml, 'text/html');
+        const blockedTags = new Set(['script', 'iframe', 'object', 'embed', 'style', 'link', 'meta', 'base', 'form', 'svg', 'math']);
+        const walk = (node) => {
+          const children = Array.from(node.childNodes);
+          for (const child of children) {
+            if (child.nodeType === 1) {
+              const tag = child.tagName.toLowerCase();
+              if (blockedTags.has(tag)) {
+                child.remove();
+                continue;
+              }
+              for (const attr of Array.from(child.attributes)) {
+                const name = attr.name.toLowerCase();
+                const val = (attr.value || '').trim();
+                if (name.startsWith('on') || name === 'srcdoc') {
+                  child.removeAttribute(attr.name);
+                } else if (['href', 'src', 'action', 'formaction', 'xlink:href'].includes(name)) {
+                  const normalized = val.replace(/[\s\x00-\x1f]+/g, '').toLowerCase();
+                  if (normalized.startsWith('javascript:') || normalized.startsWith('vbscript:') || normalized.startsWith('data:text/html')) {
+                    child.removeAttribute(attr.name);
+                  }
+                }
+              }
+              walk(child);
+            }
+          }
+        };
+        walk(doc.body);
+        return doc.body.innerHTML;
+      } catch (_) {
+        return rawHtml.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+      }
+    }
+
     function renderMarkdownContent(md) {
       if (!md) return '';
       let rendered = '';
@@ -5022,7 +5089,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       } else {
         rendered = renderMarkdownFallback(md);
       }
-      return parseGitHubAlerts(rendered);
+      return sanitizeMarkdownHtml(parseGitHubAlerts(rendered));
     }
 
     function setFileModalViewMode(mode) {
@@ -6327,9 +6394,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           row.onkeydown = (e) => { if (e.key === 'Enter') onItemClick(); };
           list.appendChild(row);
         } else {
-          const card = document.createElement('button');
-          card.type = 'button';
-          card.className = `w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-xl bg-slate-900/60 hover:bg-slate-800/90 border border-slate-800/80 transition group select-none ${item.is_dir ? 'hover:border-sky-500/40' : 'hover:border-orange-500/30'}`;
+          const card = document.createElement('div');
+          card.setAttribute('role', 'button');
+          card.tabIndex = 0;
+          card.className = `w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-xl bg-slate-900/60 hover:bg-slate-800/90 border border-slate-800/80 transition group select-none cursor-pointer ${item.is_dir ? 'hover:border-sky-500/40' : 'hover:border-orange-500/30'}`;
 
           const info = document.createElement('div');
           info.className = 'min-w-0 flex-1';
@@ -6359,6 +6427,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           }
 
           card.onclick = onItemClick;
+          card.onkeydown = (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onItemClick();
+            }
+          };
           list.appendChild(card);
         }
       });
@@ -11544,6 +11618,146 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             return True
         return False
 
+    def _read_content_length(self, max_bytes: int = 1024 * 1024):
+        raw = self.headers.get('Content-Length', '0')
+        try:
+            content_len = int(raw)
+        except (ValueError, TypeError):
+            self.send_json({"success": False, "error": "Invalid Content-Length header"}, status=400)
+            return None, False
+        if content_len < 0:
+            self.send_json({"success": False, "error": "Negative Content-Length header"}, status=400)
+            return None, False
+        if content_len > max_bytes:
+            self.send_json({
+                "success": False,
+                "error": f"Payload exceeds maximum allowed size ({max_bytes // (1024 * 1024) or 1} MB)"
+            }, status=413)
+            return None, False
+        return content_len, True
+
+    def _stream_multipart_uploads(self, content_type: str, content_len: int, target_dir: str) -> list:
+        import email.message
+        import email.parser
+
+        ct_msg = email.message.Message()
+        ct_msg['content-type'] = content_type
+        boundary = ct_msg.get_param('boundary')
+        if isinstance(boundary, tuple):
+            boundary = boundary[2]
+        if not boundary:
+            raise ValueError("Missing multipart boundary")
+
+        delim = b"--" + str(boundary).strip().encode('latin-1', errors='ignore')
+        next_delim = b"\r\n" + delim
+        keep_len = len(next_delim)
+        remaining = content_len
+        buf = b""
+        saved_files = []
+
+        def fill_buf(min_bytes: int):
+            nonlocal remaining, buf
+            while len(buf) < min_bytes and remaining > 0:
+                chunk = self.rfile.read(min(remaining, 65536))
+                if not chunk:
+                    remaining = 0
+                    break
+                remaining -= len(chunk)
+                buf += chunk
+
+        # Locate opening boundary
+        while True:
+            idx = buf.find(delim)
+            if idx != -1:
+                buf = buf[idx + len(delim):]
+                break
+            if remaining == 0:
+                return saved_files
+            if len(buf) > len(delim):
+                buf = buf[-len(delim):]
+            prev_len = len(buf)
+            fill_buf(prev_len + 65536)
+            if len(buf) == prev_len:
+                return saved_files
+
+        while True:
+            fill_buf(2)
+            if buf.startswith(b"--"):
+                break
+            if buf.startswith(b"\r\n"):
+                buf = buf[2:]
+            elif buf.startswith(b"\n"):
+                buf = buf[1:]
+            else:
+                break
+
+            # Read part headers up to \r\n\r\n (bounded to 64 KB)
+            while b"\r\n\r\n" not in buf and len(buf) < 65536 and remaining > 0:
+                fill_buf(len(buf) + 8192)
+            hdr_end = buf.find(b"\r\n\r\n")
+            if hdr_end == -1:
+                raise ValueError("Malformed multipart part headers")
+            hdr_bytes = buf[:hdr_end]
+            buf = buf[hdr_end + 4:]
+
+            part_hdrs = email.parser.BytesParser().parsebytes(hdr_bytes + b"\r\n\r\n")
+            raw_fname = part_hdrs.get_filename()
+            safe_fname = ""
+            if raw_fname:
+                candidate = os.path.basename(raw_fname).strip()
+                if candidate and candidate not in ('.', '..'):
+                    safe_fname = candidate
+
+            tmp_path = None
+            tmp_fp = None
+            bytes_written = 0
+            try:
+                if safe_fname:
+                    fd, tmp_path = tempfile.mkstemp(prefix=".upload-", dir=target_dir)
+                    tmp_fp = os.fdopen(fd, 'wb')
+
+                while True:
+                    fill_buf(keep_len + 2)
+                    d_idx = buf.find(next_delim)
+                    if d_idx != -1:
+                        tail = buf[:d_idx]
+                        if tmp_fp is not None:
+                            tmp_fp.write(tail)
+                        bytes_written += len(tail)
+                        buf = buf[d_idx + len(next_delim):]
+                        break
+                    if remaining == 0:
+                        raise ValueError("Truncated multipart upload stream")
+                    safe_flush = max(0, len(buf) - keep_len)
+                    if safe_flush > 0:
+                        if tmp_fp is not None:
+                            tmp_fp.write(buf[:safe_flush])
+                        bytes_written += safe_flush
+                        buf = buf[safe_flush:]
+                    else:
+                        fill_buf(len(buf) + 65536)
+
+                if tmp_fp is not None:
+                    tmp_fp.close()
+                    tmp_fp = None
+                    final_path = os.path.join(target_dir, safe_fname)
+                    os.replace(tmp_path, final_path)
+                    tmp_path = None
+                    saved_files.append({"filename": safe_fname, "path": final_path, "bytes": bytes_written})
+            finally:
+                if tmp_fp is not None:
+                    try:
+                        tmp_fp.close()
+                    except Exception:
+                        pass
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
+
+        return saved_files
+
     def do_HEAD(self):
         parsed = urllib.parse.urlparse(self.path)
         norm_path = parsed.path.rstrip('/') or '/'
@@ -11604,12 +11818,17 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 safe_name = urllib.parse.quote(filename)
                 disposition_type = "inline" if (norm_path in ('/api/preview', '/api/view') or query.get('inline', ['0'])[0] in ('1', 'true', 'yes')) else "attachment"
                 is_raw = query.get('raw', ['0'])[0] in ('1', 'true', 'yes')
+                has_slice_opt = any(
+                    query.get(k, [None])[0] is not None
+                    for k in ('start_line', 'start', 'end_line', 'end', 'line', 'offset')
+                )
                 if norm_path == '/api/view' and not is_raw:
-                    if file_size > 5 * 1024 * 1024:
-                        self.send_response(413)
-                        self.send_header("Content-Type", "application/json")
-                        self.end_headers()
-                        return
+                    if not has_slice_opt:
+                        if file_size > 5 * 1024 * 1024:
+                            self.send_response(413)
+                            self.send_header("Content-Type", "application/json")
+                            self.end_headers()
+                            return
                     ext = (filename.split('.').pop() if '.' in filename else '').lower()
                     BLOCKED_VIEW_EXTS = {'exe', 'bin', 'dll', 'so', 'dylib', 'o', 'a', 'obj', 'pyc', 'pyo', 'class', 'wasm',
                                          'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst', 'iso', 'dmg', 'deb', 'rpm', 'apk', 'msi'}
@@ -12062,16 +12281,27 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 content_type = mimetypes.guess_type(target_path)[0] or "application/octet-stream"
                 disposition_type = "inline" if (parsed.path.rstrip('/') in ('/api/preview', '/api/view') or query.get('inline', ['0'])[0] in ('1', 'true', 'yes')) else "attachment"
                 is_raw = query.get('raw', ['0'])[0] in ('1', 'true', 'yes')
+                start_line_opt = query.get('start_line', [None])[0] or query.get('start', [None])[0]
+                end_line_opt = query.get('end_line', [None])[0] or query.get('end', [None])[0]
+                target_line_opt = query.get('line', [None])[0]
+                offset_opt = query.get('offset', [None])[0]
+                has_slice_opt = bool(
+                    start_line_opt
+                    or end_line_opt
+                    or target_line_opt
+                    or (offset_opt is not None and offset_opt.isdigit())
+                )
                 if parsed.path.rstrip('/') == '/api/view' and not is_raw:
-                    if file_size > 5 * 1024 * 1024:
-                        self.send_json({
-                            "success": False,
-                            "error": f"File size ({file_size} bytes) exceeds the 5 MB limit for inline inspection. Please use Download.",
-                            "code": "FILE_TOO_LARGE",
-                            "size": file_size,
-                            "limit": 5 * 1024 * 1024
-                        }, status=413)
-                        return
+                    if not has_slice_opt:
+                        if file_size > 5 * 1024 * 1024:
+                            self.send_json({
+                                "success": False,
+                                "error": f"File size ({file_size} bytes) exceeds the 5 MB limit for inline inspection. Please use Download.",
+                                "code": "FILE_TOO_LARGE",
+                                "size": file_size,
+                                "limit": 5 * 1024 * 1024
+                            }, status=413)
+                            return
                     ext = (filename.split('.').pop() if '.' in filename else '').lower()
                     BLOCKED_VIEW_EXTS = {'exe', 'bin', 'dll', 'so', 'dylib', 'o', 'a', 'obj', 'pyc', 'pyo', 'class', 'wasm',
                                          'zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst', 'iso', 'dmg', 'deb', 'rpm', 'apk', 'msi'}
@@ -12100,14 +12330,11 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
 
                 safe_name = urllib.parse.quote(filename)
                 if parsed.path.rstrip('/') == '/api/view' and not is_raw:
-                    start_line_opt = query.get('start_line', [None])[0] or query.get('start', [None])[0]
-                    end_line_opt = query.get('end_line', [None])[0] or query.get('end', [None])[0]
-                    target_line_opt = query.get('line', [None])[0]
                     window_opt = query.get('window', [None])[0]
 
                     if start_line_opt or end_line_opt or target_line_opt:
                         try:
-                            w_size = int(window_opt) if window_opt and window_opt.isdigit() else 500
+                            w_size = min(2500, max(1, int(window_opt))) if window_opt and window_opt.isdigit() else 500
                             if target_line_opt and target_line_opt.isdigit():
                                 t_line = int(target_line_opt)
                                 s_line = max(1, t_line - w_size)
@@ -12115,6 +12342,8 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                             else:
                                 s_line = max(1, int(start_line_opt)) if start_line_opt and start_line_opt.isdigit() else 1
                                 e_line = max(s_line, int(end_line_opt)) if end_line_opt and end_line_opt.isdigit() else s_line + 1000
+                            if e_line - s_line > 5000:
+                                e_line = s_line + 5000
 
                             total_lines = 0
                             window_lines = []
@@ -12287,12 +12516,13 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
 
                 tables = []
                 for tbl in table_names:
-                    cursor.execute(f'PRAGMA table_info("{tbl}");')
+                    safe_tbl = str(tbl).replace('"', '""')
+                    cursor.execute(f'PRAGMA table_info("{safe_tbl}");')
                     cols = cursor.fetchall()
                     columns = [{"name": c[1], "type": c[2] or "TEXT", "pk": bool(c[5])} for c in cols]
                     row_count = 0
                     try:
-                        cursor.execute(f'SELECT COUNT(*) FROM "{tbl}";')
+                        cursor.execute(f'SELECT COUNT(*) FROM "{safe_tbl}";')
                         cnt_row = cursor.fetchone()
                         row_count = cnt_row[0] if cnt_row else 0
                     except Exception:
@@ -12391,8 +12621,10 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 }, status=429)
                 return
 
-            content_len = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(content_len).decode('utf-8', errors='ignore')
+            content_len, ok = self._read_content_length(max_bytes=64 * 1024)
+            if not ok:
+                return
+            body = self.rfile.read(content_len).decode('utf-8', errors='ignore') if content_len > 0 else ''
             
             password = ""
             try:
@@ -12457,10 +12689,8 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
             filename = query.get('name', [None])[0] or self.headers.get('X-Filename')
             dest = query.get('dest', [None])[0]
             content_type = self.headers.get('Content-Type', '')
-            content_len = int(self.headers.get('Content-Length', 0))
-
-            if content_len > MAX_UPLOAD_BYTES:
-                self.send_json({"success": False, "error": f"Upload exceeds maximum allowed size ({MAX_UPLOAD_BYTES // (1024*1024)} MB)"}, status=413)
+            content_len, ok = self._read_content_length(max_bytes=MAX_UPLOAD_BYTES)
+            if not ok:
                 return
 
             target_dir = resolve_fs_path(cwd, dest) if dest else cwd
@@ -12472,24 +12702,14 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                     self.send_json({"success": False, "error": f"Cannot create target directory: {e}"}, status=400)
                     return
 
-            # Support multipart/form-data
+            # Support multipart/form-data (streamed directly to disk)
             if 'multipart/form-data' in content_type:
                 try:
-                    import email
-                    raw_body = self.rfile.read(content_len)
-                    fake_msg = email.message_from_bytes(f"Content-Type: {content_type}\r\n\r\n".encode() + raw_body)
-                    saved_files = []
-                    for part in fake_msg.get_payload():
-                        p_filename = part.get_filename()
-                        if p_filename:
-                            p_filename = os.path.basename(p_filename).strip()
-                            if p_filename:
-                                p_path = os.path.join(target_dir, p_filename)
-                                p_data = part.get_payload(decode=True)
-                                with open(p_path, 'wb') as pf:
-                                    pf.write(p_data)
-                                saved_files.append({"filename": p_filename, "path": p_path, "bytes": len(p_data)})
+                    saved_files = self._stream_multipart_uploads(content_type, content_len, target_dir)
                     self.send_json({"success": True, "files": saved_files, "dest": target_dir})
+                    return
+                except ValueError as e:
+                    self.send_json({"success": False, "error": f"Invalid multipart upload: {e}"}, status=400)
                     return
                 except Exception as e:
                     self.send_json({"success": False, "error": f"Multipart upload failed: {e}"}, status=500)
@@ -12547,7 +12767,9 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_error(401, "Unauthorized")
                 return
             token = self.get_auth_token()
-            content_len = int(self.headers.get('Content-Length', 0))
+            content_len, ok = self._read_content_length(max_bytes=64 * 1024)
+            if not ok:
+                return
             body = self.rfile.read(content_len).decode('utf-8', errors='ignore') if content_len > 0 else '{}'
             data = {}
             try:
@@ -12573,7 +12795,9 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_error(401, "Unauthorized")
                 return
             token = self.get_auth_token()
-            content_len = int(self.headers.get('Content-Length', 0))
+            content_len, ok = self._read_content_length(max_bytes=64 * 1024)
+            if not ok:
+                return
             body = self.rfile.read(content_len).decode('utf-8', errors='ignore') if content_len > 0 else '{}'
             data = {}
             try:
@@ -12605,7 +12829,9 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                     self.send_json({"success": False, "error": "Read-only users cannot modify session title"}, status=403)
                     return
 
-            content_len = int(self.headers.get('Content-Length', 0))
+            content_len, ok = self._read_content_length(max_bytes=64 * 1024)
+            if not ok:
+                return
             body = self.rfile.read(content_len).decode('utf-8', errors='ignore') if content_len > 0 else '{}'
             new_title = ""
             try:
@@ -12643,9 +12869,8 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
                 return
 
-            content_len = int(self.headers.get('Content-Length', 0))
-            if content_len > 10 * 1024 * 1024:
-                self.send_json({"success": False, "error": "File content too large (max 10MB)"}, status=413)
+            content_len, ok = self._read_content_length(max_bytes=10 * 1024 * 1024)
+            if not ok:
                 return
 
             try:
@@ -12701,9 +12926,8 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
                 return
 
-            content_len = int(self.headers.get('Content-Length', 0))
-            if content_len > 1024 * 1024:
-                self.send_json({"success": False, "error": "Payload too large"}, status=413)
+            content_len, ok = self._read_content_length(max_bytes=1024 * 1024)
+            if not ok:
                 return
 
             try:
@@ -12725,12 +12949,23 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
 
             session = self.server.terminals.get(token, tab_id)
             cwd = session.get_cwd() if session else os.environ.get("HOME", "/root")
+
+            # Preserve unresolved path for symlink-safe rename/delete while still normalizing ~ / relative paths
+            raw_param = path_param
+            if raw_param.startswith("file://"):
+                try:
+                    raw_param = urllib.parse.unquote(urllib.parse.urlparse(raw_param).path)
+                except Exception:
+                    raw_param = raw_param[7:]
+            expanded_raw = os.path.expanduser(raw_param)
+            unresolved_path = os.path.normpath(expanded_raw if os.path.isabs(expanded_raw) else os.path.join(cwd, expanded_raw))
             target_path = resolve_fs_path(cwd, path_param)
 
             PROTECTED_SYSTEM_DIRS = {
-                '/', '/root', '/bin', '/boot', '/dev', '/etc', '/lib', '/lib64',
-                '/proc', '/sys', '/usr', '/var', '/home', '/mnt', '/media', '/opt',
-                '/run', '/srv', '/tmp'
+                '/', '/root', '/bin', '/sbin', '/boot', '/dev', '/etc', '/etc/systemd',
+                '/etc/systemd/system', '/etc/ssh', '/etc/nginx', '/etc/fire-pm',
+                '/lib', '/lib64', '/proc', '/sys', '/usr', '/usr/bin', '/usr/sbin',
+                '/usr/lib', '/var', '/home', '/mnt', '/media', '/opt', '/run', '/srv', '/tmp'
             }
 
             try:
@@ -12757,35 +12992,44 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                     if not new_name:
                         self.send_json({"success": False, "error": "Missing new_name parameter for rename"}, status=400)
                         return
-                    if not os.path.exists(target_path):
+                    if not os.path.lexists(unresolved_path):
                         self.send_json({"success": False, "error": "Source path does not exist"}, status=404)
                         return
-                    real_target = os.path.realpath(target_path)
-                    if real_target in PROTECTED_SYSTEM_DIRS:
+                    real_target = os.path.realpath(unresolved_path)
+                    if unresolved_path in PROTECTED_SYSTEM_DIRS or real_target in PROTECTED_SYSTEM_DIRS:
                         self.send_json({"success": False, "error": "Cannot rename protected system directory"}, status=403)
                         return
-                    parent_dir = os.path.dirname(real_target)
+                    src_for_op = unresolved_path if os.path.islink(unresolved_path) else real_target
+                    parent_dir = os.path.dirname(src_for_op)
                     dest_path = resolve_fs_path(parent_dir, new_name) if '/' in new_name else os.path.join(parent_dir, new_name)
-                    if os.path.exists(dest_path):
+                    if os.path.lexists(dest_path):
                         self.send_json({"success": False, "error": f"Destination already exists: {os.path.basename(dest_path)}"}, status=400)
                         return
-                    os.rename(real_target, dest_path)
-                    self.send_json({"success": True, "op": "rename", "old_path": real_target, "new_path": dest_path})
+                    os.rename(src_for_op, dest_path)
+                    self.send_json({"success": True, "op": "rename", "old_path": src_for_op, "new_path": dest_path})
                     return
 
                 elif op == 'delete':
-                    if not os.path.exists(target_path):
+                    if not os.path.lexists(unresolved_path):
                         self.send_json({"success": False, "error": "Target does not exist"}, status=404)
                         return
-                    real_target = os.path.realpath(target_path)
-                    if real_target in PROTECTED_SYSTEM_DIRS or len(real_target.strip('/').split('/')) < 2:
+                    real_target = os.path.realpath(unresolved_path)
+                    if (
+                        unresolved_path in PROTECTED_SYSTEM_DIRS
+                        or real_target in PROTECTED_SYSTEM_DIRS
+                        or len(real_target.strip('/').split('/')) < 2
+                    ):
                         self.send_json({"success": False, "error": "Deleting critical system directories is forbidden"}, status=403)
                         return
-                    if os.path.isdir(real_target):
+                    if os.path.islink(unresolved_path):
+                        os.unlink(unresolved_path)
+                        self.send_json({"success": True, "op": "delete", "path": unresolved_path})
+                    elif os.path.isdir(real_target):
                         shutil.rmtree(real_target)
+                        self.send_json({"success": True, "op": "delete", "path": real_target})
                     else:
                         os.remove(real_target)
-                    self.send_json({"success": True, "op": "delete", "path": real_target})
+                        self.send_json({"success": True, "op": "delete", "path": real_target})
                     return
 
                 elif op == 'duplicate':
@@ -12838,9 +13082,8 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
                 return
 
-            content_len = int(self.headers.get('Content-Length', 0))
-            if content_len > 1024 * 1024:
-                self.send_json({"success": False, "error": "Query payload too large"}, status=413)
+            content_len, ok = self._read_content_length(max_bytes=1024 * 1024)
+            if not ok:
                 return
 
             try:
@@ -12907,9 +13150,8 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
                 return
 
-            content_len = int(self.headers.get('Content-Length', 0))
-            if content_len > 1024 * 1024:
-                self.send_json({"success": False, "error": "Payload too large"}, status=413)
+            content_len, ok = self._read_content_length(max_bytes=1024 * 1024)
+            if not ok:
                 return
 
             try:
@@ -13022,9 +13264,11 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
                 self.send_json({"success": False, "error": "Unauthorized session"}, status=401)
                 return
 
-            content_len = int(self.headers.get('Content-Length', 0))
+            content_len, ok = self._read_content_length(max_bytes=64 * 1024)
+            if not ok:
+                return
             try:
-                body = self.rfile.read(content_len).decode('utf-8', errors='replace')
+                body = self.rfile.read(content_len).decode('utf-8', errors='replace') if content_len > 0 else '{}'
                 data = json.loads(body)
             except Exception:
                 data = {}
@@ -13111,7 +13355,20 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
         last_ping_sent = time.time()
 
         try:
+            sessions_mgr = getattr(self.server, 'sessions', None)
             while session.is_alive():
+                if sessions_mgr is not None and not sessions_mgr.is_valid(token):
+                    try:
+                        close_msg = ws_make_frame(json.dumps({
+                            "type": "session_closed",
+                            "reason": "Session expired or logged out",
+                            "message": "Your session has expired or was logged out."
+                        }).encode('utf-8'), opcode=1)
+                        sock.sendall(close_msg)
+                        sock.sendall(ws_make_frame(struct.pack("!H", 1008) + b"Session invalid", opcode=8))
+                    except Exception:
+                        pass
+                    break
                 rlist, _, _ = select.select([sock], [], [], 5.0)
 
                 # Proactive server WebSocket ping frame every 20 seconds
@@ -13245,20 +13502,6 @@ class FireSSHServerHandler(BaseHTTPRequestHandler):
 
 
 def run_server(port: int, plain_password: str = None, salt_hex: str = None, hash_hex: str = None, shell: str = None, title: str = None):
-    def _sigchld_handler(signum, frame):
-        while True:
-            try:
-                rpid, _ = os.waitpid(-1, os.WNOHANG)
-                if rpid <= 0:
-                    break
-            except (ChildProcessError, OSError):
-                break
-
-    try:
-        signal.signal(signal.SIGCHLD, _sigchld_handler)
-    except Exception:
-        pass
-
     if not plain_password and not hash_hex:
         salt_hex, hash_hex = PasswordManager.load_stored_credentials()
 
@@ -13324,6 +13567,7 @@ def run_server(port: int, plain_password: str = None, salt_hex: str = None, hash
     except KeyboardInterrupt:
         pass
     finally:
+        server.terminals.stop()
         server.server_close()
 
 

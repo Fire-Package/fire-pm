@@ -73,7 +73,7 @@ sudo ./install.sh
 ### Prerequisites
 
 * **Operating System**: Linux with `systemd` (Ubuntu 22.04+, Debian 12+, Fedora, RHEL/CentOS, Arch Linux).
-* **Runtimes**: Python 3.10+ (for TUI & `fire ssh`), Node.js 20+ & `pnpm` (for Web Dashboard).
+* **Runtimes**: Python 3.10+ (for TUI & `fire ssh`), Node.js 22+ & `pnpm` (for Web Dashboard).
 * **System Utilities**: `procps`, `iproute2`, `curl`.
 
 ---

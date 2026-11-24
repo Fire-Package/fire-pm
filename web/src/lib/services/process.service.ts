@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { safeExec } from "../shell";
-import { loadConfig } from "../config";
+import { loadConfig, resolveCliBinary } from "../config";
 import { validateServiceName, validateMemoryLimit, validateCpuLimit, validateInterpreter, validateEnvVar } from "../validation";
 import { ProcessItem, ProcessListResponse, ProcessDetail } from "../types";
 
@@ -30,7 +30,7 @@ export class ProcessService {
 
   static async list(): Promise<ProcessListResponse> {
     const config = loadConfig();
-    const result = await safeExec(config.fire.cliBinary, ["list", "--json"]);
+    const result = await safeExec(resolveCliBinary(config.fire.cliBinary), ["list", "--json"]);
     
     if (result.code !== 0 || !result.stdout) {
       // Fallback empty list
@@ -88,7 +88,7 @@ export class ProcessService {
     }
 
     const config = loadConfig();
-    const result = await safeExec(config.fire.cliBinary, ["info", name, "--json"]);
+    const result = await safeExec(resolveCliBinary(config.fire.cliBinary), ["info", name, "--json"]);
     
     let infoData: any = null;
     if (result.code === 0 && result.stdout) {
@@ -170,7 +170,7 @@ export class ProcessService {
   static async delete(name: string): Promise<{ success: boolean; message: string }> {
     if (!validateServiceName(name)) throw new Error("Invalid service name");
     const config = loadConfig();
-    const result = await safeExec(config.fire.cliBinary, ["delete", name]);
+    const result = await safeExec(resolveCliBinary(config.fire.cliBinary), ["delete", name]);
     if (result.code !== 0) {
       throw new Error(result.stderr || `Failed to delete ${name}`);
     }
@@ -228,7 +228,10 @@ export class ProcessService {
       newWatch = "always";
     }
 
-    fs.writeFileSync(unitPath, content, "utf-8");
+    fs.writeFileSync(unitPath, content, { encoding: "utf-8", mode: 0o600 });
+    try {
+      fs.chmodSync(unitPath, 0o600);
+    } catch {}
     await safeExec("systemctl", ["daemon-reload"]);
     return { success: true, watch: newWatch };
   }
@@ -261,7 +264,10 @@ export class ProcessService {
     }
 
     const pathContent = `[Unit]\nDescription=Watch ${scriptPath} for ${cleanName}\n\n[Path]\nPathModified=${scriptPath}\nUnit=fire-reload@${svcName}\n\n[Install]\nWantedBy=multi-user.target\n`;
-    fs.writeFileSync(pathFile, pathContent, "utf-8");
+    fs.writeFileSync(pathFile, pathContent, { encoding: "utf-8", mode: 0o600 });
+    try {
+      fs.chmodSync(pathFile, 0o600);
+    } catch {}
     await safeExec("systemctl", ["daemon-reload"]);
     await safeExec("systemctl", ["enable", "--now", pathName]);
 
@@ -312,7 +318,7 @@ export class ProcessService {
       }
     }
 
-    const result = await safeExec(config.fire.cliBinary, args);
+    const result = await safeExec(resolveCliBinary(config.fire.cliBinary), args);
     if (result.code !== 0) {
       throw new Error(result.stderr || "Failed to start new process");
     }
