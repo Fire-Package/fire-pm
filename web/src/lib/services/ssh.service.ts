@@ -143,9 +143,6 @@ export class SshService {
     if (options.title && options.title.trim()) {
       args.push("--title", options.title.trim());
     }
-    if (options.password) {
-      args.push("--password", options.password);
-    }
     if (options.provider) {
       args.push("--provider", options.provider);
     }
@@ -153,7 +150,11 @@ export class SshService {
       args.push("--no-tunnel");
     }
 
-    const result = await safeExec(binary, args);
+    const execEnv = options.password
+      ? { ...process.env, FIRE_SSH_PASSWORD: options.password }
+      : undefined;
+
+    const result = await safeExec(binary, args, execEnv ? { env: execEnv } : {});
 
     if (result.code !== 0 && !result.stdout) {
       if (result.stderr && result.stderr.includes("ENOENT")) {

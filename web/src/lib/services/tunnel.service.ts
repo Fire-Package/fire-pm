@@ -1,12 +1,12 @@
 import { safeExec } from "../shell";
-import { loadConfig } from "../config";
+import { loadConfig, resolveCliBinary } from "../config";
 import { validatePort } from "../validation";
 import { TunnelItem, TunnelListResponse } from "../types";
 
 export class TunnelService {
   static async list(): Promise<TunnelListResponse> {
     const config = loadConfig();
-    const result = await safeExec(config.fire.cliBinary, ["tunnel", "list", "--json"]);
+    const result = await safeExec(resolveCliBinary(config.fire.cliBinary), ["tunnel", "list", "--json"]);
 
     if (result.code !== 0 || !result.stdout) {
       return {
@@ -58,7 +58,7 @@ export class TunnelService {
     if (provider) {
       args.push("--provider", provider);
     }
-    const result = await safeExec(config.fire.cliBinary, args);
+    const result = await safeExec(resolveCliBinary(config.fire.cliBinary), args);
 
     if (result.code !== 0) {
       throw new Error(result.stderr || result.stdout || `Failed to open tunnel on port ${port}`);
@@ -87,7 +87,7 @@ export class TunnelService {
     }
 
     const config = loadConfig();
-    const result = await safeExec(config.fire.cliBinary, ["tunnel", "close", port.toString()]);
+    const result = await safeExec(resolveCliBinary(config.fire.cliBinary), ["tunnel", "close", port.toString()]);
 
     if (result.code !== 0) {
       throw new Error(result.stderr || result.stdout || `Failed to close tunnel on port ${port}`);
