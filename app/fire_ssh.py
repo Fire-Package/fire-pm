@@ -1079,6 +1079,111 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .markdown-alert-warning .markdown-alert-title { color: #fbbf24; }
     .markdown-alert-caution { border-left-color: #ef4444; }
     .markdown-alert-caution .markdown-alert-title { color: #f87171; }
+    /* Embedded Media & File Preview Cards in Markdown / File Views */
+    .md-embedded-image-card {
+      margin: 10px 0 14px 0;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      background: rgba(15, 23, 42, 0.82);
+      overflow: hidden;
+    }
+    .md-embedded-image-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 10px;
+      background: rgba(2, 6, 23, 0.65);
+      border-bottom: 1px solid rgba(51, 65, 85, 0.6);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px;
+      color: #cbd5e1;
+    }
+    .md-embedded-image-body {
+      padding: 8px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: rgba(2, 6, 23, 0.35);
+    }
+    .md-embedded-image-body img {
+      max-width: 100%;
+      max-height: 420px;
+      border-radius: 6px;
+      cursor: zoom-in;
+      object-fit: contain;
+    }
+    .md-local-file-link {
+      color: #38bdf8 !important;
+      text-decoration: underline;
+      text-decoration-style: dotted;
+      text-underline-offset: 3px;
+      cursor: pointer;
+    }
+    .md-local-file-link:hover {
+      color: #fb923c !important;
+    }
+    .md-inline-preview-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      margin-left: 6px;
+      padding: 1px 6px;
+      border-radius: 9999px;
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      background: rgba(14, 165, 233, 0.12);
+      color: #7dd3fc;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 10px;
+      line-height: 1.5;
+      cursor: pointer;
+      vertical-align: middle;
+    }
+    .md-inline-preview-btn:hover {
+      background: rgba(14, 165, 233, 0.25);
+      color: #e0f2fe;
+    }
+    .md-inline-file-preview {
+      margin: 6px 0 12px 0;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      background: #0b1120;
+      overflow: hidden;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    .md-inline-file-preview-hdr {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 5px 10px;
+      background: #0f172a;
+      border-bottom: 1px solid #1e293b;
+      font-size: 11px;
+      color: #94a3b8;
+    }
+    .md-inline-file-preview-code {
+      margin: 0 !important;
+      padding: 8px 10px !important;
+      max-height: 260px;
+      overflow: auto;
+      font-size: 12px;
+      line-height: 1.45;
+      color: #e2e8f0;
+      background: transparent !important;
+      border: 0 !important;
+      white-space: pre;
+    }
+    .code-inline-file-link {
+      color: #38bdf8;
+      text-decoration: underline;
+      text-decoration-style: dotted;
+      text-underline-offset: 2px;
+      cursor: pointer;
+    }
+    .code-inline-file-link:hover {
+      color: #fb923c;
+    }
     .xterm { height: 100%; padding: 4px; }
     .xterm-viewport { background-color: #020617 !important; -webkit-overflow-scrolling: touch; }
     .xterm-screen { touch-action: pan-y; }
@@ -1872,6 +1977,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <!-- Top Bar -->
       <div class="flex items-center justify-between px-4 py-3 bg-slate-950/80 border-b border-slate-800/80 shrink-0">
         <div class="flex items-center gap-3 min-w-0">
+          <button type="button" id="image-modal-back-btn" onclick="navigateModalBack()" class="hidden px-2 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1 font-mono shrink-0" title="Back to previous preview">
+            <span>←</span> <span class="hidden sm:inline">Back</span>
+          </button>
           <span id="image-modal-icon" class="text-lg">🖼️</span>
           <div class="min-w-0">
             <div class="flex items-center gap-2">
@@ -1954,6 +2062,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <!-- Top Bar -->
       <div class="flex items-center justify-between px-4 py-3 bg-slate-950/80 border-b border-slate-800/80 shrink-0">
         <div class="flex items-center gap-3 min-w-0">
+          <button type="button" id="file-modal-back-btn" onclick="navigateModalBack()" class="hidden px-2 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1 font-mono shrink-0" title="Back to previous file/folder">
+            <span>←</span> <span class="hidden sm:inline">Back</span>
+          </button>
           <span id="file-modal-icon" class="text-lg">📄</span>
           <div class="min-w-0">
             <div class="flex items-center gap-2">
@@ -1977,6 +2088,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
               <span>🌐</span> <span class="hidden sm:inline">Preview</span>
             </button>
           </div>
+
+          <button type="button" id="file-modal-show-images-btn" onclick="togglePreviewShowImages()" class="hidden px-2.5 py-1.5 bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 rounded-xl text-xs text-sky-300 transition flex items-center gap-1 font-mono" title="Toggle inline embedded images across previews">
+            <span>🖼️</span> <span id="file-modal-show-images-label" class="hidden sm:inline">Show Images</span>
+          </button>
 
           <button type="button" id="file-modal-open-tab-btn" onclick="openModalFileInBrowser()" class="hidden px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 hover:text-white transition flex items-center gap-1" title="Open rendered HTML in new browser tab">
             <span>↗</span> <span class="hidden sm:inline">Open in Tab</span>
@@ -2044,6 +2159,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <button type="button" id="file-modal-btn-load-after" onclick="loadMoreFileLines()" class="hidden px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 rounded border border-amber-500/40 text-[11px] text-amber-200 transition">⬇ Load More Lines</button>
             <button type="button" id="file-modal-btn-load-all" onclick="loadFullFileContent()" class="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 text-[11px] transition">Load Full File</button>
           </div>
+        </div>
+
+        <!-- Referenced Files & Media Strip (visible across code/text previews when references exist) -->
+        <div id="file-modal-refs-strip" class="hidden mb-3 bg-slate-900/70 border border-slate-800/90 rounded-xl overflow-hidden select-none">
+          <div class="px-3 py-1.5 flex items-center justify-between gap-2 bg-slate-900/90 border-b border-slate-800/80 text-xs font-mono">
+            <div class="flex items-center gap-2 text-slate-300">
+              <span>📎</span>
+              <span class="font-semibold">Referenced Files &amp; Media</span>
+              <span id="file-modal-refs-count" class="px-1.5 py-0.5 rounded-full text-[10px] bg-sky-500/20 text-sky-300 border border-sky-500/30">0</span>
+            </div>
+            <button type="button" id="file-modal-refs-toggle-btn" onclick="toggleFileRefsStripExpanded()" class="text-[11px] text-slate-400 hover:text-white transition cursor-pointer">▾ Collapse</button>
+          </div>
+          <div id="file-modal-refs-body" class="p-2.5 flex flex-col gap-2"></div>
         </div>
 
         <!-- Code Container with line numbers and text -->
@@ -4839,6 +4967,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     let currentModalIsDir = false;
     let modalParentDirPath = null;
     let mediaModalParentDirPath = null;
+    let modalNavStack = [];
+    let isRestoringModalHistory = false;
+    let previewEnhanceSeq = 0;
+    let fileRefsStripCollapsed = false;
+    let showImagesInPreview = (() => {
+      try {
+        return localStorage.getItem('fire_ssh_show_images_preview') !== 'false';
+      } catch (_) {
+        return true;
+      }
+    })();
 
     function parseGitHubAlerts(html) {
       if (!html) return '';
@@ -4895,6 +5034,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                  .replace(/\*(.*?)\*/g, '<em>$1</em>')
                  .replace(/~~(.*?)~~/g, '<del>$1</del>')
                  .replace(/`([^`]+)`/g, '<code>$1</code>');
+
+      // Images (must run before Links)
+      text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" />');
 
       // Links
       text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
@@ -5092,6 +5234,889 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       return sanitizeMarkdownHtml(parseGitHubAlerts(rendered));
     }
 
+    function normalizePosixPath(p) {
+      if (!p) return '';
+      const isAbs = p.startsWith('/');
+      const parts = p.split('/');
+      const stack = [];
+      for (const part of parts) {
+        if (!part || part === '.') continue;
+        if (part === '..') {
+          if (stack.length > 0 && stack[stack.length - 1] !== '..') {
+            stack.pop();
+          } else if (!isAbs) {
+            stack.push('..');
+          }
+        } else {
+          stack.push(part);
+        }
+      }
+      return (isAbs ? '/' : '') + stack.join('/');
+    }
+
+    function resolvePreviewPath(rawRef, baseFilePath) {
+      const raw = String(rawRef || '').trim();
+      if (!raw) return { path: '', line: null, isExternal: false, isAnchor: false, isUnsafe: false, raw };
+      if (raw.startsWith('#')) {
+        return { path: '', line: null, isExternal: false, isAnchor: true, isUnsafe: false, raw };
+      }
+      const lower = raw.replace(/[\s\x00-\x1f]+/g, '').toLowerCase();
+      if (lower.startsWith('javascript:') || lower.startsWith('vbscript:') || lower.startsWith('data:text/html')) {
+        return { path: '', line: null, isExternal: false, isAnchor: false, isUnsafe: true, raw };
+      }
+      if (/^(https?:|mailto:|tel:|data:|blob:)/i.test(raw)) {
+        return { path: raw, line: null, isExternal: true, isAnchor: false, isUnsafe: false, raw };
+      }
+
+      let line = null;
+      let s = raw;
+      if (s.toLowerCase().startsWith('file://localhost/')) {
+        s = '/' + s.slice(17);
+      } else if (s.toLowerCase().startsWith('file://')) {
+        s = s.slice(7);
+      }
+
+      const hashIdx = s.indexOf('#');
+      if (hashIdx !== -1) {
+        const frag = s.slice(hashIdx + 1);
+        const lm = frag.match(/^L(\d+)/i);
+        if (lm) line = parseInt(lm[1], 10);
+        s = s.slice(0, hashIdx);
+      }
+      const qIdx = s.indexOf('?');
+      if (qIdx !== -1) {
+        s = s.slice(0, qIdx);
+      }
+      try {
+        s = decodeURIComponent(s);
+      } catch (_) {}
+
+      const colonLineMatch = s.match(/:(\d+)(?::(\d+))?$/);
+      if (colonLineMatch && !/^[a-zA-Z]:[/\\]/.test(s)) {
+        if (!line) line = parseInt(colonLineMatch[1], 10);
+        s = s.slice(0, colonLineMatch.index);
+      }
+
+      if (s.length > 1 && s.endsWith('/')) {
+        s = s.replace(/\/+$/, '') || '/';
+      }
+      if (!s) {
+        return { path: '', line, isExternal: false, isAnchor: false, isUnsafe: false, raw };
+      }
+
+      if (s.startsWith('~')) {
+        return { path: s, line, isExternal: false, isAnchor: false, isUnsafe: false, raw };
+      }
+      if (s.startsWith('/')) {
+        return { path: normalizePosixPath(s) || '/', line, isExternal: false, isAnchor: false, isUnsafe: false, raw };
+      }
+
+      const cleanBase = cleanCandidatePath(baseFilePath || '');
+      const baseDir = cleanBase.includes('/') ? (cleanBase.substring(0, cleanBase.lastIndexOf('/')) || '/') : '';
+      const joined = baseDir ? (baseDir === '/' ? `/${s}` : `${baseDir}/${s}`) : s;
+      return {
+        path: joined.startsWith('/') ? (normalizePosixPath(joined) || '/') : joined,
+        line,
+        isExternal: false,
+        isAnchor: false,
+        isUnsafe: false,
+        raw
+      };
+    }
+
+    function updateShowImagesButtonUI() {
+      const btn = document.getElementById('file-modal-show-images-btn');
+      const label = document.getElementById('file-modal-show-images-label');
+      if (!btn) return;
+      btn.setAttribute('aria-pressed', showImagesInPreview ? 'true' : 'false');
+      if (showImagesInPreview) {
+        btn.className = 'px-2.5 py-1.5 bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 rounded-xl text-xs text-sky-300 transition flex items-center gap-1 font-mono cursor-pointer';
+        if (label) label.textContent = 'Show Images: ON';
+      } else {
+        btn.className = 'px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-400 hover:text-white transition flex items-center gap-1 font-mono cursor-pointer';
+        if (label) label.textContent = 'Show Images: OFF';
+      }
+    }
+
+    function setEmbeddedImageCardExpanded(card, expanded) {
+      if (!card) return;
+      const body = card.querySelector('.md-embedded-image-body');
+      const img = card.querySelector('img[data-preview-src]');
+      const toggleBtn = card.querySelector('.md-img-toggle-btn');
+      card.dataset.expanded = expanded ? '1' : '0';
+      if (expanded) {
+        if (img && !img.getAttribute('src') && img.dataset.previewSrc) {
+          img.setAttribute('src', img.dataset.previewSrc);
+        }
+        if (body) body.classList.remove('hidden');
+        if (toggleBtn) toggleBtn.textContent = '▾ Hide';
+      } else {
+        if (body) body.classList.add('hidden');
+        if (toggleBtn) toggleBtn.textContent = '▸ Expand';
+      }
+    }
+
+    function togglePreviewShowImages() {
+      showImagesInPreview = !showImagesInPreview;
+      try {
+        localStorage.setItem('fire_ssh_show_images_preview', showImagesInPreview ? 'true' : 'false');
+      } catch (_) {}
+      updateShowImagesButtonUI();
+      document.querySelectorAll('.md-embedded-image-card').forEach(card => {
+        setEmbeddedImageCardExpanded(card, showImagesInPreview);
+      });
+      if (currentModalFileType === 'html' && currentModalFileMode === 'preview') {
+        const previewFrame = document.getElementById('file-modal-preview-frame');
+        if (previewFrame && currentModalFileContent) {
+          previewFrame.removeAttribute('srcdoc');
+          previewFrame.srcdoc = rewriteHtmlPreviewContent(currentModalFileContent, currentModalFilePath, currentModalFileTabId);
+        }
+      }
+      showToast(showImagesInPreview ? 'Inline image previews enabled' : 'Inline image previews collapsed');
+    }
+
+    function toggleFileRefsStripExpanded() {
+      fileRefsStripCollapsed = !fileRefsStripCollapsed;
+      const body = document.getElementById('file-modal-refs-body');
+      const btn = document.getElementById('file-modal-refs-toggle-btn');
+      if (body) {
+        if (fileRefsStripCollapsed) body.classList.add('hidden');
+        else body.classList.remove('hidden');
+      }
+      if (btn) {
+        btn.textContent = fileRefsStripCollapsed ? '▸ Expand' : '▾ Collapse';
+      }
+    }
+
+    function buildEmbeddedImageCard(resolvedPath, previewUrl, displayLabel, altText, tabId, isExternal = false) {
+      const card = document.createElement('div');
+      card.className = 'md-embedded-image-card';
+
+      const bar = document.createElement('div');
+      bar.className = 'md-embedded-image-bar';
+
+      const left = document.createElement('div');
+      left.className = 'flex items-center gap-2 min-w-0 truncate';
+      const icon = document.createElement('span');
+      icon.textContent = '🖼️';
+      const title = document.createElement('span');
+      title.className = 'text-sky-300 truncate';
+      title.textContent = displayLabel || resolvedPath.split('/').pop() || resolvedPath;
+      title.title = resolvedPath || previewUrl;
+      left.appendChild(icon);
+      left.appendChild(title);
+      if (altText && altText !== title.textContent) {
+        const altSpan = document.createElement('span');
+        altSpan.className = 'text-slate-500 truncate hidden sm:inline';
+        altSpan.textContent = `— ${altText}`;
+        left.appendChild(altSpan);
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'flex items-center gap-1.5 shrink-0';
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.type = 'button';
+      toggleBtn.className = 'md-img-toggle-btn px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer';
+      toggleBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setEmbeddedImageCardExpanded(card, card.dataset.expanded !== '1');
+      };
+      actions.appendChild(toggleBtn);
+
+      if (!isExternal && resolvedPath) {
+        const lbBtn = document.createElement('button');
+        lbBtn.type = 'button';
+        lbBtn.className = 'px-2 py-0.5 rounded bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 text-orange-300 transition cursor-pointer';
+        lbBtn.textContent = '🔍 Lightbox';
+        lbBtn.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openReferencedTargetFromModal(resolvedPath, tabId);
+        };
+        actions.appendChild(lbBtn);
+      }
+
+      bar.appendChild(left);
+      bar.appendChild(actions);
+
+      const body = document.createElement('div');
+      body.className = 'md-embedded-image-body';
+
+      const img = document.createElement('img');
+      img.alt = altText || displayLabel || '';
+      img.loading = 'lazy';
+      img.dataset.previewSrc = previewUrl;
+      img.onerror = () => {
+        body.innerHTML = '';
+        const errDiv = document.createElement('div');
+        errDiv.className = 'text-xs text-slate-400 font-mono py-2';
+        errDiv.textContent = `⚠️ Unable to load image: ${resolvedPath || previewUrl}`;
+        body.appendChild(errDiv);
+      };
+      if (!isExternal && resolvedPath) {
+        img.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openReferencedTargetFromModal(resolvedPath, tabId);
+        };
+      }
+      body.appendChild(img);
+
+      card.appendChild(bar);
+      card.appendChild(body);
+      setEmbeddedImageCardExpanded(card, showImagesInPreview);
+      return card;
+    }
+
+    async function toggleInlineFilePreviewDrawer(drawer, targetPath, tabId, targetLine = null) {
+      if (!drawer) return;
+      const isHidden = drawer.classList.contains('hidden');
+      if (!isHidden) {
+        drawer.classList.add('hidden');
+        return;
+      }
+      drawer.classList.remove('hidden');
+      if (drawer.dataset.loaded === '1') return;
+
+      const bodyEl = drawer.querySelector('.md-inline-file-preview-code');
+      const metaEl = drawer.querySelector('.md-inline-preview-meta');
+      if (bodyEl) bodyEl.textContent = 'Loading preview...';
+
+      try {
+        const fileParam = `file=${encodeURIComponent(targetPath)}`;
+        const tabParam = (tabId || activeTabId) ? `tab=${encodeURIComponent(tabId || activeTabId)}` : '';
+        const tokenParam = sessionToken ? `token=${encodeURIComponent(sessionToken)}` : '';
+        const rangeParam = targetLine ? `line=${targetLine}&window=40` : 'start_line=1&end_line=120';
+        const qs = [fileParam, tabParam, tokenParam, 'inline=1', rangeParam].filter(Boolean).join('&');
+        const res = await fetch(`/api/view?${qs}`);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const totalLines = res.headers.get('X-Total-Lines');
+        const startLine = parseInt(res.headers.get('X-Start-Line') || '1', 10);
+        const endLine = parseInt(res.headers.get('X-End-Line') || '0', 10);
+        const txt = await res.text();
+        if (txt.includes('\x00')) {
+          if (bodyEl) bodyEl.textContent = '[Binary file — click Open to inspect/download]';
+          drawer.dataset.loaded = '1';
+          return;
+        }
+        if (metaEl && totalLines) {
+          metaEl.textContent = `Lines ${startLine}–${endLine} of ${totalLines}`;
+        }
+        if (bodyEl) {
+          const lang = getLanguageFromPath(targetPath);
+          const trimmed = txt.replace(/\n$/, '');
+          if (lang && typeof hljs !== 'undefined' && hljs.getLanguage(lang) && trimmed.length <= 65536) {
+            try {
+              const hl = hljs.highlight(trimmed, { language: lang, ignoreIllegals: true }).value;
+              bodyEl.innerHTML = `<code class="hljs language-${escapeHtml(lang)}">${hl}</code>`;
+            } catch (_) {
+              bodyEl.textContent = trimmed;
+            }
+          } else {
+            bodyEl.textContent = trimmed;
+          }
+        }
+        drawer.dataset.loaded = '1';
+      } catch (err) {
+        if (bodyEl) bodyEl.textContent = `Failed to load preview (${err.message || err})`;
+      }
+    }
+
+    function createInlineFilePreviewDrawer(targetPath, stat, tabId, targetLine = null) {
+      const drawer = document.createElement('div');
+      drawer.className = 'md-inline-file-preview hidden';
+
+      const hdr = document.createElement('div');
+      hdr.className = 'md-inline-file-preview-hdr';
+
+      const titleWrap = document.createElement('div');
+      titleWrap.className = 'flex items-center gap-2 min-w-0 truncate';
+      const pathSpan = document.createElement('span');
+      pathSpan.className = 'text-slate-300 truncate';
+      pathSpan.textContent = targetPath + (targetLine ? `:${targetLine}` : '');
+      const metaSpan = document.createElement('span');
+      metaSpan.className = 'md-inline-preview-meta text-slate-500 shrink-0';
+      if (stat && stat.size !== undefined) {
+        metaSpan.textContent = formatBytes(stat.size) + (stat.lines !== null && stat.lines !== undefined ? ` • ${stat.lines} lines` : '');
+      }
+      titleWrap.appendChild(pathSpan);
+      titleWrap.appendChild(metaSpan);
+
+      const btns = document.createElement('div');
+      btns.className = 'flex items-center gap-1.5 shrink-0';
+
+      const openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className = 'px-2 py-0.5 rounded bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 text-orange-300 text-[10px] cursor-pointer';
+      openBtn.textContent = 'Open Full →';
+      openBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openReferencedTargetFromModal(targetPath, tabId, targetLine);
+      };
+
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-[10px] cursor-pointer';
+      closeBtn.textContent = '✕';
+      closeBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        drawer.classList.add('hidden');
+      };
+
+      btns.appendChild(openBtn);
+      btns.appendChild(closeBtn);
+      hdr.appendChild(titleWrap);
+      hdr.appendChild(btns);
+
+      const pre = document.createElement('pre');
+      pre.className = 'md-inline-file-preview-code';
+
+      drawer.appendChild(hdr);
+      drawer.appendChild(pre);
+      return drawer;
+    }
+
+    function extractPathCandidatesFromText(text, maxCandidates = 30) {
+      if (!text) return [];
+      const found = [];
+      const seen = new Set();
+      const addCand = (raw) => {
+        if (!raw || found.length >= maxCandidates) return;
+        const clean = raw.trim().replace(/[),.;:'"`]+$/, '');
+        if (!clean || clean.length < 2) return;
+        if (/^(https?:|mailto:|tel:|data:|blob:|#)/i.test(clean)) return;
+        if (/^[0-9.]+$/.test(clean)) return;
+        if (seen.has(clean)) return;
+        seen.add(clean);
+        found.push(clean);
+      };
+
+      // 1. Markdown image/link refs: ![alt](path) and [label](path)
+      const mdLinkRe = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+      let m;
+      while ((m = mdLinkRe.exec(text)) !== null && found.length < maxCandidates) {
+        addCand(m[1]);
+      }
+
+      // 2. HTML src/href refs
+      const attrRe = /(?:src|href)=["']([^"']+)["']/gi;
+      while ((m = attrRe.exec(text)) !== null && found.length < maxCandidates) {
+        addCand(m[1]);
+      }
+
+      // 3. Local file://, relative/absolute paths, or files with extensions
+      const pathRe = /(?:^|[\s"'`(\[<,=])((?:file:\/\/(?:localhost)?\/|[~.]?\/|\.\/|\.\.\/)?(?:[A-Za-z0-9_.~%+-]+\/)*[A-Za-z0-9_.~%+-]+\.[A-Za-z0-9_+-]{1,10}(?:#L\d+|:\d+(?::\d+)?)?|(?:file:\/\/(?:localhost)?\/|\/|~\/|\.\/|\.\.\/)[A-Za-z0-9_.~%+/+-]+\/?)/gm;
+      while ((m = pathRe.exec(text)) !== null && found.length < maxCandidates) {
+        const cand = m[1];
+        if (cand && (cand.includes('/') || /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif|mp4|webm|mp3|wav|ogg|flac|pdf|db|sqlite3?|md|markdown|html?|txt|log|json|ya?ml|toml|ini|py|js|ts|tsx|jsx|sh|css|sql)$/i.test(cand.split(/[:#?]/)[0]))) {
+          addCand(cand);
+        }
+      }
+      return found;
+    }
+
+    function updateModalBackButtons() {
+      const hasBack = modalNavStack.length > 0 || Boolean(modalParentDirPath) || Boolean(mediaModalParentDirPath);
+      const fileBack = document.getElementById('file-modal-back-btn');
+      const imgBack = document.getElementById('image-modal-back-btn');
+      if (fileBack) {
+        if (modalNavStack.length > 0 || (modalParentDirPath && !currentModalIsDir)) fileBack.classList.remove('hidden');
+        else fileBack.classList.add('hidden');
+      }
+      if (imgBack) {
+        if (modalNavStack.length > 0 || mediaModalParentDirPath) imgBack.classList.remove('hidden');
+        else imgBack.classList.add('hidden');
+      }
+      return hasBack;
+    }
+
+    function captureCurrentModalSnapshot() {
+      const imgModal = document.getElementById('image-preview-modal');
+      if (imgModal && !imgModal.classList.contains('hidden') && currentPreviewPath) {
+        return {
+          kind: 'media',
+          path: currentPreviewPath,
+          tabId: currentPreviewTabId,
+          parentDir: mediaModalParentDirPath
+        };
+      }
+      const fileModal = document.getElementById('file-content-modal');
+      if (fileModal && !fileModal.classList.contains('hidden')) {
+        if (currentModalIsDir && currentModalDirPath) {
+          return {
+            kind: 'dir',
+            path: currentModalDirPath,
+            tabId: currentModalFileTabId
+          };
+        }
+        if (currentModalFilePath) {
+          return {
+            kind: currentModalFileType === 'pdf' ? 'pdf' : (currentModalFileType === 'database' ? 'db' : 'file'),
+            path: currentModalFilePath,
+            tabId: currentModalFileTabId,
+            mode: currentModalFileMode,
+            parentDir: modalParentDirPath,
+            targetLine: currentModalFileTargetLine
+          };
+        }
+      }
+      return null;
+    }
+
+    async function navigateModalBack() {
+      if (modalNavStack.length === 0) {
+        const imgModal = document.getElementById('image-preview-modal');
+        if (imgModal && !imgModal.classList.contains('hidden')) {
+          closeImagePreviewModal(false);
+        } else {
+          closeFileContentModal(false);
+        }
+        return;
+      }
+      const prev = modalNavStack.pop();
+      isRestoringModalHistory = true;
+      try {
+        if (prev.kind === 'media') {
+          const fileModal = document.getElementById('file-content-modal');
+          if (fileModal && !fileModal.classList.contains('hidden')) {
+            cleanupFileModalView();
+            fileModal.classList.add('hidden');
+          }
+          openImagePreviewModal(prev.path, prev.tabId, prev.parentDir || null);
+        } else if (prev.kind === 'dir') {
+          await openFolderInModal(prev.path, prev.tabId);
+        } else if (prev.kind === 'pdf') {
+          await openPdfModal(prev.path, prev.tabId, prev.parentDir || null);
+        } else if (prev.kind === 'db') {
+          await openDatabaseModal(prev.path, prev.tabId, null, prev.parentDir || null);
+        } else {
+          await openFileContentModal(prev.path, prev.tabId, null, prev.mode || null, prev.parentDir || null, prev.targetLine || null);
+        }
+      } finally {
+        isRestoringModalHistory = false;
+        updateModalBackButtons();
+      }
+    }
+
+    async function openReferencedTargetFromModal(targetPath, tabId, targetLine = null) {
+      if (!targetPath) return;
+      const tid = tabId || currentModalFileTabId || currentPreviewTabId || activeTabId;
+      const stat = await fetchPathStat(targetPath, tid);
+      if (stat && stat.exists === false) {
+        showToast(`Path not found: ${targetPath}`);
+        return;
+      }
+      const finalPath = (stat && stat.path) ? stat.path : cleanCandidatePath(targetPath);
+      const snap = captureCurrentModalSnapshot();
+      if (snap) {
+        modalNavStack.push(snap);
+      }
+
+      isRestoringModalHistory = true;
+      try {
+        if (stat && stat.is_dir) {
+          await openFolderInModal(finalPath, tid);
+          return;
+        }
+        const cat = getFileCategory(finalPath);
+        if (cat.isImage || cat.isVideo || cat.isAudio) {
+          const fileModal = document.getElementById('file-content-modal');
+          if (fileModal && !fileModal.classList.contains('hidden')) {
+            cleanupFileModalView();
+            fileModal.classList.add('hidden');
+          }
+          openImagePreviewModal(finalPath, tid, null);
+        } else if (cat.isDb) {
+          await openDatabaseModal(finalPath, tid, stat, null);
+        } else if (cat.isPdf) {
+          await openPdfModal(finalPath, tid, null);
+        } else {
+          const mode = (cat.isHtml || cat.isMarkdown) ? 'preview' : 'code';
+          await openFileContentModal(finalPath, tid, stat, mode, null, targetLine);
+        }
+      } finally {
+        isRestoringModalHistory = false;
+        updateModalBackButtons();
+      }
+    }
+
+    function rewriteHtmlPreviewContent(rawHtml, baseFilePath, tabId) {
+      if (!rawHtml) return '';
+      try {
+        const doc = new DOMParser().parseFromString(rawHtml, 'text/html');
+        doc.querySelectorAll('img, video, audio, source').forEach(el => {
+          const rawSrc = el.getAttribute('src');
+          if (!rawSrc) return;
+          const res = resolvePreviewPath(rawSrc, baseFilePath);
+          if (res.isUnsafe) {
+            el.removeAttribute('src');
+            return;
+          }
+          if (el.tagName.toLowerCase() === 'img' && !showImagesInPreview) {
+            const ph = doc.createElement('span');
+            ph.textContent = `[🖼️ Image hidden: ${el.getAttribute('alt') || res.path || rawSrc}]`;
+            ph.style.cssText = 'display:inline-block;padding:4px 8px;margin:4px 0;border:1px dashed #64748b;border-radius:6px;font-family:monospace;font-size:12px;color:#334155;background:#f8fafc;';
+            el.replaceWith(ph);
+            return;
+          }
+          if (!res.isExternal && !res.isAnchor && res.path) {
+            el.setAttribute('src', buildImageUrl(res.path, tabId));
+          }
+        });
+        doc.querySelectorAll('a[href]').forEach(a => {
+          const rawHref = a.getAttribute('href');
+          if (!rawHref) return;
+          const res = resolvePreviewPath(rawHref, baseFilePath);
+          if (res.isUnsafe) {
+            a.removeAttribute('href');
+          } else if (res.isExternal) {
+            a.setAttribute('target', '_blank');
+            a.setAttribute('rel', 'noopener noreferrer');
+          } else if (!res.isAnchor && res.path) {
+            a.setAttribute('data-fire-local-path', res.path);
+            if (res.line) a.setAttribute('data-fire-local-line', String(res.line));
+          }
+        });
+        const bridgeScript = doc.createElement('script');
+        bridgeScript.textContent = "document.addEventListener('click',function(e){var a=e.target&&e.target.closest?e.target.closest('a[data-fire-local-path]'):null;if(a){e.preventDefault();window.parent.postMessage({type:'fire-preview-open-ref',path:a.getAttribute('data-fire-local-path'),line:a.getAttribute('data-fire-local-line')},'*');}});";
+        if (doc.body) doc.body.appendChild(bridgeScript);
+        return '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
+      } catch (_) {
+        return rawHtml;
+      }
+    }
+
+    function getCategoryIcon(cat, stat) {
+      if (stat && stat.is_dir) return '📁';
+      if (!cat) return '📄';
+      if (cat.isImage) return '🖼️';
+      if (cat.isVideo) return '🎬';
+      if (cat.isAudio) return '🎵';
+      if (cat.isPdf) return '📕';
+      if (cat.isDb) return '🗄️';
+      if (cat.isHtml) return '🌐';
+      if (cat.isMarkdown) return '📖';
+      if (cat.badge === 'ARCHIVE') return '📦';
+      if (cat.badge === 'BINARY') return '⚙️';
+      return '📄';
+    }
+
+    async function enhanceMarkdownPreview(mdBody, baseFilePath, tabId) {
+      if (!mdBody || !baseFilePath) return;
+      const seq = ++previewEnhanceSeq;
+
+      // 1. Upgrade all <img> elements to expandable embedded cards with local /api/preview resolution
+      const imgs = Array.from(mdBody.querySelectorAll('img'));
+      imgs.forEach(img => {
+        if (img.closest('.md-embedded-image-card')) return;
+        const rawSrc = img.getAttribute('src') || '';
+        const altText = img.getAttribute('alt') || '';
+        const res = resolvePreviewPath(rawSrc, baseFilePath);
+        if (res.isUnsafe) {
+          img.remove();
+          return;
+        }
+        const previewUrl = res.isExternal ? rawSrc : buildImageUrl(res.path, tabId);
+        const label = res.isExternal ? (rawSrc.split('/').pop() || rawSrc) : (res.path.split('/').pop() || res.path);
+        const card = buildEmbeddedImageCard(res.path, previewUrl, label, altText, tabId, res.isExternal);
+        const parentP = img.parentElement;
+        if (parentP && parentP.tagName === 'P' && parentP.childNodes.length === 1) {
+          parentP.replaceWith(card);
+        } else {
+          img.replaceWith(card);
+        }
+      });
+
+      // 2. Enhance <a> links (local files, folders, images, text inline previews, anchors, external links)
+      const anchors = Array.from(mdBody.querySelectorAll('a[href]'));
+      await Promise.all(anchors.map(async (a) => {
+        const rawHref = a.getAttribute('href') || '';
+        const res = resolvePreviewPath(rawHref, baseFilePath);
+        if (res.isUnsafe) {
+          a.removeAttribute('href');
+          return;
+        }
+        if (res.isAnchor) {
+          a.onclick = (e) => {
+            e.preventDefault();
+            const slug = rawHref.slice(1).toLowerCase();
+            const targetEl = mdBody.querySelector(`[id="${CSS.escape(rawHref.slice(1))}"]`)
+              || Array.from(mdBody.querySelectorAll('h1,h2,h3,h4,h5,h6')).find(h =>
+                h.textContent.trim().toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-') === slug
+              );
+            if (targetEl) targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          };
+          return;
+        }
+        if (res.isExternal) {
+          a.setAttribute('target', '_blank');
+          a.setAttribute('rel', 'noopener noreferrer');
+          return;
+        }
+        if (!res.path) return;
+        const stat = await fetchPathStat(res.path, tabId);
+        if (seq !== previewEnhanceSeq || !stat || !stat.exists) return;
+
+        const targetPath = stat.path || res.path;
+        const cat = getFileCategory(targetPath);
+        const icon = getCategoryIcon(cat, stat);
+        a.classList.add('md-local-file-link');
+        a.setAttribute('title', `${icon} ${targetPath}${stat.size ? ` (${formatBytes(stat.size)})` : ''}`);
+        a.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openReferencedTargetFromModal(targetPath, tabId, res.line);
+        };
+
+        const containerBlock = a.closest('p, li, blockquote, td, div') || a.parentElement;
+        if (cat.isImage) {
+          const card = buildEmbeddedImageCard(targetPath, buildImageUrl(targetPath, tabId), targetPath.split('/').pop() || targetPath, a.textContent.trim(), tabId, false);
+          if (containerBlock && containerBlock.parentNode) {
+            containerBlock.insertAdjacentElement('afterend', card);
+          }
+        } else if (stat.is_file && !stat.is_binary && cat.type === 'text') {
+          const drawer = createInlineFilePreviewDrawer(targetPath, stat, tabId, res.line);
+          const previewBtn = document.createElement('button');
+          previewBtn.type = 'button';
+          previewBtn.className = 'md-inline-preview-btn';
+          previewBtn.textContent = '👁️ Preview';
+          previewBtn.title = 'Toggle inline text preview';
+          previewBtn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const willOpen = drawer.classList.contains('hidden');
+            previewBtn.textContent = willOpen ? '▾ Hide' : '👁️ Preview';
+            toggleInlineFilePreviewDrawer(drawer, targetPath, tabId, res.line);
+          };
+          a.insertAdjacentElement('afterend', previewBtn);
+          if (containerBlock && containerBlock.parentNode) {
+            containerBlock.insertAdjacentElement('afterend', drawer);
+          }
+        }
+      }));
+
+      if (seq !== previewEnhanceSeq) return;
+
+      // 3. Linkify inline <code> references that point to real local files/images
+      const inlineCodes = Array.from(mdBody.querySelectorAll('code')).filter(c => !c.closest('pre') && !c.closest('a'));
+      await Promise.all(inlineCodes.map(async (codeEl) => {
+        const cand = (codeEl.textContent || '').trim();
+        if (!cand || cand.length > 260 || /\s/.test(cand)) return;
+        if (/^(https?:|mailto:|#)/i.test(cand)) return;
+        const looksPath = cand.includes('/') || cand.startsWith('~') || cand.startsWith('file://') || /\.[a-z0-9]{1,8}(?::\d+(?::\d+)?)?$/i.test(cand);
+        if (!looksPath) return;
+        const res = resolvePreviewPath(cand, baseFilePath);
+        if (!res.path || res.isExternal || res.isAnchor || res.isUnsafe) return;
+        const stat = await fetchPathStat(res.path, tabId);
+        if (seq !== previewEnhanceSeq || !stat || !stat.exists) return;
+
+        const targetPath = stat.path || res.path;
+        const cat = getFileCategory(targetPath);
+        codeEl.classList.add('md-local-file-link');
+        codeEl.title = `Click to open ${targetPath}`;
+        codeEl.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openReferencedTargetFromModal(targetPath, tabId, res.line);
+        };
+        const block = codeEl.closest('p, li, blockquote, td') || codeEl.parentElement;
+        if (cat.isImage && block && block.parentNode) {
+          const card = buildEmbeddedImageCard(targetPath, buildImageUrl(targetPath, tabId), targetPath.split('/').pop() || targetPath, cand, tabId, false);
+          block.insertAdjacentElement('afterend', card);
+        } else if (stat.is_file && !stat.is_binary && cat.type === 'text' && block && block.parentNode) {
+          const drawer = createInlineFilePreviewDrawer(targetPath, stat, tabId, res.line);
+          const previewBtn = document.createElement('button');
+          previewBtn.type = 'button';
+          previewBtn.className = 'md-inline-preview-btn';
+          previewBtn.textContent = '👁️ Preview';
+          previewBtn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const willOpen = drawer.classList.contains('hidden');
+            previewBtn.textContent = willOpen ? '▾ Hide' : '👁️ Preview';
+            toggleInlineFilePreviewDrawer(drawer, targetPath, tabId, res.line);
+          };
+          codeEl.insertAdjacentElement('afterend', previewBtn);
+          block.insertAdjacentElement('afterend', drawer);
+        }
+      }));
+    }
+
+    function linkifyCodeElementPaths(codeTextEl, verifiedByRaw, tabId) {
+      if (!codeTextEl || !verifiedByRaw || verifiedByRaw.size === 0 || isModalEditing) return;
+      const entries = Array.from(verifiedByRaw.entries()).sort((a, b) => b[0].length - a[0].length);
+      const walker = document.createTreeWalker(codeTextEl, NodeFilter.SHOW_TEXT, null);
+      const textNodes = [];
+      let n;
+      while ((n = walker.nextNode())) {
+        if (n.parentElement && n.parentElement.closest('a.code-inline-file-link')) continue;
+        if (n.nodeValue && n.nodeValue.length >= 2) textNodes.push(n);
+      }
+
+      textNodes.forEach(node => {
+        const text = node.nodeValue;
+        let matches = [];
+        for (const [rawToken, info] of entries) {
+          let idx = text.indexOf(rawToken);
+          while (idx !== -1) {
+            const end = idx + rawToken.length;
+            const overlaps = matches.some(m => !(end <= m.start || idx >= m.end));
+            if (!overlaps) {
+              matches.push({ start: idx, end, token: rawToken, info });
+            }
+            idx = text.indexOf(rawToken, end);
+          }
+        }
+        if (matches.length === 0) return;
+        matches.sort((a, b) => a.start - b.start);
+
+        const frag = document.createDocumentFragment();
+        let cursor = 0;
+        for (const m of matches) {
+          if (m.start > cursor) {
+            frag.appendChild(document.createTextNode(text.slice(cursor, m.start)));
+          }
+          const a = document.createElement('a');
+          a.className = 'code-inline-file-link';
+          a.href = '#';
+          a.textContent = m.token;
+          a.title = `Open ${m.info.path}`;
+          a.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openReferencedTargetFromModal(m.info.path, tabId, m.info.line);
+          };
+          frag.appendChild(a);
+          cursor = m.end;
+        }
+        if (cursor < text.length) {
+          frag.appendChild(document.createTextNode(text.slice(cursor)));
+        }
+        node.parentNode.replaceChild(frag, node);
+      });
+    }
+
+    async function enhanceCodeAndRefsPreview(text, baseFilePath, tabId) {
+      const strip = document.getElementById('file-modal-refs-strip');
+      const bodyEl = document.getElementById('file-modal-refs-body');
+      const countEl = document.getElementById('file-modal-refs-count');
+      if (!strip || !bodyEl) return;
+
+      bodyEl.innerHTML = '';
+      strip.classList.add('hidden');
+      if (!text || !baseFilePath || currentModalIsDir) return;
+
+      const seq = previewEnhanceSeq;
+      const candidates = extractPathCandidatesFromText(text, 30);
+      if (candidates.length === 0) return;
+
+      const verifiedList = [];
+      const seenResolved = new Set();
+      const verifiedByRaw = new Map();
+
+      await Promise.all(candidates.map(async (rawCand) => {
+        const res = resolvePreviewPath(rawCand, baseFilePath);
+        if (!res.path || res.isExternal || res.isAnchor || res.isUnsafe) return;
+        if (res.path === cleanCandidatePath(baseFilePath)) return;
+        const stat = await fetchPathStat(res.path, tabId);
+        if (seq !== previewEnhanceSeq || !stat || !stat.exists) return;
+
+        const targetPath = stat.path || res.path;
+        verifiedByRaw.set(rawCand, { path: targetPath, line: res.line, stat });
+        if (seenResolved.has(targetPath)) return;
+        seenResolved.add(targetPath);
+        verifiedList.push({ raw: rawCand, path: targetPath, line: res.line, stat });
+      }));
+
+      if (seq !== previewEnhanceSeq || verifiedList.length === 0) return;
+
+      if (countEl) countEl.textContent = String(verifiedList.length);
+      fileRefsStripCollapsed = false;
+      bodyEl.classList.remove('hidden');
+      const toggleBtn = document.getElementById('file-modal-refs-toggle-btn');
+      if (toggleBtn) toggleBtn.textContent = '▾ Collapse';
+
+      verifiedList.forEach(item => {
+        const cat = getFileCategory(item.path);
+        const icon = getCategoryIcon(cat, item.stat);
+        if (cat.isImage) {
+          const card = buildEmbeddedImageCard(item.path, buildImageUrl(item.path, tabId), item.path.split('/').pop() || item.path, item.raw, tabId, false);
+          bodyEl.appendChild(card);
+        } else {
+          const rowWrap = document.createElement('div');
+          rowWrap.className = 'flex flex-col gap-1';
+
+          const row = document.createElement('div');
+          row.className = 'flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-slate-950/80 border border-slate-800/80 hover:border-slate-700 text-xs font-mono';
+
+          const left = document.createElement('div');
+          left.className = 'flex items-center gap-2 min-w-0 truncate';
+          const ic = document.createElement('span');
+          ic.textContent = icon;
+          const linkBtn = document.createElement('button');
+          linkBtn.type = 'button';
+          linkBtn.className = 'text-sky-300 hover:text-orange-300 truncate text-left cursor-pointer';
+          linkBtn.textContent = item.raw;
+          linkBtn.title = item.path;
+          linkBtn.onclick = () => openReferencedTargetFromModal(item.path, tabId, item.line);
+          left.appendChild(ic);
+          left.appendChild(linkBtn);
+
+          const meta = document.createElement('span');
+          meta.className = 'text-[10px] text-slate-500 shrink-0 hidden sm:inline';
+          if (item.stat.is_dir) meta.textContent = 'Folder';
+          else if (item.stat.size !== undefined) {
+            meta.textContent = formatBytes(item.stat.size) + (item.stat.lines !== null && item.stat.lines !== undefined ? ` • ${item.stat.lines}L` : '');
+          }
+          left.appendChild(meta);
+
+          const right = document.createElement('div');
+          right.className = 'flex items-center gap-1.5 shrink-0';
+
+          let drawer = null;
+          if (item.stat.is_file && !item.stat.is_binary && cat.type === 'text') {
+            drawer = createInlineFilePreviewDrawer(item.path, item.stat, tabId, item.line);
+            const pBtn = document.createElement('button');
+            pBtn.type = 'button';
+            pBtn.className = 'px-2 py-0.5 rounded bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 text-[11px] cursor-pointer';
+            pBtn.textContent = '👁️ Preview';
+            pBtn.onclick = () => {
+              const willOpen = drawer.classList.contains('hidden');
+              pBtn.textContent = willOpen ? '▾ Hide' : '👁️ Preview';
+              toggleInlineFilePreviewDrawer(drawer, item.path, tabId, item.line);
+            };
+            right.appendChild(pBtn);
+          }
+
+          const openBtn = document.createElement('button');
+          openBtn.type = 'button';
+          openBtn.className = 'px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] cursor-pointer';
+          openBtn.textContent = 'Open →';
+          openBtn.onclick = () => openReferencedTargetFromModal(item.path, tabId, item.line);
+          right.appendChild(openBtn);
+
+          row.appendChild(left);
+          row.appendChild(right);
+          rowWrap.appendChild(row);
+          if (drawer) rowWrap.appendChild(drawer);
+          bodyEl.appendChild(rowWrap);
+        }
+      });
+
+      if (!currentModalIsDir && currentModalFileMode === 'code') {
+        strip.classList.remove('hidden');
+      }
+
+      const codeTextEl = document.getElementById('file-modal-code-text');
+      linkifyCodeElementPaths(codeTextEl, verifiedByRaw, tabId);
+    }
+
     function setFileModalViewMode(mode) {
       currentModalFileMode = mode;
       const btnCode = document.getElementById('file-modal-btn-code');
@@ -5117,6 +6142,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       // Always hide dir wrap when switching to a file mode
       if (dirWrap) dirWrap.classList.add('hidden');
+      const showImagesBtn = document.getElementById('file-modal-show-images-btn');
+      const refsStrip = document.getElementById('file-modal-refs-strip');
+      if (showImagesBtn) {
+        if (!currentModalIsDir && currentModalFilePath) {
+          showImagesBtn.classList.remove('hidden');
+          updateShowImagesButtonUI();
+        } else {
+          showImagesBtn.classList.add('hidden');
+        }
+      }
 
       if (mode === 'preview') {
         if (btnCode) {
@@ -5126,12 +6161,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           btnPreview.className = 'px-2.5 py-1 rounded-lg transition bg-orange-500/20 text-orange-300 font-medium flex items-center gap-1';
         }
         if (codeWrap) codeWrap.classList.add('hidden');
+        if (refsStrip) refsStrip.classList.add('hidden');
 
         if (isMd) {
           if (previewWrap) previewWrap.classList.add('hidden');
           if (mdWrap) mdWrap.classList.remove('hidden');
           if (mdBody && currentModalFileContent) {
             mdBody.innerHTML = renderMarkdownContent(currentModalFileContent);
+            enhanceMarkdownPreview(mdBody, currentModalFilePath, currentModalFileTabId);
           }
           if (metaEncoding) metaEncoding.textContent = 'Mode: Rendered Markdown (GitHub)';
         } else if (isHtml) {
@@ -5139,7 +6176,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           if (previewWrap) previewWrap.classList.remove('hidden');
           if (previewFrame && currentModalFileContent) {
             previewFrame.removeAttribute('srcdoc');
-            previewFrame.srcdoc = currentModalFileContent;
+            previewFrame.srcdoc = rewriteHtmlPreviewContent(currentModalFileContent, currentModalFilePath, currentModalFileTabId);
           }
           if (metaEncoding) metaEncoding.textContent = 'Mode: Rendered HTML Preview';
         } else {
@@ -5157,6 +6194,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (previewWrap) previewWrap.classList.add('hidden');
         if (mdWrap) mdWrap.classList.add('hidden');
         if (codeWrap) codeWrap.classList.remove('hidden');
+        const refsBody = document.getElementById('file-modal-refs-body');
+        if (refsStrip && refsBody && refsBody.children.length > 0 && !isModalEditing) {
+          refsStrip.classList.remove('hidden');
+        }
         const detectedLang = getLanguageFromPath(currentModalFilePath);
         const langLabel = getLanguageLabel(detectedLang, currentModalFilePath);
         if (metaEncoding) metaEncoding.textContent = `Mode: Source Code (${langLabel})`;
@@ -5278,12 +6319,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       const detectedLang = getLanguageFromPath(currentModalFilePath);
       const langLabel = getLanguageLabel(detectedLang, currentModalFilePath);
+      const showImagesBtn = document.getElementById('file-modal-show-images-btn');
+      const refsStrip = document.getElementById('file-modal-refs-strip');
 
       if (isModalEditing) {
         setFileModalViewMode('code');
 
         if (viewModeGroup) viewModeGroup.classList.add('hidden');
         if (openTabBtn) openTabBtn.classList.add('hidden');
+        if (showImagesBtn) showImagesBtn.classList.add('hidden');
+        if (refsStrip) refsStrip.classList.add('hidden');
         if (editBtn) editBtn.classList.add('hidden');
         if (nanoBtn) nanoBtn.classList.add('hidden');
         if (copyBtn) copyBtn.classList.add('hidden');
@@ -5311,6 +6356,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (nanoBtn) nanoBtn.classList.remove('hidden');
         if (copyBtn) copyBtn.classList.remove('hidden');
         if (dlBtn) dlBtn.classList.remove('hidden');
+        if (showImagesBtn && currentModalFilePath) {
+          showImagesBtn.classList.remove('hidden');
+          updateShowImagesButtonUI();
+        }
 
         const isHtml = currentModalFileType === 'html';
         const isMd = currentModalFileType === 'markdown';
@@ -5326,6 +6375,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         renderModalCodeContent(currentModalFileContent, currentModalFilePath);
+        enhanceCodeAndRefsPreview(currentModalFileContent, currentModalFilePath, currentModalFileTabId);
         if (metaEncoding) metaEncoding.textContent = `Mode: Source Code (${langLabel})`;
       }
     }
@@ -5375,16 +6425,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           const previewFrame = document.getElementById('file-modal-preview-frame');
           if (previewFrame) {
             previewFrame.removeAttribute('srcdoc');
-            previewFrame.srcdoc = newContent;
+            previewFrame.srcdoc = rewriteHtmlPreviewContent(newContent, currentModalFilePath, currentModalFileTabId);
           }
         } else if (isMd) {
           const mdBody = document.getElementById('file-modal-markdown-body');
           if (mdBody) {
             mdBody.innerHTML = renderMarkdownContent(newContent);
+            enhanceMarkdownPreview(mdBody, currentModalFilePath, currentModalFileTabId);
           }
         }
 
         toggleFileModalEditor(false);
+        enhanceCodeAndRefsPreview(newContent, currentModalFilePath, currentModalFileTabId);
       } catch (err) {
         showToast('Save failed: ' + (err.message || 'Unknown error'));
       } finally {
@@ -5418,6 +6470,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       path = cleanCandidatePath(path);
       hideFileHoverMenu();
       closeImagePreviewModal(false, true);
+      if (!isRestoringModalHistory) {
+        modalNavStack = [];
+      }
 
       currentModalIsDir = true;
       currentModalDirPath = path;
@@ -5427,6 +6482,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       currentModalFilePath = '';
       currentModalFileContent = '';
       currentModalFileType = 'text';
+      updateModalBackButtons();
+      const showImagesBtn = document.getElementById('file-modal-show-images-btn');
+      if (showImagesBtn) showImagesBtn.classList.add('hidden');
+      const refsStrip = document.getElementById('file-modal-refs-strip');
+      if (refsStrip) refsStrip.classList.add('hidden');
 
       const modal = document.getElementById('file-content-modal');
       const titleEl = document.getElementById('file-modal-title');
@@ -6561,11 +7621,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       }
       hideFileHoverMenu();
       closeImagePreviewModal(false, true);
+      if (!isRestoringModalHistory) {
+        modalNavStack = [];
+      }
       currentModalIsDir = false;
       currentModalDirPath = '';
       modalParentDirPath = (parentDir !== undefined && parentDir !== null) ? parentDir : null;
       currentModalFilePath = path;
       currentModalFileTabId = tabId || activeTabId;
+      updateModalBackButtons();
 
       if (catCheck && catCheck.type === 'blocked') {
         renderBinaryModalCard(path, catCheck, statData);
@@ -6860,11 +7924,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         if (hasPreview && currentModalFileMode === 'preview') {
           if (isMd && mdBody) {
             mdBody.innerHTML = renderMarkdownContent(text);
+            enhanceMarkdownPreview(mdBody, path, currentModalFileTabId);
           } else if (isHtml && previewFrame) {
             previewFrame.removeAttribute('srcdoc');
-            previewFrame.srcdoc = text;
+            previewFrame.srcdoc = rewriteHtmlPreviewContent(text, path, currentModalFileTabId);
           }
         }
+        enhanceCodeAndRefsPreview(text, path, currentModalFileTabId);
       } catch (err) {
         if (errorEl) errorEl.classList.remove('hidden');
         if (errorMsg) errorMsg.textContent = err.message || 'Unable to load file content';
@@ -6958,6 +8024,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       currentModalFileEndLine = 0;
       currentModalFileTotalLines = 0;
       currentModalFileTargetLine = null;
+      ++previewEnhanceSeq;
+      const refsStrip = document.getElementById('file-modal-refs-strip');
+      const refsBody = document.getElementById('file-modal-refs-body');
+      if (refsStrip) refsStrip.classList.add('hidden');
+      if (refsBody) refsBody.innerHTML = '';
+      const showImagesBtn = document.getElementById('file-modal-show-images-btn');
+      if (showImagesBtn) showImagesBtn.classList.add('hidden');
       stopLogFollow();
       closeFileFindBar();
       closeDirNewMenu();
@@ -7077,10 +8150,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     async function loadFullFileContent() {
       if (!currentModalFilePath) return;
       showToast('Loading full file...');
-      await openFileContentModal(currentModalFilePath, currentModalFileTabId, null, currentModalFileMode, modalParentDirPath, null, true);
+      const prevHist = isRestoringModalHistory;
+      isRestoringModalHistory = true;
+      try {
+        await openFileContentModal(currentModalFilePath, currentModalFileTabId, null, currentModalFileMode, modalParentDirPath, null, true);
+      } finally {
+        isRestoringModalHistory = prevHist;
+      }
     }
 
     function closeFileContentModal(forceCloseAll = false) {
+      if (!forceCloseAll && modalNavStack.length > 0) {
+        navigateModalBack();
+        return;
+      }
       if (!forceCloseAll && modalParentDirPath && !currentModalIsDir) {
         const returnDir = modalParentDirPath;
         const returnTab = currentModalFileTabId;
@@ -7089,8 +8172,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         openFolderInModal(returnDir, returnTab);
         return;
       }
+      if (!isRestoringModalHistory) {
+        modalNavStack = [];
+      }
       modalParentDirPath = null;
       cleanupFileModalView();
+      updateModalBackButtons();
       const modal = document.getElementById('file-content-modal');
       if (modal) modal.classList.add('hidden');
     }
@@ -7336,11 +8423,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       path = cleanCandidatePath(path);
       hideFileHoverMenu();
       closeImagePreviewModal(false, true);
+      if (!isRestoringModalHistory) {
+        modalNavStack = [];
+      }
       currentModalIsDir = false;
       currentModalDirPath = '';
       modalParentDirPath = (parentDir !== undefined && parentDir !== null) ? parentDir : null;
       currentModalFilePath = path;
       currentModalFileTabId = tabId || activeTabId;
+      updateModalBackButtons();
       currentModalFileType = 'pdf';
       isModalEditing = false;
 
@@ -7367,6 +8458,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const pdfWrap = document.getElementById('file-modal-pdf-wrap');
       const pdfFrame = document.getElementById('file-modal-pdf-frame');
       const viewModeGroup = document.getElementById('file-modal-view-mode');
+      const showImagesBtn = document.getElementById('file-modal-show-images-btn');
+      const refsStrip = document.getElementById('file-modal-refs-strip');
       const openTabBtn = document.getElementById('file-modal-open-tab-btn');
       const cdBtn = document.getElementById('file-modal-cd-btn');
       const editBtn = document.getElementById('file-modal-edit-btn');
@@ -7387,6 +8480,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (sizeBadge) sizeBadge.classList.add('hidden');
 
       if (viewModeGroup) { viewModeGroup.classList.add('hidden'); viewModeGroup.classList.remove('flex'); }
+      if (showImagesBtn) { showImagesBtn.classList.add('hidden'); showImagesBtn.classList.remove('flex'); }
+      if (refsStrip) refsStrip.classList.add('hidden');
       if (openTabBtn) openTabBtn.classList.remove('hidden');
       if (cdBtn) cdBtn.classList.add('hidden');
       if (editBtn) editBtn.classList.add('hidden');
@@ -7529,6 +8624,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       path = cleanCandidatePath(path);
       hideFileHoverMenu();
       closeImagePreviewModal(false, true);
+      if (!isRestoringModalHistory) {
+        modalNavStack = [];
+      }
 
       currentModalIsDir = false;
       currentModalDirPath = '';
@@ -7538,6 +8636,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       currentModalFileType = 'database';
       isModalEditing = false;
       isDbTableWrap = false;
+      updateModalBackButtons();
+      const showImagesBtn = document.getElementById('file-modal-show-images-btn');
+      if (showImagesBtn) showImagesBtn.classList.add('hidden');
+      const refsStrip = document.getElementById('file-modal-refs-strip');
+      if (refsStrip) refsStrip.classList.add('hidden');
 
       const modal = document.getElementById('file-content-modal');
       const titleEl = document.getElementById('file-modal-title');
@@ -8139,12 +9242,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       path = cleanCandidatePath(path);
       hideFileHoverMenu();
       dismissImageOutputChip();
+      if (!isRestoringModalHistory) {
+        modalNavStack = [];
+      }
 
       const reqId = ++activePreviewSeq;
 
       currentPreviewPath = path;
       currentPreviewTabId = tabId || activeTabId;
       mediaModalParentDirPath = (parentDir !== undefined && parentDir !== null) ? parentDir : null;
+      updateModalBackButtons();
 
       const folderDir = parentDir || (path.includes('/') ? path.substring(0, path.lastIndexOf('/')) || '/' : '');
       fetchPreviewFolderMedia(folderDir, currentPreviewTabId, path);
@@ -8388,10 +9495,29 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       mediaModalParentDirPath = null;
       currentPreviewPath = '';
 
+      if (!forceCloseAll && !returnDir && modalNavStack.length > 0) {
+        navigateModalBack();
+        return;
+      }
+
+      if (!isRestoringModalHistory) {
+        modalNavStack = [];
+      }
+      updateModalBackButtons();
+
       if (returnDir) {
         openFolderInModal(returnDir, returnTab);
       }
     }
+
+    window.addEventListener('message', (e) => {
+      const previewFrame = document.getElementById('file-modal-preview-frame');
+      if (!previewFrame || e.source !== previewFrame.contentWindow) return;
+      if (e.data && e.data.type === 'fire-preview-open-ref' && e.data.path) {
+        const lineNum = e.data.line ? parseInt(e.data.line, 10) : null;
+        openReferencedTargetFromModal(e.data.path, currentModalFileTabId, lineNum);
+      }
+    });
 
     function updateImageTransform() {
       const img = document.getElementById('image-modal-img');
